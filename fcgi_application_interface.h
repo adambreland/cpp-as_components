@@ -224,18 +224,19 @@ private:
   //
   // Requires:
   // 1) interface_state_mutex_ must be acquired by the caller prior to
-  // calling.
+  //    calling.
   //
   // Effects:
-  // 1) In regard to access to interface state, atomically examines the
-  // state of each request on the connection and updates interface state
-  // as summarized below.
-  // 1 a) If a request is not assigned, it is deleted. If a request is
-  // assigned, the identifier of the request will be returned in the
-  // returned list of identifiers. The request is then deleted.
-  // 1 b) Removes the connection from request_map_.
-  // 1 c) Removes the connection from request_count_map_.
-  // 1 d) Removes the connection from record_status_map_.
+  // 1) In regard to access to interface state, examines the
+  //    state of each request on the connection and updates interface state
+  //    as summarized below.
+  // 1 a) According to the state of request_map_, if a request is not
+  //      assigned, it is deleted. If a request is assigned, the identifier
+  //      of the request will be returned in the returned list of identifiers.
+  //      The request is then deleted.
+  // 1 b) Removes the connection from all maps from connections:
+  //      record_status_map_, write_mutex_map_, closure_request_map_,
+  //      and request_count_map_
   std::vector<RequestIdentifier>
   ClosedConnectionFoundDuringAcceptRequests(int connection);
 
@@ -248,15 +249,20 @@ private:
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
 
-  // The map takes the file descriptor of the connection and returns the
+  // SHARED STATE START //
+
+  // A mutex for shared state. This state is implicitly accessed by calls to
+  // FCGIRequest objects associated with the interface. They are also accessed
+  // by the interface.
+  std::mutex interface_state_mutex_;
+
+  // The state of the application-set overload flag.
+  bool application_overload_ {false};
+
+  // This map takes the file descriptor of the connection and returns the
   // RecordStatus object which summarizes the current state of data
   // transmission over the socket.
-  //
-  // This map is only accessed by the interface. It is not accessed through
-  // application calls on an FCGIRequest object.
   std::map<int, RecordStatus> record_status_map_;
-
-  // SHARED STATE START //
 
   // A map to retrieve a connection's write mutex. These mutextes are used by
   // the interface and by FCGIRequest objects.
@@ -265,14 +271,12 @@ private:
   // application calls on an FCGIRequest object.
   std::map<int, std::mutex> write_mutex_map_;
 
-  // A mutex for request_count_map_, request_map_, and application_overload_.
-  // These data structures are implicitly accessed by calls to FCGIRequest
-  // objects associated with the interface. They are also accessed by the
-  // interface.
-  std::mutex interface_state_mutex_;
-
-  // The state of the application-set overload flag.
-  bool application_overload_ {false};
+  // This map holds the status of socket closure requests from FCGIRequest
+  // objects. This is necessary as a web server can indicate in the
+  // FCGI_BEGIN_REQUEST record of a request that the connection used for the
+  // request be closed after request service. This status flag allows
+  // for an orderly closure of the connection by the interface thread.
+  std::map<int, bool> closure_request_map_;
 
   // A map to retrieve the total number of requests associated with a
   // connection.
@@ -285,11 +289,11 @@ private:
 
   // SHARED STATE END //
 
-  // Status of the record currently being received on the connection.
-  // This is a struct to allow the header and bytes_received variables
-  // to be accessed directly. Since writes occur to other objects but
-  // should cause an increment to bytes_received, struct status was deemed
-  // appropriate.
+  // A struct describing the status of the record currently being received
+  // on the connection. This type is a struct to allow the header and
+  // bytes_received variables to be accessed directly. Since writes occur
+  // to other objects but should cause an increment to bytes_received, struct
+  // status was deemed appropriate.
   //
   // Usage discipline:
   // 1) The first time that the header is completed as determined by
@@ -297,9 +301,10 @@ private:
   // 2) When associated bytes are processed, the bytes_received accumulator
   //    must be incremented appropriately.
   // 3) FCGI_BEGIN_REQUEST and management records use the local buffer for
-  //    data storage. Data should be stored there instead on non-locally in
+  //    data storage. Data should be stored there instead of non-locally in
   //    a RequestData object.
-  // 4) The header of every record is stored locally.
+  // 4) The header of every record is stored locally. Valid header bytes are
+  //    determined by the value of bytes_received.
   struct RecordStatus {
     // May implicitly acquire interface_state_mutex_.
     void UpdateAfterHeaderCompletion(int connection);
