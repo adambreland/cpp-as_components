@@ -20,6 +20,10 @@ public:
 
   const std::map<std::basic_string<uint8_t>, std::basic_string<uint8_t>>&
   get_environment_map() const;
+  const std::basic_string<uint8_t>& get_STDIN() const;
+  const std::basic_string<uint8_t>& get_DATA() const;
+
+  bool get_abort() const;
 
   void Write(std::basic_string<uint8_t> response) const;
   void WriteError(std::basic_string<uint8_t> error_message) const;
@@ -27,9 +31,7 @@ public:
   ssize_t SendFile(int in_fd, off_t* offset_ptr, size_t count) const;
   ssize_t SendFile(std::string pathname) const;
 
-  void AbortRespond(int status) const;
-
-  void Complete();
+  void Complete(int status);
 
   // No copy or default construction.
   FCGIRequest() = delete;
@@ -43,13 +45,8 @@ public:
   ~FCGIRequest() = default;
 
 private:
-  // Constructors made private as only an FCGIApplicationInterface object
+  // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects.
-
-  // The boolean argument indicates that an abort request should be
-  // constructed. Use true, though false results in identical behavior.
-  FCGIRequest(RequestIdentifier request_id, bool abort_placeholder);
-
   FCGIRequest(RequestIdentifier request_id);
 
   RequestIdentifier request_identifier_;
@@ -62,16 +59,13 @@ private:
   // For inspection of the role requested by the client server.
   uint16_t role_;
 
-  // A flag to indicate that a request which was already assigned should be
-  // aborted by the application.
-  bool abort_;
-
   // A flag to inform the call to Complete() that the connection associated
   // with the request should be closed by the interface.
   bool close_connection_;
 
-  // Allows preventing calls to Complete() after the first from having
-  // an effect.
+  // Forces the object to act as if it is null. Calls will return null
+  // values (empty containers, false) or have no effect (e.g. a second
+  // call to complete).
   bool completed_;
 };
 

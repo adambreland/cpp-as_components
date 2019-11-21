@@ -240,7 +240,7 @@ Read(int connection)
         if(record_status.IsRecordComplete())
         {
           fcgi_synchronous_interface::RequestIdentifier request_id
-            {ProcessCompleteRecord(connection)};
+            {ProcessCompleteRecord(connection, &record_status)};
           if(request_id) request_identifiers.push_back(request_id);
         }
         // Loop to check if more received bytes need to be processed.
@@ -259,7 +259,183 @@ Read(int connection)
   return request_identifiers;
 }
 
+RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::
+ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
+{
+  constexpr uint8_t FCGI_KEEP_CONN {1};
 
+  // Retrieve record status for the connection.
+  RequestIdentifier result {};
+  RecordStatus& record_status {*record_status_ptr};
+  // Extract type
+  FCGIType type {record_status.content_buffer_[1]};
+  // Extract FCGI request ID
+  uint16_t FCGI_request_id {record_status.content_buffer_[2]};
+  FCGI_request_id <<= 8;
+  FCGI_request_id += record_status.content_buffer_[3];
+  // Check if it is a management record.
+  if(FCGI_request_id == 0)
+  {
+    if(type == FCGIType::kFCGI_GET_VALUES)
+      SendGetValueResult(connection, &record_status);
+    else // Unknown type,
+      SendFCGIUnknownType(connection, type);
+    return result;
+  }
+  // Else, FCGI_request_id > 0 => application request record.
+  // Check for the allowed application record types and act accordingly.
+  // The allowed types are:
+  // 1) kFCGI_BEGIN_REQUEST
+  // 2) kFCGI_ABORT_REQUEST
+  // 3) kFCGI_PARAMS
+  // 4) kFCGI_DATA
+  // 5) kFCGI_STDIN
+
+  fcgi_synchronous_interface::RequestIdentifier request_id
+    {connection, FCGI_request_id};
+
+  // Obtain interface_state_mutex_ to access state.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+
+  auto request_data_it {request_map_.find(request_id)};
+
+  switch(type)
+  {
+    case FCGIType::kFCGI_BEGIN_REQUEST: {
+
+      if(request_data_it == request_map_.end())
+      {
+        // Check for rejection based on role, maximum request count,
+        // and application-set overload.
+
+        // Extract role
+        uint6_t role {record_status.local_record_content_buffer[0]};
+        role <<= 8;
+        role += local_record_content_buffer[1];
+
+        if(role =! role_)
+        {
+          // TODO send unknown role record
+        }
+        else if((auto request_count_it {request_count_map_.find(connection)},
+                 request_count_it.second == maximum_connection_count_))
+        {
+          if(maximum_connection_count_ == 1)
+          {
+            // TODO send can't multiplex end record.
+          }
+          else
+          {
+            // TODO send overloaded end record.
+          }
+        }
+        else if(application_overload_)
+        {
+          // TODO send overloaded end record.
+        }
+        else
+        {
+          // Extract close connection value.
+          bool close_connection =
+            !(record_status.local_record_content_buffer[2] & FCGI_KEEP_CONN);
+
+          request_map_[request_id] = fcgi_synchronous_interface::
+            RequestData(role, close connection);
+          request_count_it.second += 1;
+        }
+      }
+      break;
+    }
+
+start 20191122 (or earlier)
+
+    case FCGIType::kFCGI_ABORT_REQUEST: {
+      // Does the abort apply to a request?
+      if((auto request_data_it = request_map_.find(request_id))
+        != request_map_.end())
+      {
+        if(!(request_data_it->second.get_abort()))
+        // The request has not already been aborted.
+        {
+          // Has the request already been assigned?
+          if(request_data_it->second.get_status()
+            == fcgi_synchronous_interface::RequestStatus::kRequestAssigned)
+          {
+            request_data_it->second.set_abort();
+          }
+          else // It hasn't been assigned. We can erase the request.
+          {
+            // TODO figure out the best way to have the interface send a
+            // response.
+            request_map_.erase(request_data_it);
+          }
+        }
+      }
+      break;
+    }
+    case FCGIType::kFCGI_PARAMS: {
+
+    }
+    case FCGIType::kFCGI_STDIN: {
+      // Does the record apply to a request?
+      if((auto request_data_it = request_map_.find(request_id)) != request_map_.end())
+      {
+        if(!(request_data_it->second.FCGI_STDIN_complete)) // Not complete, process data.
+        {
+          // Extract content length
+          uint16_t content_length_1 = record_status.content_buffer_[4];
+          uint16_t content_length_0 = record_status.content_buffer_[5];
+          int content_length = (content_length_1 << 8) + content_length_0;
+          if(content_length)
+          {
+            // Append data to RequestData stdin buffer
+            // TODO
+          }
+          else // content_length == 0 (and stdin is now complete)
+          {
+            request_data_it->second.FCGI_STDIN_complete = true;
+            if(request_data_it->second.FCGI_DATA_complete && equest_data_it->second.FCGI_PARAMS_complete)
+            {
+              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
+              result = request_id;
+            }
+          }
+        }
+      }
+      break;
+    }
+    case FCGIType::kFCGI_DATA: {
+      if((auto request_data_it = request_map_.find(request_id)) != request_map_.end())
+      {
+        if(!(request_data_it->second.FCGI_DATA_complete))
+        {
+          // Extract content length
+          uint16_t content_length_1 = record_status.content_buffer_[4];
+          uint16_t content_length_0 = record_status.content_buffer_[5];
+          int content_length = (content_length_1 << 8) + content_length_0;
+          if(content_length)
+          {
+            // Append data to RequestData stdin buffer
+
+          }
+          else // content_length == 0 (and stdin is complete)
+          {
+            request_data_it->second.FCGI_DATA_complete = true;
+            if(request_data_it->second.FCGI_STDIN_complete && request_data_it->second.FCGI_PARAMS_complete)
+            {
+              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
+              result = request_id;
+            }
+          }
+        }
+      }
+      break;
+    }
+  }
+  // Clear the record status for the next record.
+  record_status = RecordStatus();
+  return result; // Default (null) RequestIdentifier if not assinged to.
+} // Release interface_state_mutex_.
 
 
 
@@ -472,137 +648,7 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
 
 }
 
-RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::
-ProcessCompleteRecord(RecordStatus* record_status_ptr)
-{
-  // Retrieve record status for the connection.
-  RequestIdentifier result {};
-  RecordStatus& record_status {*record_status_ptr};
-  // Extract type
-  FCGIType type {record_status.content_buffer_[1]};
-  // Extract FCGI request ID
-  uint16_t FCGI_request_ID_1 = record_status.content_buffer_[2];
-  uint16_t FCGI_request_ID_0 = record_status.content_buffer_[3];
-  int FCGI_request_ID = (FCGI_request_ID_1 << 8) + FCGI_request_ID_0;
-  // Check if it is a management record.
-  if(FCGI_request_ID == 0)
-  {
-    if(type == FCGIType::kFCGI_GET_VALUES)
-      SendGetValueResult(connection, record_status);
-    else // Unknown type,
-      SendFCGIUnknownType(connection, type);
-    return result;
-  }
-  // Else, request_ID > 0 => application request record.
-  // Check for the allowed application record types and act accordingly.
-  // The allowed types are:
-  // 1) kFCGI_BEGIN_REQUEST
-  // 2) kFCGI_ABORT_REQUEST
-  // 3) kFCGI_STDIN
-  // 4) kFCGI_DATA
-  // 5) kFCGI_PARAMS
-  fcgi_synchronous_interface::RequestIdentifier request_ID {connection, request_ID};
-  switch(type)
-  {
-    // Record types indicates a new request.
-    case FCGIType::kFCGI_BEGIN_REQUEST: {
-      if(request_map_.find(request_ID) == request_map_.end())
-        request_map_[request_ID] = fcgi_synchronous_interface::RequestData();
-      break;
-    }
-    // An abort record.
-    case FCGIType::kFCGI_ABORT_REQUEST: {
-      // Does the abort apply to a request?
-      if((auto request_data_it = request_map_.find(request_ID))
-        != request_map_.end())
-      {
-        if(!(request_data_it->second.abort))
-        // The request has not already been aborted.
-        {
-          // Has the request already been assigned?
-          if(request_data_it->second.request_status
-            == RequestStatus::kRequestAssigned)
-          {
-            request_data_it->second.abort = true;
-            result = request_ID; // The code which processes RequestIdentifiers will
-                                 // create an abort FCGIRequest object for the application.
-          }
-          else // It hasn't been assigned. We can erase the request.
-          {
-            fcgi_synchronous_interface::FCGIRequest abort_request {request_ID, true};
-            abort_request.AbortRespond(-1);
-            request_map_.erase(request_data_it);
-          }
-        }
-      }
-      break;
-    }
-    // A stdin stream record.
-    case FCGIType::kFCGI_STDIN: {
-      // Does the record apply to a request?
-      if((auto request_data_it = request_map_.find(request_ID)) != request_map_.end())
-      {
-        if(!(request_data_it->second.FCGI_STDIN_complete)) // Not complete, process data.
-        {
-          // Extract content length
-          uint16_t content_length_1 = record_status.content_buffer_[4];
-          uint16_t content_length_0 = record_status.content_buffer_[5];
-          int content_length = (content_length_1 << 8) + content_length_0;
-          if(content_length)
-          {
-            // Append data to RequestData stdin buffer
-            // TODO
-          }
-          else // content_length == 0 (and stdin is now complete)
-          {
-            request_data_it->second.FCGI_STDIN_complete = true;
-            if(request_data_it->second.FCGI_DATA_complete && equest_data_it->second.FCGI_PARAMS_complete)
-            {
-              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
-              result = request_ID;
-            }
-          }
-        }
-      }
-      break;
-    }
-    // A data stream record.
-    case FCGIType::kFCGI_DATA: {
-      if((auto request_data_it = request_map_.find(request_ID)) != request_map_.end())
-      {
-        if(!(request_data_it->second.FCGI_DATA_complete))
-        {
-          // Extract content length
-          uint16_t content_length_1 = record_status.content_buffer_[4];
-          uint16_t content_length_0 = record_status.content_buffer_[5];
-          int content_length = (content_length_1 << 8) + content_length_0;
-          if(content_length)
-          {
-            // Append data to RequestData stdin buffer
 
-          }
-          else // content_length == 0 (and stdin is complete)
-          {
-            request_data_it->second.FCGI_DATA_complete = true;
-            if(request_data_it->second.FCGI_STDIN_complete && request_data_it->second.FCGI_PARAMS_complete)
-            {
-              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
-              result = request_ID;
-            }
-          }
-        }
-      }
-      break;
-    }
-    // An environment variable (FCGI_PARAMS) stream record.
-    case FCGIType::kFCGI_PARAMS: {
-
-    }
-  }
-  // Clear the record status for the next record.
-  record_status = RecordStatus();
-  return result; // Default (null) RequestIdentifier if not assinged to.
-}
 
 std::vector<RequestIdentifier>
 fcgi_synchronous_interface::FCGIApplicationInterface::

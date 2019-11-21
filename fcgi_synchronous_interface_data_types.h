@@ -53,18 +53,20 @@ public:
 
   using size = std::allocator_traits<std::allocator<uint8_t>>::size_type;
 
-  bool get_abort();
+  bool get_abort() const;
   void set_abort();
 
-  bool get_PARAMS_completion();
+  fcgi_synchronous_interface::RequestStatus get_status() const;
+
+  bool get_PARAMS_completion() const;
   void CompletePARAMS();
   void AppendToPARAMS(const uint8_t* buffer_ptr, size count)
 
-  bool get_STDIN_completion();
+  bool get_STDIN_completion() const;
   void CompleteSTDIN();
   void AppenToSTDIN(const uint8_t* buffer_ptr, size count);
 
-  bool get_DATA_completion();
+  bool get_DATA_completion() const;
   void CompleteDATA();
   void AppendToDATA(const uint8_t* buffer_ptr, size count);
 
