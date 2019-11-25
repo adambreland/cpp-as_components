@@ -13,6 +13,7 @@ extern "C" {
 #include <cstdlib>          // For std::getenv().
 #include <stdexcept>
 #include <mutex>            // For std::lock_guard
+#include <cmath>            // For std::exp2().
 
 fcgi_synchronous_interface::FCGIApplicationInterface::
 FCGIApplicationInterface(int max_connections, int max_requests);
@@ -20,17 +21,24 @@ FCGIApplicationInterface(int max_connections, int max_requests);
   maximum_request_count_per_connection_ {max_requests}
 {
   // Ensure that the listening socket is non_blocking.
-  // (The file descriptor value 0 must correspond to the listening
-  // socket per the FastCGI specification.)
-  int flags = fcntl(0, F_GETFL);
-  if(flags == -1) throw // TODO
+  int flags = fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO, F_GETFL);
+  if(flags == -1)
+  {
+    throw; // TODO
+  }
   flags |= O_NONBLOCK;
-  if(fcntl(0, F_SETFL, flags) == -1) throw // TODO
-
+  if(fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
+     F_SETFL, flags) == -1)
+  {
+    throw; // TODO
+  }
   // Access environment variables and check for valid IP addresses.
   if(const char* ip_addresses_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS"))
     // TODO: Create or find a function to call to parse textual,
     // comma-delimited IP addresses.
+
+  // TODO add error checking against values for max_connections
+  // and max_requests
 }
 
 std::vector<FCGIRequest> fcgi_synchronous_interface::FCGIApplicationInterface::
@@ -64,8 +72,8 @@ AcceptRequests()
     throw std::runtime_error(
        "Call to select() failed with errno value: \n"
      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-     + __FILE__ + ":\n"
-     + "Line " + std::to_string(__LINE__));
+     + __FILE__ + "\n"
+     + "Line: " + std::to_string(__LINE__) + '\n');
 
   // Start reading data from ready connections.
   // Check connected sockets (as held in record_status_map_) before the
@@ -96,6 +104,7 @@ Read(int connection)
 {
   // Number of bytes read at a time from connected sockets.
   constexpr int kBufferSize {512};
+  uint8_t read_buffer[kBufferSize];
 
   // Return value to be modified during processing.
   std::vector<RequestIdentifier> request_identifiers {};
@@ -107,7 +116,6 @@ Read(int connection)
   while(true)
   {
     // Read from socket.
-    uint8_t read_buffer[kBufferSize];
     int number_bytes_processed = 0;
     int number_bytes_received =
       NonblockingSocketRead(connection, read_buffer, kBufferSize);
@@ -121,9 +129,9 @@ Read(int connection)
         // state.
 
         // Acquire interface_state_mutex_ to access and modify state.
-        std::lock_guard<std::mutex> interface_state_lock
-          {interface_state_mutex_};
-        return ClosedConnectionFoundDuringAcceptRequests(connection);
+        std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+        ClosedConnectionFoundDuringAcceptRequests(connection);
+        return {};
       }
 
       if((errno != EAGAIN) && (errno != EWOULDBLOCK))
@@ -143,10 +151,11 @@ Read(int connection)
         // Is the header complete?
         if(!(record_status.IsHeaderComplete()))
         {
-          if((int remaining_header {8 - record_status.bytes_received})
-             <= number_bytes_remaining)
+          if((int remaining_header {fcgi_synchronous_interface::FCGI_HEADER_LEN
+            - record_status.bytes_received}) <= number_bytes_remaining)
           {
-            for(char i {record_status.bytes_received}; i < 8; i++)
+            for(char i {record_status.bytes_received};
+                i < fcgi_synchronous_interface::FCGI_HEADER_LEN; i++)
             {
               header[i] = read_buffer[number_bytes_processed];
               number_bytes_processed++;
@@ -172,8 +181,8 @@ Read(int connection)
         // Either the content is complete or it isn't.
         else
         {
-          int content_byte_difference {8 + content_bytes_expected
-            - record_status.bytes_received};
+          int content_byte_difference {fcgi_synchronous_interface::FCGI_HEADER_LEN
+            + content_bytes_expected - record_status.bytes_received};
           int remaining_content {(content_byte_difference > 0) ?
             content_byte_difference : 0};
           int number_to_write {};
@@ -259,11 +268,112 @@ Read(int connection)
   return request_identifiers;
 }
 
+bool fcgi_synchronous_interface::FCGIApplicationInterface::
+SendGetValueResult(int connection, const RecordStatus& record_status)
+{
+  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+    get_value_pairs
+    {ProcessBinaryNameValuePairs(record_status.local_record_content_buffer.size(),
+     record_status.local_record_content_buffer.data())};
+
+  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+    result_pairs {};
+
+  // Construct result pairs disregarding any name that is not understood.
+  for(auto iter {get_value_pairs.begin()};
+      iter != get_value_pairs.end(); ++iter)
+  {
+    if(iter->first == fcgi_synchronous_interface::FCGI_MAX_CONNS)
+    {
+      result_pairs.emplace_back(iter->first,
+        std::to_string(maximum_connection_count_));
+    }
+    else if(iter->first == fcgi_synchronous_interface::FCGI_MAX_REQS)
+    {
+      result_pairs.emplace_back(iter->first,
+        std::to_string(maximum_request_count_per_connection_));
+    }
+    else if(iter->first == fcgi_synchronous_interface::FCGI_MPXS_CONNS)
+    {
+      result_pairs.emplace_back(iter->first,
+        (maximum_request_count_per_connection_ > 1) ? "1" : "0");
+    }
+  }
+
+  // Process result pairs to generate the response string.
+
+  // Allocate space for header.
+  std::basic_string<uint8_t> result(8, 0);
+
+  // Since only known names are accepted, assume that the lengths of
+  // the names and values can fit in either 7 or 31 bits.
+  for(auto pair_iter {result_pairs.begin()}; iter != result_pairs.end(); ++iter)
+  {
+    // Encode name length;
+    uint32_t item_size(pair_iter->first.size());
+    if(item_size <=
+       fcgi_synchronous_interface::kNameValuePairSingleByteLength)
+      result.push_back(item_size);
+    else
+      EncodeFourByteLength(item_size, &result);
+    // Encode value temp_length
+    item_size = pair_iter->second.size();
+    if(item_size <=
+       fcgi_synchronous_interface::kNameValuePairSingleByteLength)
+      result.push_back(item_size);
+    else
+      EncodeFourByteLength(item_size, &result);
+    // Append character bytes of name and value.
+    result.append(pair_iter->first);
+    result.append(pair_iter->second);
+  }
+
+  // Prepare to write the response.
+
+  // Check that the content length can be encoded in the header.
+  uint64_t header_and_content_length(result.size());
+  uint64_t content_length {header_and_content_length
+    - fcgi_synchronous_interface::FCGI_HEADER_LEN};
+  if(content_length > kMaxRecordContentByteLength)
+    throw; // TODO what?
+
+  // Pad the record to a multiple of FCGI_HEADER_LEN.
+  uint8_t pad_length {fcgi_synchronous_interface::FCGI_HEADER_LEN
+    - (header_and_content_length % fcgi_synchronous_interface::FCGI_HEADER_LEN)};
+  result.append(pad_length, 0);
+
+  // Update header:
+  result[0] = fcgi_synchronous_interface::FCGI_VERSION_1;
+  result[1] = static_cast<uint8_t>(fcgi_synchronous_interface::FCGIType::
+                                   kFCGI_GET_VALUES_RESULT);
+  result[2] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[3] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[4] = content_length >> 8;
+  result[5] = content_length;
+  result[6] = pad_length;
+  result[7] = 0;
+
+  // Obtain the interface state mutex to obtain the write mutex.
+  // Obtain the write mutex for the connection.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
+
+  size_t number_written = NonblockingPollingSocketWrite(connection,
+    result.data(), result.size());
+  if(number_written < result.size())
+    if(errno == EPIPE)
+      return false;
+    else throw std::runtime_error(
+        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
+        "write() which could not be handled. Errno had a value of: \n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+  return true;
+}
+
 RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::
 ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
 {
-  constexpr uint8_t FCGI_KEEP_CONN {1};
-
   // Retrieve record status for the connection.
   RequestIdentifier result {};
   RecordStatus& record_status {*record_status_ptr};
@@ -337,7 +447,8 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
         {
           // Extract close connection value.
           bool close_connection =
-            !(record_status.local_record_content_buffer[2] & FCGI_KEEP_CONN);
+            !(record_status.local_record_content_buffer[2]
+              & fcgi_synchronous_interface::FCGI_KEEP_CONN);
 
           request_map_[request_id] = fcgi_synchronous_interface::
             RequestData(role, close connection);
@@ -559,6 +670,23 @@ ExtractFourByteLength(const uint8_t* content_ptr) const
   return length;
 }
 
+void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
+{
+  // The mask for setting the four-byte flag in the FCGI name-value
+  // pair encoding.
+  constexpr uint8_t four_byte_mask(std::exp2(7));
+
+  uint8_t byte_in_encoding(length >> 24);
+  byte_in_encoding |= four_byte_mask;
+  string_ptr->push_back(byte_in_encoding);
+  byte_in_encoding = (length >> 16);
+  string_ptr->push_back(byte_in_encoding);
+  byte_in_encoding = (length >> 8);
+  string_ptr->push_back(byte_in_encoding);
+  byte_in_encoding = length;
+  string_ptr->push_back(byte_in_encoding);
+}
+
 std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
 fcgi_synchronous_interface::FCGIApplicationInterface::
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
@@ -624,31 +752,6 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
 
   return result;
 }
-
-void fcgi_synchronous_interface::FCGIApplicationInterface::
-SendGetValueResult(int connection, const RecordStatus& record_status)
-{
-  // TODO Consider removing length equality check.
-  int record_content_length = record_status.content_bytes_expected_;
-  int content_string_length = record_status.content_buffer_.size();
-  if(record_content_length != content_string_length)
-    throw std::runtime_error(
-      "GetValueResult() encountered a mismatch between the expected\n"
-      "content size and the actual size: \n"
-     + __FILE__ + ":\n" + "Line " + std::to_string(__LINE__));
-
-
-  uint8_t* content_ptr = record_status.content_buffer_.data();
-
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-  name_list = ProcessBinaryNameValuePairs(record_content_length, content_ptr);
-
-
-
-
-}
-
-
 
 std::vector<RequestIdentifier>
 fcgi_synchronous_interface::FCGIApplicationInterface::

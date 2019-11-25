@@ -6,6 +6,28 @@
 
 namespace fcgi_synchronous_interface {
 
+// Protocol Constants
+constexpr int                        FCGI_LISTENSOCK_FILENO {0};
+constexpr int                        FCGI_HEADER_LEN        {8};
+constexpr uint8_t                    FCGI_VERSION_1         {1};
+constexpr uint16_t                   FCGI_NULL_REQUEST_ID   {0};
+constexpr uint8_t                    FCGI_KEEP_CONN         {1};
+constexpr uint16_t                   FCGI_RESPONDER         {1};
+constexpr uint16_t                   FCGI_AUTHORIZER        {2};
+constexpr uint16_t                   FCGI_FILTER            {3};
+constexpr uint8_t                    FCGI_REQUEST_COMPLETE  {0};
+constexpr uint8_t                    FCGI_CANT_MPX_CONN     {1};
+constexpr uint8_t                    FCGI_OVERLOADED        {2};
+constexpr uint8_t                    FCGI_UNKNOWN_ROLE      {3};
+constexpr std::basic_string<uint8_t> FCGI_MAX_CONNS         {"FCGI_MAX_CONNS"};
+constexpr std::basic_string<uint8_t> FCGI_MAX_REQS          {"FCGI_MAX_REQS"};
+constexpr std::basic_string<uint8_t> FCGI_MPXS_CONNS        {"FCGI_MPXS_CONNS"};
+
+// Implementation Constants
+constexpr uint8_t                    kNameValuePairSingleByteLength {std::exp2(7) - 1};
+constexpr uint32_t                   kNameValuePairFourByteLength {std::exp2(31) - 1};
+constexpr uint16_t                   kMaxRecordContentByteLength {std::exp2(16) - 1};
+
 // Enum class for header type values.
 // Record types as defined by FastCGI.
 enum class FCGIType : uint8_t

@@ -59,23 +59,23 @@ UpdateAfterHeaderCompletion(int connection)
       break;
     }
     case fcgi_synchronous_interface::FCGIType::kFCGI_ABORT_REQUEST : {
-      invalid_record = (request_map_iter == request_map_.end() ||
-         request_map_iter->second.get_abort())
+      invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_abort())
       break;
     }
     case fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS : {
-      invalid_record = (request_map_iter == request_map_.end() ||
-         request_map_iter->second.get_FCGI_PARAMS_completion())
+      invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_FCGI_PARAMS_completion())
       break;
     }
     case fcgi_synchronous_interface::FCGIType::kFCGI_STDIN : {
-      invalid_record = (request_map_iter == request_map_.end() ||
-         request_map_iter->second.get_FCGI_STDIN_completion())
+      invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_FCGI_STDIN_completion())
       break;
     }
     case fcgi_synchronous_interface::FCGIType::kFCGI_DATA : {
-      invalid_record = request_map_iter == request_map_.end() ||
-         request_map_iter->second.get_FCGI_DATA_completion())
+      invalid_record = request_map_iter == request_map_.end()
+        || request_map_iter->second.get_FCGI_DATA_completion())
       break;
     }
     // No other cases should occur. Reject any others.

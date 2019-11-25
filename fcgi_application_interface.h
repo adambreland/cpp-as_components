@@ -113,6 +113,10 @@ private:
   //    value byte array.
   uint32_t ExtractFourByteLength(const uint8_t* content_ptr) const;
 
+  void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr);
+
+  bool SendGetValueResult(int connection, const RecordStatus& record_status);
+
   // Extracts a collection of name-value pairs when they are encoded as a
   // sequence of bytes in the FastCGI name-value pair encoding.
   // Note: Checking if content_length is zero before calling allows for
@@ -234,16 +238,13 @@ private:
   //    calling.
   //
   // Effects:
-  // 1) In regard to access to interface state, examines the
-  //    state of each request on the connection and updates interface state
-  //    as summarized below.
-  // 1 a) According to the state of request_map_, if a request is not
-  //      assigned, it is deleted. If a request is assigned, the identifier
-  //      of the request will be returned in the returned list of identifiers.
-  //      The request is then deleted.
-  // 1 b) Removes the connection from all maps from connections:
-  //      record_status_map_, write_mutex_map_, closure_request_map_,
-  //      and request_count_map_
+  // 1 a) Removes the connection from all maps with a domain equal to
+  //      the set of connections: record_status_map_, write_mutex_map_,
+  //      closure_request_map_, and request_count_map_.
+  // 1 b) Removes all of the associated requests from request_map_. Note that
+  //      FCGIRequest object methods are implemented to check for missing
+  //      RequestIdentifier values and missing connections. Absence indicates
+  //      that the connection was found to be closed by the interface.
   std::vector<RequestIdentifier>
   ClosedConnectionFoundDuringAcceptRequests(int connection);
 
