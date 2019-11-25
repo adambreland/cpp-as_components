@@ -13,7 +13,6 @@ extern "C" {
 #include <cstdlib>          // For std::getenv().
 #include <stdexcept>
 #include <mutex>            // For std::lock_guard
-#include <cmath>            // For std::exp2().
 
 fcgi_synchronous_interface::FCGIApplicationInterface::
 FCGIApplicationInterface(int max_connections, int max_requests);
@@ -674,7 +673,7 @@ void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_pt
 {
   // The mask for setting the four-byte flag in the FCGI name-value
   // pair encoding.
-  constexpr uint8_t four_byte_mask(std::exp2(7));
+  constexpr uint8_t four_byte_mask(1 << 7);
 
   uint8_t byte_in_encoding(length >> 24);
   byte_in_encoding |= four_byte_mask;

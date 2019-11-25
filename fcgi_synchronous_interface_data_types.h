@@ -24,9 +24,9 @@ constexpr std::basic_string<uint8_t> FCGI_MAX_REQS          {"FCGI_MAX_REQS"};
 constexpr std::basic_string<uint8_t> FCGI_MPXS_CONNS        {"FCGI_MPXS_CONNS"};
 
 // Implementation Constants
-constexpr uint8_t                    kNameValuePairSingleByteLength {std::exp2(7) - 1};
-constexpr uint32_t                   kNameValuePairFourByteLength {std::exp2(31) - 1};
-constexpr uint16_t                   kMaxRecordContentByteLength {std::exp2(16) - 1};
+constexpr uint8_t                    kNameValuePairSingleByteLength {(1 << 7) - 1};
+constexpr uint32_t                   kNameValuePairFourByteLength {(1 << 31) - 1};
+constexpr uint16_t                   kMaxRecordContentByteLength {(1 << 16) - 1};
 
 // Enum class for header type values.
 // Record types as defined by FastCGI.
