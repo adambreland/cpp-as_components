@@ -117,6 +117,8 @@ private:
 
   bool SendGetValueResult(int connection, const RecordStatus& record_status);
 
+  bool SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type);
+
   // Extracts a collection of name-value pairs when they are encoded as a
   // sequence of bytes in the FastCGI name-value pair encoding.
   // Note: Checking if content_length is zero before calling allows for
@@ -142,22 +144,6 @@ private:
   //    name-value pairs, an empty vector is returned.
   std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
   ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
-
-  // Create a FastCGI header for a response with a contentData section with
-  // count bytes and type as indicated by record_type.
-  //
-  // Parameters:
-  // record_type: the FastCGI record type.
-  // count: the number of bytes of the contentData section of a FastCGI record.
-  //
-  // Requires:
-  // 1) count >= 0;
-  //
-  // Effects:
-  // 1) An appropriate header is returned as the content of a
-  //    std::basic_string<uint8_t> object.
-  std::basic_string<uint8_t>
-  CreateHeader(FCGIType record_type, int count) const;
 
   // Examines the completed record associated with the connected socket
   // represented by connection and performs various actions according to
@@ -257,13 +243,6 @@ private:
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
 
-  ///////////////////////// SHARED STATE START ///////////////////////////////
-
-  // A mutex for shared state. This state is implicitly accessed by calls to
-  // FCGIRequest objects associated with the interface. They are also accessed
-  // by the interface.
-  std::mutex interface_state_mutex_;
-
   // The state of the application-set overload flag.
   bool application_overload_ {false};
 
@@ -272,6 +251,18 @@ private:
   // transmission over the socket.
   std::map<int, RecordStatus> record_status_map_;
 
+  // A set for connections which were found to have been closed by the peer
+  // but which could not be closed immediately as assigned requests were
+  // still present.
+  std::set<int> connections_found_closed_set_;
+
+  //////////////////////// SHARED DATA STRUCTURE START ////////////////////////
+
+  // A mutex for shared state. This state is implicitly accessed by calls to
+  // FCGIRequest objects associated with the interface. They are also accessed
+  // by the interface.
+  std::mutex interface_state_mutex_;
+
   // A map to retrieve a connection's write mutex. These mutextes are used by
   // the interface and by FCGIRequest objects.
   //
@@ -279,12 +270,12 @@ private:
   // application calls on an FCGIRequest object.
   std::map<int, std::mutex> write_mutex_map_;
 
-  // This map holds the status of socket closure requests from FCGIRequest
+  // This set holds the status of socket closure requests from FCGIRequest
   // objects. This is necessary as a web server can indicate in the
   // FCGI_BEGIN_REQUEST record of a request that the connection used for the
   // request be closed after request service. This status flag allows
   // for an orderly closure of the connection by the interface thread.
-  std::map<int, bool> closure_request_map_;
+  std::set<int> application_closure_request_set_;
 
   // A map to retrieve the total number of requests associated with a
   // connection.
@@ -295,7 +286,7 @@ private:
   // connection socket descriptor value and the FCGI request number.
   std::map<RequestIdentifier, RequestData> request_map_;
 
-  ///////////////////////// SHARED STATE END ////////////////////////////////
+  //////////////////////// SHARED DATA STRUCTURE END //////////////////////////
 
   // A struct describing the status of the record currently being received
   // on the connection. This type is a struct to allow the header and

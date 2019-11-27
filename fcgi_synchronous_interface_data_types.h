@@ -19,30 +19,30 @@ constexpr uint8_t                    FCGI_REQUEST_COMPLETE  {0};
 constexpr uint8_t                    FCGI_CANT_MPX_CONN     {1};
 constexpr uint8_t                    FCGI_OVERLOADED        {2};
 constexpr uint8_t                    FCGI_UNKNOWN_ROLE      {3};
-constexpr std::basic_string<uint8_t> FCGI_MAX_CONNS         {"FCGI_MAX_CONNS"};
-constexpr std::basic_string<uint8_t> FCGI_MAX_REQS          {"FCGI_MAX_REQS"};
-constexpr std::basic_string<uint8_t> FCGI_MPXS_CONNS        {"FCGI_MPXS_CONNS"};
+const     std::basic_string<uint8_t> FCGI_MAX_CONNS         {"FCGI_MAX_CONNS"};
+const     std::basic_string<uint8_t> FCGI_MAX_REQS          {"FCGI_MAX_REQS"};
+const     std::basic_string<uint8_t> FCGI_MPXS_CONNS        {"FCGI_MPXS_CONNS"};
 
-// Implementation Constants
-constexpr uint8_t                    kNameValuePairSingleByteLength {(1 << 7) - 1};
-constexpr uint32_t                   kNameValuePairFourByteLength {(1 << 31) - 1};
-constexpr uint16_t                   kMaxRecordContentByteLength {(1 << 16) - 1};
+// Implementation Constants (determined by current protocol features)
+constexpr uint8_t                    kNameValuePairSingleByteLength {(1 << 7)  - 1};
+constexpr uint32_t                   kNameValuePairFourByteLength   {(1 << 31) - 1};
+constexpr uint16_t                   kMaxRecordContentByteLength    {(1 << 16) - 1};
 
 // Enum class for header type values.
 // Record types as defined by FastCGI.
 enum class FCGIType : uint8_t
 {
-  kFCGI_BEGIN_REQUEST = 1,              // From client.
-  kFCGI_ABORT_REQUEST = 2,              // From client.
-  kFCGI_END_REQUEST = 3,
-  kFCGI_PARAMS = 4,                     // From client.
-  kFCGI_STDIN = 5,                      // From client.
-  kFCGI_STDOUT = 6,
-  kFCGI_STDERR = 7,
-  kFCGI_DATA = 8,                       // From client.
-  kFCGI_GET_VALUES = 9,                 // From client.
+  kFCGI_BEGIN_REQUEST     = 1,       // From client.
+  kFCGI_ABORT_REQUEST     = 2,       // From client.
+  kFCGI_END_REQUEST       = 3,
+  kFCGI_PARAMS            = 4,       // From client.
+  kFCGI_STDIN             = 5,       // From client.
+  kFCGI_STDOUT            = 6,
+  kFCGI_STDERR            = 7,
+  kFCGI_DATA              = 8,       // From client.
+  kFCGI_GET_VALUES        = 9,       // From client.
   kFCGI_GET_VALUES_RESULT = 10,
-  kFCGI_UNKNOWN_TYPE = 11,
+  kFCGI_UNKNOWN_TYPE      = 11
 };
 
 class RequestIdentifier {

@@ -40,11 +40,12 @@ FCGIApplicationInterface(int max_connections, int max_requests);
   // and max_requests
 }
 
-std::vector<FCGIRequest> fcgi_synchronous_interface::FCGIApplicationInterface::
+std::vector<fcgi_synchronous_interface::FCGIRequest>
+fcgi_synchronous_interface::FCGIApplicationInterface::
 AcceptRequests()
 {
   // Result to return.
-  std::vector<FCGIRequest> requests {};
+  std::vector<fcgi_synchronous_interface::FCGIRequest> requests {};
 
   // Construct read descriptor set to wait on.
   fd_set read_set;
@@ -110,8 +111,6 @@ Read(int connection)
 
   // Start reading from the connection until it blocks (no more data),
   // it is found to be disconnected, or an unrecoverable error occurs.
-  // Each loop iteration acquires and then releases interface_state_mutex_
-  // if an unrecoverable error does not occur.
   while(true)
   {
     // Read from socket.
@@ -138,8 +137,8 @@ Read(int connection)
       throw; // TODO add exception content and pass errno value
     }
 
-    // Process bytes received (if any). Needed as blocking errors return
-    // zero bytes.
+    // Process bytes received (if any). This check is needed as blocking
+    // errors may return zero bytes if nothing was read.
     if(number_bytes_received > 0)
     {
       RecordStatus& record_status = record_status_map_[connection];
@@ -231,7 +230,7 @@ Read(int connection)
                     break;
                   }
                 }
-              }
+              } // interface_state_mutex_ released here.
             }
           }
           else // Padding incomplete.
@@ -302,7 +301,7 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   // Process result pairs to generate the response string.
 
   // Allocate space for header.
-  std::basic_string<uint8_t> result(8, 0);
+  std::basic_string<uint8_t> result(fcgi_synchronous_interface::FCGI_HEADER_LEN, 0);
 
   // Since only known names are accepted, assume that the lengths of
   // the names and values can fit in either 7 or 31 bits.
@@ -352,11 +351,45 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   result[6] = pad_length;
   result[7] = 0;
 
-  // Obtain the interface state mutex to obtain the write mutex.
   // Obtain the write mutex for the connection.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
   std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
 
+  // Send record.
+  size_t number_written = NonblockingPollingSocketWrite(connection,
+    result.data(), result.size());
+  if(number_written < result.size())
+    if(errno == EPIPE)
+      return false;
+    else throw std::runtime_error(
+        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
+        "write() which could not be handled. Errno had a value of: \n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+  return true;
+}
+
+bool fcgi_synchronous_interface::FCGIApplicationInterface::
+SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
+{
+  std::basic_string<uint8_t> result(16, 0) // Allocate space for two bytes.
+  // Set header.
+  result[0] = fcgi_synchronous_interface::FCGI_VERSION_1;
+  result[1] = static_cast<uint8_t>(fcgi_synchronous_interface::FCGIType::
+                                   kFCGI_UNKNOWN_TYPE);
+  result[2] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[3] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[4] = 0;
+  result[5] = 8; // One byte.
+  result[6] = 0; // No padding needed.
+  result[7] = 0;
+  // Set body.
+  result[8] = static_cast<uint8_t>(type);
+  // Remainder was set to zero bytes during string initialization.
+
+  // Obtain the write mutex for the connection.
+  std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
+
+  // Send record.
   size_t number_written = NonblockingPollingSocketWrite(connection,
     result.data(), result.size());
   if(number_written < result.size())
