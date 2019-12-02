@@ -7,23 +7,34 @@
 namespace fcgi_synchronous_interface {
 
 // Protocol Constants
-constexpr int                        FCGI_LISTENSOCK_FILENO {0};
-constexpr int                        FCGI_HEADER_LEN        {8};
-constexpr uint8_t                    FCGI_VERSION_1         {1};
-constexpr uint16_t                   FCGI_NULL_REQUEST_ID   {0};
-constexpr uint8_t                    FCGI_KEEP_CONN         {1};
-constexpr uint16_t                   FCGI_RESPONDER         {1};
-constexpr uint16_t                   FCGI_AUTHORIZER        {2};
-constexpr uint16_t                   FCGI_FILTER            {3};
-constexpr uint8_t                    FCGI_REQUEST_COMPLETE  {0};
-constexpr uint8_t                    FCGI_CANT_MPX_CONN     {1};
-constexpr uint8_t                    FCGI_OVERLOADED        {2};
-constexpr uint8_t                    FCGI_UNKNOWN_ROLE      {3};
-const     std::basic_string<uint8_t> FCGI_MAX_CONNS         {"FCGI_MAX_CONNS"};
-const     std::basic_string<uint8_t> FCGI_MAX_REQS          {"FCGI_MAX_REQS"};
-const     std::basic_string<uint8_t> FCGI_MPXS_CONNS        {"FCGI_MPXS_CONNS"};
+constexpr int                        FCGI_LISTENSOCK_FILENO         {0};
+constexpr int                        FCGI_HEADER_LEN                {8};
+constexpr uint8_t                    FCGI_VERSION_1                 {1};
+constexpr uint16_t                   FCGI_NULL_REQUEST_ID           {0};
+constexpr uint8_t                    FCGI_KEEP_CONN                 {1};
+constexpr uint16_t                   FCGI_RESPONDER                 {1};
+constexpr uint16_t                   FCGI_AUTHORIZER                {2};
+constexpr uint16_t                   FCGI_FILTER                    {3};
+constexpr uint8_t                    FCGI_REQUEST_COMPLETE          {0};
+constexpr uint8_t                    FCGI_CANT_MPX_CONN             {1};
+constexpr uint8_t                    FCGI_OVERLOADED                {2};
+constexpr uint8_t                    FCGI_UNKNOWN_ROLE              {3};
+const     std::basic_string<uint8_t> FCGI_MAX_CONNS                 {"FCGI_MAX_CONNS"};
+const     std::basic_string<uint8_t> FCGI_MAX_REQS                  {"FCGI_MAX_REQS"};
+const     std::basic_string<uint8_t> FCGI_MPXS_CONNS                {"FCGI_MPXS_CONNS"};
 
 // Implementation Constants (determined by current protocol features)
+constexpr uint8_t                    kHeaderVersionIndex            {0};
+constexpr uint8_t                    kHeaderTypeIndex               {1};
+constexpr uint8_t                    kHeaderRequestIDB1Index        {2};
+constexpr uint8_t                    kHeaderRequestIDB0Index        {3};
+constexpr uint8_t                    kHeaderContentLengthB1Index    {4};
+constexpr uint8_t                    kHeaderContentLengthB0Index    {5};
+constexpr uint8_t                    kHeaderPaddingLengthIndex      {6};
+constexpr uint8_t                    kHeaderReservedByteIndex       {7};
+constexpr uint8_t                    kBeginRequestRoleB1Index       {0};
+constexpr uint8_t                    kBeginRequestRoleB0Index       {1};
+constexpr uint8_t                    kBeginRequestFlagsIndex        {2};
 constexpr uint8_t                    kNameValuePairSingleByteLength {(1 << 7)  - 1};
 constexpr uint32_t                   kNameValuePairFourByteLength   {(1 << 31) - 1};
 constexpr uint16_t                   kMaxRecordContentByteLength    {(1 << 16) - 1};

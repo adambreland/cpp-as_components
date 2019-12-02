@@ -125,16 +125,17 @@ Read(int connection)
       {
         // Connection was closed. Discard any read data and update interface
         // state.
-
-        // Acquire interface_state_mutex_ to access and modify state.
-        std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
         ClosedConnectionFoundDuringAcceptRequests(connection);
         return {};
       }
 
       if((errno != EAGAIN) && (errno != EWOULDBLOCK))
       // Unrecoverable error.
-      throw; // TODO add exception content and pass errno value
+      throw std::runtime_error(
+         "A call to read() in NonblockingSocketRead() failed with errno value: \n"
+       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+       + __FILE__ + "\n"
+       + "Line: " + std::to_string(__LINE__) + '\n');
     }
 
     // Process bytes received (if any). This check is needed as blocking
@@ -211,22 +212,24 @@ Read(int connection)
               else // Append to non-local buffer.
               {
                 // Acquire interface_state_mutex_ to locate append location.
+                // The key request_id must be present as the record is valid
+                // and it is not a begin request record.
                 std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
                 auto request_map_iter {request_map_.find(request_id)};
                 switch(record_status.type) {
                   case fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS : {
                     request_map_iter->second.AppendToPARAMS(
-                      &read_buffer[number_bytes_processed], number_to_write)
+                      &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
                   case fcgi_synchronous_interface::FCGIType::kFCGI_STDIN : {
                     request_map_iter->second.AppendToSTDIN(
-                      &read_buffer[number_bytes_processed], number_to_write)
+                      &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
                   case fcgi_synchronous_interface::FCGIType::kFCGI_DATA : {
                     request_map_iter->second.AppendToDATA(
-                      &read_buffer[number_bytes_processed], number_to_write)
+                      &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
                 }
@@ -341,15 +344,22 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   result.append(pad_length, 0);
 
   // Update header:
-  result[0] = fcgi_synchronous_interface::FCGI_VERSION_1;
-  result[1] = static_cast<uint8_t>(fcgi_synchronous_interface::FCGIType::
-                                   kFCGI_GET_VALUES_RESULT);
-  result[2] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
-  result[3] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
-  result[4] = content_length >> 8;
-  result[5] = content_length;
-  result[6] = pad_length;
-  result[7] = 0;
+  result[fcgi_synchronous_interface::kHeaderVersionIndex]            =
+    fcgi_synchronous_interface::FCGI_VERSION_1;
+  result[fcgi_synchronous_interface::kHeaderTypeIndex]               =
+    fcgi_synchronous_interface::FCGIType::kFCGI_GET_VALUES_RESULT;
+  result[fcgi_synchronous_interface::kHeaderRequestIDB1Index]        =
+    fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[fcgi_synchronous_interface::kHeaderRequestIDB0Index]        =
+    fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[fcgi_synchronous_interface::kHeaderContentLengthB1Index]    =
+    content_length >> 8;
+  result[fcgi_synchronous_interface::kHeaderContentLengthB0Index]    =
+    content_length;
+  result[fcgi_synchronous_interface::kHeaderPaddingLengthIndex]      =
+    pad_length;
+  result[fcgi_synchronous_interface::kHeaderReservedByteIndex]       =
+    0;
 
   // Obtain the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
@@ -373,18 +383,26 @@ SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
 {
   std::basic_string<uint8_t> result(16, 0) // Allocate space for two bytes.
   // Set header.
-  result[0] = fcgi_synchronous_interface::FCGI_VERSION_1;
-  result[1] = static_cast<uint8_t>(fcgi_synchronous_interface::FCGIType::
-                                   kFCGI_UNKNOWN_TYPE);
-  result[2] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
-  result[3] = fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
-  result[4] = 0;
-  result[5] = 8; // One byte.
-  result[6] = 0; // No padding needed.
-  result[7] = 0;
+  result[fcgi_synchronous_interface::kHeaderVersionIndex]            =
+    fcgi_synchronous_interface::FCGI_VERSION_1;
+  result[fcgi_synchronous_interface::kHeaderTypeIndex]               =
+    fcgi_synchronous_interface::FCGIType::kFCGI_UNKNOWN_TYPE;
+  result[fcgi_synchronous_interface::kHeaderRequestIDB1Index]        =
+    fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[fcgi_synchronous_interface::kHeaderRequestIDB0Index]        =
+    fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID;
+  result[fcgi_synchronous_interface::kHeaderContentLengthB1Index]    =
+    0;
+  result[fcgi_synchronous_interface::kHeaderContentLengthB0Index]    =
+    8; // One byte.
+  result[fcgi_synchronous_interface::kHeaderPaddingLengthIndex]      =
+    0; // No padding needed.
+  result[fcgi_synchronous_interface::kHeaderReservedByteIndex]       =
+    0;
   // Set body.
-  result[8] = static_cast<uint8_t>(type);
-  // Remainder was set to zero bytes during string initialization.
+  result[1 + fcgi_synchronous_interface::kHeaderReservedByteIndex]   =
+    type;
+  // Remaining bytes were set to zero during string initialization.
 
   // Obtain the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
@@ -406,24 +424,27 @@ SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
 RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::
 ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
 {
-  // Retrieve record status for the connection.
   RequestIdentifier result {};
   RecordStatus& record_status {*record_status_ptr};
   // Extract type
-  FCGIType type {record_status.content_buffer_[1]};
+  FCGIType type
+    {record_status.header[fcgi_synchronous_interface::kHeaderTypeIndex]};
   // Extract FCGI request ID
-  uint16_t FCGI_request_id {record_status.content_buffer_[2]};
-  FCGI_request_id <<= 8;
-  FCGI_request_id += record_status.content_buffer_[3];
+  uint16_t FCGI_request_id
+    {record_status.header[fcgi_synchronous_interface::kHeaderRequestIDB1Index]};
+  FCGI_request_id <<= 8; // shift by one byte
+  FCGI_request_id +=
+    record_status.header[fcgi_synchronous_interface::kHeaderRequestIDB0Index];
   // Check if it is a management record.
   if(FCGI_request_id == 0)
   {
-    if(type == FCGIType::kFCGI_GET_VALUES)
+    if(type == fcgi_synchronous_interface::FCGIType::kFCGI_GET_VALUES)
       SendGetValueResult(connection, &record_status);
     else // Unknown type,
       SendFCGIUnknownType(connection, type);
     return result;
   }
+
   // Else, FCGI_request_id > 0 => application request record.
   // Check for the allowed application record types and act accordingly.
   // The allowed types are:
@@ -432,32 +453,29 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
   // 3) kFCGI_PARAMS
   // 4) kFCGI_DATA
   // 5) kFCGI_STDIN
-
   fcgi_synchronous_interface::RequestIdentifier request_id
     {connection, FCGI_request_id};
-
   // Obtain interface_state_mutex_ to access state.
   std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-
   auto request_data_it {request_map_.find(request_id)};
-
   switch(type)
   {
     case FCGIType::kFCGI_BEGIN_REQUEST: {
-
       if(request_data_it == request_map_.end())
       {
         // Check for rejection based on role, maximum request count,
         // and application-set overload.
 
         // Extract role
-        uint6_t role {record_status.local_record_content_buffer[0]};
+        uint6_t role {record_status.local_record_content_buffer[
+          fcgi_synchronous_interface::kBeginRequestRoleB1Index]};
         role <<= 8;
-        role += local_record_content_buffer[1];
+        role += local_record_content_buffer[
+          fcgi_synchronous_interface::kBeginRequestRoleB0Index];
 
         if(role =! role_)
         {
-          // TODO send unknown role record
+          
         }
         else if((auto request_count_it {request_count_map_.find(connection)},
                  request_count_it.second == maximum_connection_count_))
@@ -475,7 +493,7 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
         {
           // TODO send overloaded end record.
         }
-        else
+        else // We can accept the request.
         {
           // Extract close connection value.
           bool close_connection =
@@ -483,7 +501,7 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
               & fcgi_synchronous_interface::FCGI_KEEP_CONN);
 
           request_map_[request_id] = fcgi_synchronous_interface::
-            RequestData(role, close connection);
+            RequestData(role, close_connection);
           request_count_it.second += 1;
         }
       }
@@ -687,18 +705,14 @@ NonblockingSocketRead(int fd, uint8_t* buffer_ptr, size_t count)
 uint32_t fcgi_synchronous_interface::FCGIApplicationInterface::
 ExtractFourByteLength(const uint8_t* content_ptr) const
 {
-  uint32_t temp_length {*content_ptr & 0x7f}; // mask out leading 1;
-  uint32_t length {temp_length << 24};
-  content_ptr++;
-  temp_length = *content_ptr;
-  length += temp_length << 16;
-  content_ptr++;
-  temp_length = *content_ptr;
-  length += temp_length << 8;
-  content_ptr++;
-  temp_length = *content_ptr;
-  length += temp_length;
-
+  uint32_t length {*content_ptr & 0x7f}; // mask out leading 1;
+  // Perform three shifts by 8 bits to extract all four bytes.
+  for(char i {0}; i < 3; i++)
+  {
+    length <<= 8;
+    content_ptr++;
+    length += *content_ptr;
+  }
   return length;
 }
 
@@ -706,9 +720,9 @@ void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_pt
 {
   // The mask for setting the four-byte flag in the FCGI name-value
   // pair encoding.
-  constexpr uint8_t four_byte_mask(1 << 7);
+  constexpr uint8_t four_byte_mask {1 << 7};
 
-  uint8_t byte_in_encoding(length >> 24);
+  uint8_t byte_in_encoding(length >> 24); // Truncation desired.
   byte_in_encoding |= four_byte_mask;
   string_ptr->push_back(byte_in_encoding);
   byte_in_encoding = (length >> 16);
@@ -785,12 +799,46 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
   return result;
 }
 
-std::vector<RequestIdentifier>
+void RemoveConnectionFromSharedState(int connection)
+{
+  write_mutex_map_.erase(connection);
+  application_closure_request_set_.erase(connection);
+  request_count_map_.erase(connection);
+  close(connection);
+}
+
+void
 fcgi_synchronous_interface::FCGIApplicationInterface::
 ClosedConnectionFoundDuringAcceptRequests(int connection)
 {
-  std::vector<RequestIdentifier> request_identifiers {};
+  // Remove the connection from the record_status_map_ so that it is not
+  // included in a call to select().
+  record_status_map_.erase(connection);
 
-  auto request_map_iter = request_map_.lower_bound(RequestIdentifier {connection, 0});
-
+  // Iterate over requests: delete unassigned requests and check for
+  // assigned requests.
+  bool active_requests_present {false};
+  // Acquire interface_state_mutex_ to access and modify shared state.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  for(auto request_map_iter =
+        request_map_.lower_bound(RequestIdentifier {connection, 0});
+      !(request_map_iter == request_map_.end()
+        || request_map_iter->first.descriptor() > connection));
+      ++request_map_iter)
+  {
+    if(request_map_iter->second.get_status() ==
+       fcgi_synchronous_interface::RequestStatus::kRequestAssigned)
+    {
+      active_requests_present = true;
+    }
+    else
+    {
+      request_map_.erase(request_map_iter);
+      request_count_map_[connection]--;
+    }
+  }
+  // Check if the connection can be closed or assigned requests require
+  // closure to be delayed.
+  (!active_requests_present) ? RemoveConnectionFromSharedState(connection) :
+                               connections_found_closed_set_.insert(connection);
 }

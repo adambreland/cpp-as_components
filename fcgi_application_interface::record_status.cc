@@ -6,9 +6,9 @@ RecordStatus()
 
 RecordStatus& operator=(const RecordStatus& record_status)
 {
-  for(char i {0}; i < 8; i++)
+  for(char i {0}; i < fcgi_synchronous_interface::FCGI_HEADER_LEN; i++)
   {
-    header[8] = record_status.header[8];
+    header[i] = record_status.header[i];
   }
 
   bytes_received = record_status.bytes_received;
@@ -27,7 +27,7 @@ UpdateAfterHeaderCompletion(int connection)
 {
   // Extract number of content bytes from two bytes.
   content_bytes_expected = header[4];
-  content_bytes_expected <<= 8;
+  content_bytes_expected <<= 8; // one byte
   content_bytes_expected += header[5];
 
   // Extract number of padding bytes.
@@ -36,7 +36,7 @@ UpdateAfterHeaderCompletion(int connection)
   // Extract type and request_id.
   type = header[1];
   uint16_t FCGI_request_id = header[2];
-  FCGI_request_id << 8;
+  FCGI_request_id << 8; // one byte
   FCGI_request_id += header[3];
   request_id = fcgi_synchronous_interface::
     RequestIdentifier(connection, FCGI_request_id);
@@ -45,7 +45,7 @@ UpdateAfterHeaderCompletion(int connection)
   // information.
 
   // Every management record is accepted.
-  if(FCGI_request_id == 0)
+  if(FCGI_request_id == fcgi_synchronous_interface::FCGI_NULL_REQUEST_ID)
     return;
 
   // Not a management record. Use type to determine rejection.
@@ -89,14 +89,15 @@ inline uint32_t
 fcgi_synchronous_interface::FCGIApplicationInterface::RecordStatus::
 ExpectedBytes()
 {
-  return padding_bytes_expected + content_bytes_expected + 8;
+  return padding_bytes_expected + content_bytes_expected
+         + fcgi_synchronous_interface::FCGI_HEADER_LEN;
 }
 
 inline bool
 fcgi_synchronous_interface::FCGIApplicationInterface::RecordStatus::
 IsHeaderComplete()
 {
-  return bytes_received >= 8;
+  return bytes_received >= fcgi_synchronous_interface::FCGI_HEADER_LEN;
 }
 
 inline bool

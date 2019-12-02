@@ -31,7 +31,7 @@ public:
 
   // Returns a vector of pairs:
   // (character address, number of active requests)
-  std::vector<std::string, int>> connection_request_counts() const;
+  std::vector<std::pair<std::string, int>> connection_request_counts() const;
 
   // No copy, move, or default construction.
   FCGIApplicationInterface() = delete;
@@ -219,18 +219,15 @@ private:
   // Parameters:
   // connection: the socket that was found to have been closed by the peer.
   //
-  // Requires:
-  // 1) interface_state_mutex_ must be acquired by the caller prior to
-  //    calling.
-  //
   // Effects:
-  // 1 a) Removes the connection from all maps with a domain equal to
-  //      the set of connections: record_status_map_, write_mutex_map_,
-  //      closure_request_map_, and request_count_map_.
-  // 1 b) Removes all of the associated requests from request_map_. Note that
-  //      FCGIRequest object methods are implemented to check for missing
-  //      RequestIdentifier values and missing connections. Absence indicates
-  //      that the connection was found to be closed by the interface.
+  // 0) Acquires and releases interface_state_mutex_.
+  // 1  a) Removes the connection from all maps with a domain equal to
+  //       the set of connections: record_status_map_, write_mutex_map_,
+  //       closure_request_map_, and request_count_map_.
+  // 1  b) Removes all of the associated requests from request_map_. Note that
+  //       FCGIRequest object methods are implemented to check for missing
+  //       RequestIdentifier values and missing connections. Absence indicates
+  //       that the connection was found to be closed by the interface.
   std::vector<RequestIdentifier>
   ClosedConnectionFoundDuringAcceptRequests(int connection);
 
