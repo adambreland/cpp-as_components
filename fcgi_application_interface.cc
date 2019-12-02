@@ -310,20 +310,18 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   // the names and values can fit in either 7 or 31 bits.
   for(auto pair_iter {result_pairs.begin()}; iter != result_pairs.end(); ++iter)
   {
+    // Mask for encoding four byte lengths.
+    uint32_t four_byte_mask {1 << 31};
     // Encode name length;
     uint32_t item_size(pair_iter->first.size());
-    if(item_size <=
-       fcgi_synchronous_interface::kNameValuePairSingleByteLength)
-      result.push_back(item_size);
-    else
-      EncodeFourByteLength(item_size, &result);
+    (item_size <= fcgi_synchronous_interface::kNameValuePairSingleByteLength) ?
+      result.push_back(item_size) :
+      EncodeFourByteLength(four_byte_mask | item_size, &result);
     // Encode value temp_length
     item_size = pair_iter->second.size();
-    if(item_size <=
-       fcgi_synchronous_interface::kNameValuePairSingleByteLength)
-      result.push_back(item_size);
-    else
-      EncodeFourByteLength(item_size, &result);
+    (item_size <= fcgi_synchronous_interface::kNameValuePairSingleByteLength) ?
+      result.push_back(item_size) :
+      EncodeFourByteLength(four_byte_mask | item_size, &result);
     // Append character bytes of name and value.
     result.append(pair_iter->first);
     result.append(pair_iter->second);
@@ -421,8 +419,14 @@ SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
   return true;
 }
 
+bool fcgi_synchronous_interface::FCGIApplicationInterface::
+SendFCGIEndRequest(int connection, uint8_t protocol_status, int app_status)
+{
+  
+}
+
 RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::
-ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
+ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
   RequestIdentifier result {};
   RecordStatus& record_status {*record_status_ptr};
@@ -463,9 +467,6 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
     case FCGIType::kFCGI_BEGIN_REQUEST: {
       if(request_data_it == request_map_.end())
       {
-        // Check for rejection based on role, maximum request count,
-        // and application-set overload.
-
         // Extract role
         uint6_t role {record_status.local_record_content_buffer[
           fcgi_synchronous_interface::kBeginRequestRoleB1Index]};
@@ -473,43 +474,32 @@ ProcessCompleteRecord(connection, RecordStatus* record_status_ptr)
         role += local_record_content_buffer[
           fcgi_synchronous_interface::kBeginRequestRoleB0Index];
 
+        // Check for rejection based on role, maximum request count,
+        // and application-set overload.
         if(role =! role_)
-        {
-          
-        }
+          SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_UNKNOWN_ROLE), -1);
         else if((auto request_count_it {request_count_map_.find(connection)},
                  request_count_it.second == maximum_connection_count_))
-        {
-          if(maximum_connection_count_ == 1)
-          {
-            // TODO send can't multiplex end record.
-          }
-          else
-          {
-            // TODO send overloaded end record.
-          }
-        }
+          (maximum_connection_count_ == 1) ?
+            SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_CANT_MPX_CONN, -1) :
+            SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else if(application_overload_)
-        {
-          // TODO send overloaded end record.
-        }
+          SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else // We can accept the request.
         {
-          // Extract close connection value.
+          // Extract close_connection value.
           bool close_connection =
-            !(record_status.local_record_content_buffer[2]
+            !(record_status.local_record_content_buffer[
+                fcgi_synchronous_interface::kBeginRequestFlagsIndex]
               & fcgi_synchronous_interface::FCGI_KEEP_CONN);
 
           request_map_[request_id] = fcgi_synchronous_interface::
             RequestData(role, close_connection);
-          request_count_it.second += 1;
+          request_count_it->second += 1;
         }
       }
       break;
     }
-
-start 20191122 (or earlier)
-
     case FCGIType::kFCGI_ABORT_REQUEST: {
       // Does the abort apply to a request?
       if((auto request_data_it = request_map_.find(request_id))
@@ -718,19 +708,10 @@ ExtractFourByteLength(const uint8_t* content_ptr) const
 
 void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
 {
-  // The mask for setting the four-byte flag in the FCGI name-value
-  // pair encoding.
-  constexpr uint8_t four_byte_mask {1 << 7};
-
-  uint8_t byte_in_encoding(length >> 24); // Truncation desired.
-  byte_in_encoding |= four_byte_mask;
-  string_ptr->push_back(byte_in_encoding);
-  byte_in_encoding = (length >> 16);
-  string_ptr->push_back(byte_in_encoding);
-  byte_in_encoding = (length >> 8);
-  string_ptr->push_back(byte_in_encoding);
-  byte_in_encoding = length;
-  string_ptr->push_back(byte_in_encoding);
+  for(char i {0}; i < 4; i++)
+  {
+    string_ptr->push_back(length >> (24 - (8*i)));
+  }
 }
 
 std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>

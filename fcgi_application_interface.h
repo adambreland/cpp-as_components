@@ -119,6 +119,8 @@ private:
 
   bool SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type);
 
+  bool SendFCGIEndRequest(int connection, uint8_t protocol_status, int app_status);
+
   // Extracts a collection of name-value pairs when they are encoded as a
   // sequence of bytes in the FastCGI name-value pair encoding.
   // Note: Checking if content_length is zero before calling allows for
