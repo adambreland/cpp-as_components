@@ -31,7 +31,7 @@ public:
   ssize_t SendFile(int in_fd, off_t* offset_ptr, size_t count) const;
   ssize_t SendFile(std::string pathname) const;
 
-  void Complete(int status);
+  void Complete(int32_t app_status);
 
   // No copy or default construction.
   FCGIRequest() = delete;

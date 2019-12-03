@@ -269,6 +269,25 @@ Read(int connection)
   return request_identifiers;
 }
 
+bool SendRecord(int connection, const std::basic_string<uint8_t>& result)
+{
+  // Obtain the write mutex for the connection.
+  std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
+
+  // Send record.
+  size_t number_written = NonblockingPollingSocketWrite(connection,
+    result.data(), result.size());
+  if(number_written < result.size())
+    if(errno == EPIPE)
+      return false;
+    else throw std::runtime_error(
+        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
+        "write() which could not be handled. Errno had a value of: \n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+  return true;
+}
+
 bool fcgi_synchronous_interface::FCGIApplicationInterface::
 SendGetValueResult(int connection, const RecordStatus& record_status)
 {
@@ -359,27 +378,14 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   result[fcgi_synchronous_interface::kHeaderReservedByteIndex]       =
     0;
 
-  // Obtain the write mutex for the connection.
-  std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
-
-  // Send record.
-  size_t number_written = NonblockingPollingSocketWrite(connection,
-    result.data(), result.size());
-  if(number_written < result.size())
-    if(errno == EPIPE)
-      return false;
-    else throw std::runtime_error(
-        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
-        "write() which could not be handled. Errno had a value of: \n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
-  return true;
+  return SendRecord(connection, result);
 }
 
 bool fcgi_synchronous_interface::FCGIApplicationInterface::
 SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
 {
   std::basic_string<uint8_t> result(16, 0) // Allocate space for two bytes.
+
   // Set header.
   result[fcgi_synchronous_interface::kHeaderVersionIndex]            =
     fcgi_synchronous_interface::FCGI_VERSION_1;
@@ -397,7 +403,7 @@ SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
     0; // No padding needed.
   result[fcgi_synchronous_interface::kHeaderReservedByteIndex]       =
     0;
-  // Set body.
+  // Set body. (Only the first byte in the body is used.)
   result[1 + fcgi_synchronous_interface::kHeaderReservedByteIndex]   =
     type;
   // Remaining bytes were set to zero during string initialization.
@@ -405,24 +411,61 @@ SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type)
   // Obtain the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
 
-  // Send record.
-  size_t number_written = NonblockingPollingSocketWrite(connection,
-    result.data(), result.size());
-  if(number_written < result.size())
-    if(errno == EPIPE)
-      return false;
-    else throw std::runtime_error(
-        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
-        "write() which could not be handled. Errno had a value of: \n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
-  return true;
+  return SendRecord(connection, result);
 }
 
 bool fcgi_synchronous_interface::FCGIApplicationInterface::
-SendFCGIEndRequest(int connection, uint8_t protocol_status, int app_status)
+SendFCGIEndRequest(int connection, RequestIdentifier request_id,
+                   uint8_t protocol_status, int32_t app_status)
 {
-  
+  std::basic_string<uint8_t> result(16, 0) // Allocate space for two bytes.
+
+  // Encode the record FCGI request ID from the RequestID object.
+  uint8_t request_id_byte_array[2];
+  for(char i {0}; i < 2; i++)
+  {
+    request_id_byte_array[i] = request_id.FCGI_id() >> (8 - (8*i));
+  }
+
+  // Encode app_status.
+  uint8_t app_status_byte_array[4];
+  uint32_t unsigned_app_status {static_cast<uint32_t>(app_status)};
+  for(char i {0}; i < 4; i++)
+  {
+    app_status_byte_array[i] = unsigned_app_status >> (24 - (8*i));
+  }
+
+  // Set header.
+  result[fcgi_synchronous_interface::kHeaderVersionIndex]            =
+    fcgi_synchronous_interface::FCGI_VERSION_1;
+  result[fcgi_synchronous_interface::kHeaderTypeIndex]               =
+    fcgi_synchronous_interface::FCGIType::kFCGI_END_REQUEST;
+  result[fcgi_synchronous_interface::kHeaderRequestIDB1Index]        =
+    request_id_byte_array[0];
+  result[fcgi_synchronous_interface::kHeaderRequestIDB0Index]        =
+    request_id_byte_array[1];
+  result[fcgi_synchronous_interface::kHeaderContentLengthB1Index]    =
+    0;
+  result[fcgi_synchronous_interface::kHeaderContentLengthB0Index]    =
+    8; // One byte.
+  result[fcgi_synchronous_interface::kHeaderPaddingLengthIndex]      =
+    0; // No padding needed.
+  result[fcgi_synchronous_interface::kHeaderReservedByteIndex]       =
+    0;
+  // Set body.
+  for(char i {0}; i < 4; i++)
+  {
+    result[(i + 1) + fcgi_synchronous_interface::kHeaderReservedByteIndex] =
+      app_status_byte_array[i]
+  }
+  result[5 + fcgi_synchronous_interface::kHeaderReservedByteIndex]   =
+    protocol_status;
+  // Remaining bytes were set to zero during string initialization.
+
+  // Obtain the write mutex for the connection.
+  std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
+
+  return SendRecord(connection, result);
 }
 
 RequestIdentifier fcgi_synchronous_interface::FCGIApplicationInterface::

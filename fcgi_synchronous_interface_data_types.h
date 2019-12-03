@@ -66,10 +66,10 @@ enum class FCGIType : uint8_t
 class RequestIdentifier {
 public:
   int descriptor();
-  int FCGI_id();
+  uint16_t FCGI_id();
 
   RequestIdentifier() = default;
-  RequestIdentifier(int descriptor, int FCGI_id);
+  RequestIdentifier(int descriptor, uint16_t FCGI_id);
   RequestIdentifier(const RequestIdentifier& request_id) = default;
   RequestIdentifier(RequestIdentifier&& request_id) = default;
 
@@ -81,7 +81,7 @@ public:
   ~RequestIdentifier() = default;
 
 private:
-  std::pair<int, int> pair_;
+  std::pair<int, uint16_t> pair_;
 };
 
 enum class RequestStatus {kRequestPending, kRequestAssigned};
