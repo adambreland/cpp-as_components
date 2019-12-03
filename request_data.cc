@@ -17,6 +17,21 @@ inline void fcgi_synchronous_interface::RequestData::set_abort()
   abort_ = true;
 }
 
+inline bool fcgi_synchronous_interface::RequestData::get_close_connection()
+{
+  return close_connection_;
+}
+
+inline uint16_t fcgi_synchronous_interface::RequestData::get_role()
+{
+  return role_;
+}
+
+inline bool fcgi_synchronous_interface::RequestData::IsRequestComplete()
+{
+  return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ && FCGI_DATA_complete_;
+}
+
 // PARAMS
 
 inline bool fcgi_synchronous_interface::RequestData::get_PARAMS_completion()

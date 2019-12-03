@@ -26,18 +26,23 @@ void fcgi_synchronous_interface::FCGIApplicationInterface::RecordStatus::
 UpdateAfterHeaderCompletion(int connection)
 {
   // Extract number of content bytes from two bytes.
-  content_bytes_expected = header[4];
+  content_bytes_expected =
+    header[fcgi_synchronous_interface::kHeaderContentLengthB1Index];
   content_bytes_expected <<= 8; // one byte
-  content_bytes_expected += header[5];
+  content_bytes_expected +=
+    header[fcgi_synchronous_interface::kHeaderContentLengthB0Index];
 
   // Extract number of padding bytes.
-  padding_bytes_expected = header[6];
+  padding_bytes_expected =
+    header[fcgi_synchronous_interface::kHeaderPaddingLengthIndex];
 
   // Extract type and request_id.
-  type = header[1];
-  uint16_t FCGI_request_id = header[2];
+  type = header[fcgi_synchronous_interface::kHeaderTypeIndex];
+  uint16_t FCGI_request_id =
+    header[fcgi_synchronous_interface::kHeaderRequestIDB1Index];
   FCGI_request_id << 8; // one byte
-  FCGI_request_id += header[3];
+  FCGI_request_id +=
+    header[fcgi_synchronous_interface::kHeaderRequestIDB0Index];
   request_id = fcgi_synchronous_interface::
     RequestIdentifier(connection, FCGI_request_id);
 

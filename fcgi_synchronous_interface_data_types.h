@@ -96,6 +96,11 @@ public:
   bool get_abort() const;
   void set_abort();
 
+  bool get_close_connection() const;
+  uint16_t get_role() const;
+
+  bool IsRequestComplete() const;
+
   fcgi_synchronous_interface::RequestStatus get_status() const;
 
   bool get_PARAMS_completion() const;

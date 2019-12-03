@@ -491,25 +491,18 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
       SendFCGIUnknownType(connection, type);
     return result;
   }
-
-  // Else, FCGI_request_id > 0 => application request record.
-  // Check for the allowed application record types and act accordingly.
-  // The allowed types are:
-  // 1) kFCGI_BEGIN_REQUEST
-  // 2) kFCGI_ABORT_REQUEST
-  // 3) kFCGI_PARAMS
-  // 4) kFCGI_DATA
-  // 5) kFCGI_STDIN
-  fcgi_synchronous_interface::RequestIdentifier request_id
-    {connection, FCGI_request_id};
-  // Obtain interface_state_mutex_ to access state.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-  auto request_data_it {request_map_.find(request_id)};
-  switch(type)
+  else if(record_status.invalid_record)
+  {} // Check if the record is valid. Ignore record if it is not.
+  else
   {
-    case FCGIType::kFCGI_BEGIN_REQUEST: {
-      if(request_data_it == request_map_.end())
-      {
+    fcgi_synchronous_interface::RequestIdentifier request_id
+      {connection, FCGI_request_id};
+    // Obtain interface_state_mutex_ to access state.
+    std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+    auto request_data_it {request_map_.find(request_id)};
+    switch(type)
+    {
+      case fcgi_synchronous_interface::FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
         uint6_t role {record_status.local_record_content_buffer[
           fcgi_synchronous_interface::kBeginRequestRoleB1Index]};
@@ -520,14 +513,18 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         // Check for rejection based on role, maximum request count,
         // and application-set overload.
         if(role =! role_)
-          SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_UNKNOWN_ROLE), -1);
+          SendFCGIEndRequest(connection,
+            fcgi_synchronous_interface::FCGI_UNKNOWN_ROLE), -1);
         else if((auto request_count_it {request_count_map_.find(connection)},
                  request_count_it.second == maximum_connection_count_))
           (maximum_connection_count_ == 1) ?
-            SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_CANT_MPX_CONN, -1) :
-            SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
+            SendFCGIEndRequest(connection,
+              fcgi_synchronous_interface::FCGI_CANT_MPX_CONN, -1) :
+            SendFCGIEndRequest(connection,
+              fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else if(application_overload_)
-          SendFCGIEndRequest(connection, fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
+          SendFCGIEndRequest(connection,
+            fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else // We can accept the request.
         {
           // Extract close_connection value.
@@ -538,125 +535,58 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 
           request_map_[request_id] = fcgi_synchronous_interface::
             RequestData(role, close_connection);
-          request_count_it->second += 1;
+          request_count_it->second++;
         }
+        break;
       }
-      break;
-    }
-    case FCGIType::kFCGI_ABORT_REQUEST: {
-      // Does the abort apply to a request?
-      if((auto request_data_it = request_map_.find(request_id))
-        != request_map_.end())
-      {
-        if(!(request_data_it->second.get_abort()))
-        // The request has not already been aborted.
+      case fcgi_synchronous_interface::FCGIType::kFCGI_ABORT_REQUEST: {
+        // Has the request already been assigned?
+        if(request_data_it->second.get_status()
+          == fcgi_synchronous_interface::RequestStatus::kRequestAssigned)
         {
-          // Has the request already been assigned?
-          if(request_data_it->second.get_status()
-            == fcgi_synchronous_interface::RequestStatus::kRequestAssigned)
-          {
-            request_data_it->second.set_abort();
-          }
-          else // It hasn't been assigned. We can erase the request.
-          {
-            // TODO figure out the best way to have the interface send a
-            // response.
-            request_map_.erase(request_data_it);
-          }
+          request_data_it->second.set_abort();
         }
-      }
-      break;
-    }
-    case FCGIType::kFCGI_PARAMS: {
+        else // Not assigned. We can erase the request and update state.
+        {
+          // Check if we should indicate that a request was made by the
+          // client web sever to close the connection.
+          if(request_data_it->second.get_close_connection())
+            application_closure_request_set_.insert(connection);
 
-    }
-    case FCGIType::kFCGI_STDIN: {
-      // Does the record apply to a request?
-      if((auto request_data_it = request_map_.find(request_id)) != request_map_.end())
-      {
-        if(!(request_data_it->second.FCGI_STDIN_complete)) // Not complete, process data.
-        {
-          // Extract content length
-          uint16_t content_length_1 = record_status.content_buffer_[4];
-          uint16_t content_length_0 = record_status.content_buffer_[5];
-          int content_length = (content_length_1 << 8) + content_length_0;
-          if(content_length)
-          {
-            // Append data to RequestData stdin buffer
-            // TODO
-          }
-          else // content_length == 0 (and stdin is now complete)
-          {
-            request_data_it->second.FCGI_STDIN_complete = true;
-            if(request_data_it->second.FCGI_DATA_complete && equest_data_it->second.FCGI_PARAMS_complete)
-            {
-              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
-              result = request_id;
-            }
-          }
+          request_map_.erase(request_data_it);
+          request_count_map_[connection]--;
+          SendFCGIEndRequest(connection, request_id,
+            fcgi_synchronous_interface::FCGI_REQUEST_COMPLETE, -1);
+          // Don't bother checking if the connection was closed by the
+          // peer by inspecting the return value of the call to
+          // SendFCGIEndRequest() as it would be difficult to act on
+          // this information in the middle of the call to read.
         }
+        break;
       }
-      break;
-    }
-    case FCGIType::kFCGI_DATA: {
-      if((auto request_data_it = request_map_.find(request_id)) != request_map_.end())
-      {
-        if(!(request_data_it->second.FCGI_DATA_complete))
+      case fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS:
+      case fcgi_synchronous_interface::FCGIType::kFCGI_STDIN:
+      case fcgi_synchronous_interface::FCGIType::kFCGI_DATA: {
+        // Should we complete the stream?
+        if(record_status.content_bytes_expected == 0)
         {
-          // Extract content length
-          uint16_t content_length_1 = record_status.content_buffer_[4];
-          uint16_t content_length_0 = record_status.content_buffer_[5];
-          int content_length = (content_length_1 << 8) + content_length_0;
-          if(content_length)
-          {
-            // Append data to RequestData stdin buffer
+          (type == fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS) ?
+            request_data_it->second.CompletePARAMS() :
+          (type == fcgi_synchronous_interface::FCGIType::kFCGI_STDIN)  ?
+            request_data_it->second.CompleteSTDIN() :
+            request_data_it->second.CompleteDATA();
 
-          }
-          else // content_length == 0 (and stdin is complete)
-          {
-            request_data_it->second.FCGI_DATA_complete = true;
-            if(request_data_it->second.FCGI_STDIN_complete && request_data_it->second.FCGI_PARAMS_complete)
-            {
-              request_data_it->second.request_status = fcgi_synchronous_interface::RequestStatus::kRequestAssigned;
-              result = request_id;
-            }
-          }
+          if(request_data_it->second.IsRequestComplete())
+            result = request_id;
         }
+        break;
       }
-      break;
     }
   }
   // Clear the record status for the next record.
   record_status = RecordStatus();
   return result; // Default (null) RequestIdentifier if not assinged to.
 } // Release interface_state_mutex_.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // TODO Refactor with new cases for implicit calls to accept.
 ssize_t fcgi_synchronous_interface::FCGIApplicationInterface::

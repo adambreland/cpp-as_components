@@ -51,6 +51,8 @@ private:
   // Returns -1 on an error or rejection and the file descriptor on success.
   ssize_t Accept();
 
+  void RemoveConnectionFromSharedState(int connection);
+
   // A utility wrapper to write() which keeps writing despite errors with EINTR,
   // EAGAIN, or EWOULDBLOCK errno values. Intended to be used with a file
   // descriptor which refers to a non-blocking, connected socket.
