@@ -27,11 +27,7 @@ public:
   bool get_overload() const;
   void set_overload(bool overload_status);
 
-  int connection_count() const;
-
-  // Returns a vector of pairs:
-  // (character address, number of active requests)
-  std::vector<std::pair<std::string, int>> connection_request_counts() const;
+  std::map<int, RecordStatus>::size_type connection_count() const;
 
   // No copy, move, or default construction.
   FCGIApplicationInterface() = delete;
@@ -218,7 +214,7 @@ private:
   //       checked for completion. If complete, the identifier is returned.
   //       If not complete, a null RequestIdentifier object is returned.
   RequestIdentifier ProcessCompleteRecord(int connection,
-                                          *RecordStatus record_status_ptr);
+                                          RecordStatus* record_status_ptr);
 
   // Called when a closed connection is found from a scope within a call
   // to AcceptRequests().

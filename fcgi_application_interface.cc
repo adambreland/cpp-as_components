@@ -14,6 +14,8 @@ extern "C" {
 #include <stdexcept>
 #include <mutex>            // For std::lock_guard
 
+// Public member functions
+
 fcgi_synchronous_interface::FCGIApplicationInterface::
 FCGIApplicationInterface(int max_connections, int max_requests);
 : maximum_connection_count_ {max_connections},
@@ -70,10 +72,10 @@ AcceptRequests()
     == -1 && (errno == EINTR || errno == EAGAIN)){}
   if(select_return == -1) // Unrecoverable error from select().
     throw std::runtime_error(
-       "Call to select() failed with errno value: \n"
-     + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-     + __FILE__ + "\n"
-     + "Line: " + std::to_string(__LINE__) + '\n');
+      "An error from a call to select() could not be handled.\n"
+      "Errno had a value of:\n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
 
   // Start reading data from ready connections.
   // Check connected sockets (as held in record_status_map_) before the
@@ -97,6 +99,27 @@ AcceptRequests()
     // Accept();
   }
 }
+
+inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
+get_overload() const
+{
+  return application_overload_;
+}
+
+inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
+set_overload()
+{
+  application_overload_ = true;
+}
+
+inline std::map<int, RecordStatus>::size_type
+fcgi_synchronous_interface::FCGIApplicationInterface::
+connection_count() const
+{
+  return record_status_map_.size();
+}
+
+// Helper functions
 
 std::vector<RequestIdentifier>
 fcgi_synchronous_interface::FCGIApplicationInterface::
@@ -132,10 +155,10 @@ Read(int connection)
       if((errno != EAGAIN) && (errno != EWOULDBLOCK))
       // Unrecoverable error.
       throw std::runtime_error(
-         "A call to read() in NonblockingSocketRead() failed with errno value: \n"
-       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-       + __FILE__ + "\n"
-       + "Line: " + std::to_string(__LINE__) + '\n');
+        "NonblockingSocketRead() encountered an error from a call to\n"
+        "read() which could not be handled. Errno had a value of: \n"
+        + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
     }
 
     // Process bytes received (if any). This check is needed as blocking
@@ -281,8 +304,8 @@ bool SendRecord(int connection, const std::basic_string<uint8_t>& result)
     if(errno == EPIPE)
       return false;
     else throw std::runtime_error(
-        "NonblockingPollingSocketWrite() encountered an error from a call to\n"
-        "write() which could not be handled. Errno had a value of: \n"
+      "NonblockingPollingSocketWrite() encountered an error from a call to\n"
+      "write() which could not be handled. Errno had a value of: \n"
       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
       + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
   return true;
@@ -473,22 +496,14 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
   RequestIdentifier result {};
   RecordStatus& record_status {*record_status_ptr};
-  // Extract type
-  FCGIType type
-    {record_status.header[fcgi_synchronous_interface::kHeaderTypeIndex]};
-  // Extract FCGI request ID
-  uint16_t FCGI_request_id
-    {record_status.header[fcgi_synchronous_interface::kHeaderRequestIDB1Index]};
-  FCGI_request_id <<= 8; // shift by one byte
-  FCGI_request_id +=
-    record_status.header[fcgi_synchronous_interface::kHeaderRequestIDB0Index];
+
   // Check if it is a management record.
-  if(FCGI_request_id == 0)
+  if(record_status.request_id.FCGI_id() == 0)
   {
-    if(type == fcgi_synchronous_interface::FCGIType::kFCGI_GET_VALUES)
+    if(record_status.type == fcgi_synchronous_interface::FCGIType::kFCGI_GET_VALUES)
       SendGetValueResult(connection, &record_status);
     else // Unknown type,
-      SendFCGIUnknownType(connection, type);
+      SendFCGIUnknownType(connection, record_status.type);
     return result;
   }
   else if(record_status.invalid_record)
@@ -497,10 +512,11 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   {
     fcgi_synchronous_interface::RequestIdentifier request_id
       {connection, FCGI_request_id};
+
     // Obtain interface_state_mutex_ to access state.
     std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
     auto request_data_it {request_map_.find(request_id)};
-    switch(type)
+    switch(record_status.type)
     {
       case fcgi_synchronous_interface::FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
@@ -516,14 +532,14 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
           SendFCGIEndRequest(connection,
             fcgi_synchronous_interface::FCGI_UNKNOWN_ROLE), -1);
         else if((auto request_count_it {request_count_map_.find(connection)},
-                 request_count_it.second == maximum_connection_count_))
-          (maximum_connection_count_ == 1) ?
-            SendFCGIEndRequest(connection,
+                 request_count_it.second == maximum_request_count_per_connection_))
+          (maximum_request_count_per_connection_ == 1) ?
+            SendFCGIEndRequest(connection, request_id,
               fcgi_synchronous_interface::FCGI_CANT_MPX_CONN, -1) :
-            SendFCGIEndRequest(connection,
+            SendFCGIEndRequest(connection, request_id,
               fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else if(application_overload_)
-          SendFCGIEndRequest(connection,
+          SendFCGIEndRequest(connection, request_id,
             fcgi_synchronous_interface::FCGI_OVERLOADED, -1);
         else // We can accept the request.
         {
@@ -570,9 +586,9 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         // Should we complete the stream?
         if(record_status.content_bytes_expected == 0)
         {
-          (type == fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS) ?
+          (record_status.type == fcgi_synchronous_interface::FCGIType::kFCGI_PARAMS) ?
             request_data_it->second.CompletePARAMS() :
-          (type == fcgi_synchronous_interface::FCGIType::kFCGI_STDIN)  ?
+          (record_status.type == fcgi_synchronous_interface::FCGIType::kFCGI_STDIN)  ?
             request_data_it->second.CompleteSTDIN() :
             request_data_it->second.CompleteDATA();
 
@@ -758,7 +774,19 @@ void RemoveConnectionFromSharedState(int connection)
   write_mutex_map_.erase(connection);
   application_closure_request_set_.erase(connection);
   request_count_map_.erase(connection);
-  close(connection);
+
+  // Error checking on close() is currently dependent on how
+  // Linux implements close(). For most errors, Linux guarantees
+  // that the descriptor is closed.
+  if(close(connection) == -1)
+  {
+    if(errno != EINTR)
+      throw std::runtime_error(
+        "RemoveConnectionFromSharedState() encountered an error from a call to\n"
+        "close() which could not be handled. Errno had a value of: \n"
+        + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+  }
 }
 
 void
@@ -777,7 +805,7 @@ ClosedConnectionFoundDuringAcceptRequests(int connection)
   for(auto request_map_iter =
         request_map_.lower_bound(RequestIdentifier {connection, 0});
       !(request_map_iter == request_map_.end()
-        || request_map_iter->first.descriptor() > connection));
+        || request_map_iter->first.descriptor() > connection);
       ++request_map_iter)
   {
     if(request_map_iter->second.get_status() ==
