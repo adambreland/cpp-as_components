@@ -1,4 +1,4 @@
-// C standard library headers present in the C++ standard library.
+// C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint32_t.
 // C++ standard library headers.
 #include <mutex>

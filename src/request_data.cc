@@ -1,4 +1,4 @@
-// C standard library headers present in the C++ standard library.
+// C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint16_t.
 
 #include "include/data_types.h"

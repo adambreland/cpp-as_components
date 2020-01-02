@@ -9,17 +9,19 @@ extern "C" {
   // Socket headers.
   #include <sys/socket.h>
   #include <netinet/in.h>   // Defines constants for use with inet_ntop().
+  #include <arpa/inet.h>    // For inet_pton() and inet_ntop().
   // I/O multiplexing headers.
   #include <sys/time.h>     // For portability for <sys/select.h>.
   #include <sys/select.h>
 }
 
-// C standard library headers present in the C++ standard library.
+// C standard library headers in the C++ standard library.
 #include <cerrno>
 #include <cstdlib>          // For std::getenv() and uint8_t etc.
 // C++ standard library headers.
 #include <stdexcept>        // For the standard exception classes.
 #include <mutex>
+#include <regex>
 
 #include "include/data_types.h"
 #include "include/fcgi_application_interface.h"
@@ -82,14 +84,44 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
 
   // For internet domains, check for IP addresses which the parent process
   // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
-  // empty value, any address is accepted. If no valid addresses are found
+  // empty value, any address is authorized. If no valid addresses are found
   // after processing a list, an error is thrown. Otherwise, the list of
   // authorized addresses is stored in the FCGIApplicationInterface object.
   if(!(socket_domain == AF_INET || socket_domain == AF_INET6))
     return;
 
-  if(const char* ip_addresses_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS"))
+  const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS")
+  std::string ip_address_list {(ip_address_list_ptr) ?
+    std::string(ip_address_list_ptr) : ""};
+  if(ip_address_list) // A non-empty address list was bound.
   {
+    // Declare appropriate variables to use with inet_pton() and inet_ntop().
+    // These structs are internal to struct sockaddr_in and struct sockaddr_in6.
+    struct in_addr ipv4_internal_address;
+    struct in6_addr ipv6_internal_address;
+    void* inet_address_subaddress_ptr {nullptr};
+    if(socket_domain == AF_INET)
+      inet_address_subaddress_ptr = &(ipv4_internal_address);
+    else
+      inet_address_subaddress_ptr = &(ipv6_internal_address);
+    // Allocate enough space for a maximal normalized address string.
+    char normalized_address[INET6_ADDRSTRLEN];
+
+    // Construct a tokenizer to split the string into address tokens.
+    std::regex comma_tokenizer {","};
+    std::sregex_token_iterator token_it {ip_address_list.begin(),
+      ip_address_list.end(), comma_tokenizer, -1};
+    std::sregex_token_iterator end {};
+
+    // Iterate over tokens and add the normalized textual representation of
+    // every well-formed address to the set of authorized addresses.
+    for(; token_it != end; ++token_it)
+    {
+
+
+
+
+    }
 
   }
 }

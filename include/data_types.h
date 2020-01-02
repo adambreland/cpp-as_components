@@ -1,7 +1,7 @@
 #ifndef FCGI_APPLICATION_INTERFACE_DATA_TYPES_H_
 #define FCGI_APPLICATION_INTERFACE_DATA_TYPES_H_
 
-// C standard library headers present in the C++ standard library.
+// C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint8_t.
 // C++ standard headers.
 #include <map>
