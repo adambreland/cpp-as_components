@@ -1,48 +1,89 @@
+// Unix system call headers.
 extern "C" {
-  #include <sys/types.h>    // General
-  #include <unistd.h>       // For file status flag manipulation,
-                            // socket writing.
+  // General headers.
+  #include <unistd.h>
+  #include <sys/types.h>    // General. Also included for portability for
+                            // <sys/socket.h>.
   #include <fcntl.h>        // For file status flag manipulation.
-  #include <sys/socket.h>   // To accept requests.
-  #include <sys/time.h>     // For select().
-  #include <sys/select.h>
   #include <syslog.h>       // For central logging.
+  // Socket headers.
+  #include <sys/socket.h>
+  #include <netinet/in.h>   // Defines constants for use with inet_ntop().
+  // I/O multiplexing headers.
+  #include <sys/time.h>     // For portability for <sys/select.h>.
+  #include <sys/select.h>
 }
 
-#include <cstring>
+// C standard library headers present in the C++ standard library.
 #include <cerrno>
-#include <cstdlib>          // For std::getenv().
-#include <stdexcept>
-#include <mutex>            // For std::lock_guard
+#include <cstdlib>          // For std::getenv() and uint8_t etc.
+// C++ standard library headers.
+#include <stdexcept>        // For the standard exception classes.
+#include <mutex>
 
 // Public member functions
 
 fcgi_synchronous_interface::FCGIApplicationInterface::
-FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests);
+FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
+  uint16_t role);
 : maximum_connection_count_ {max_connections},
-  maximum_request_count_per_connection_ {max_requests}
+  maximum_request_count_per_connection_ {max_requests},
+  role_ {role}
 {
+  // Check that the role is supported.
+  if(role_ != FCGI_RESPONDER)
+    throw std::runtime_error {
+      "An FCGIApplicationInterface object could not be constructed\n"
+      "as the provided role is not supported.\n"
+      "Provided role: " + std::to_string(role_) + '\n'};
+
   // Ensure that the listening socket is non_blocking.
   int flags = fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
   {
-    throw std::runtime_error(
+    throw std::runtime_error {
       "An error from a call to fcntl() with F_GETFL could not be handled.\n"
       "Errno had a value of:\n"
       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
   }
   flags |= O_NONBLOCK;
   if(fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
      F_SETFL, flags) == -1)
   {
-    throw std::runtime_error(
+    throw std::runtime_error {
       "An error from a call to fcntl() with F_SETFL could not be handled.\n"
       "Errno had a value of:\n"
       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
   }
-  // Access environment variables and check for valid IP addresses.
+
+  // Determine the socket domain. Internet domains may have a list of
+  // authorized IP addresses bound to FCGI_WEB_SERVER_ADDRS.
+  struct sockaddr_storage passive_socket_address;
+  socklen_t address_size {sizeof(struct sockaddr_storage)};
+  int getsockname_return {};
+  while((getsockname_return = getsockname(FCGI_LISTENSOCK_FILENO,
+    (struct sockaddr*)&passive_socket_address,
+    &address_size)) == -1 && errno == EINTR){}
+  if(getsockname_return == -1)
+  {
+    throw std::runtime_error {
+      "An error from a call to getsockname() could not be handled.\n"
+      "Errno had a value of:\n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
+  }
+  sa_family_t socket_domain {passive_socket_address.ss_family};
+
+  // For internet domains, check for IP addresses which the parent process
+  // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
+  // empty value, any address is accepted. If no valid addresses are found
+  // after processing a list, an error is thrown. Otherwise, the list of
+  // authorized addresses is stored in the FCGIApplicationInterface object.
+  if(!(socket_domain == AF_INET || socket_domain == AF_INET6))
+    return;
+
   if(const char* ip_addresses_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS"))
   {
 
@@ -78,11 +119,11 @@ AcceptRequests()
     select(number_for_select, &read_set, nullptr, nullptr, nullptr))
     == -1 && (errno == EINTR || errno == EAGAIN)){}
   if(select_return == -1) // Unrecoverable error from select().
-    throw std::runtime_error(
+    throw std::runtime_error {
       "An error from a call to select() could not be handled.\n"
       "Errno had a value of:\n"
       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
 
   // Start reading data from ready connections.
   // Check connected sockets (as held in record_status_map_) before the
@@ -161,11 +202,11 @@ Read(int connection)
 
       if((errno != EAGAIN) && (errno != EWOULDBLOCK))
       // Unrecoverable error.
-      throw std::runtime_error(
+      throw std::runtime_error {
         "NonblockingSocketRead() encountered an error from a call to\n"
         "read() which could not be handled. Errno had a value of: \n"
         + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
     }
 
     // Process bytes received (if any). This check is needed as blocking
@@ -310,11 +351,11 @@ bool SendRecord(int connection, const std::basic_string<uint8_t>& result)
   if(number_written < result.size())
     if(errno == EPIPE)
       return false;
-    else throw std::runtime_error(
+    else throw std::runtime_error {
       "NonblockingPollingSocketWrite() encountered an error from a call to\n"
       "write() which could not be handled. Errno had a value of: \n"
       + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
   return true;
 }
 
@@ -788,11 +829,11 @@ void RemoveConnectionFromSharedState(int connection)
   if(close(connection) == -1)
   {
     if(errno != EINTR)
-      throw std::runtime_error(
+      throw std::runtime_error {
         "RemoveConnectionFromSharedState() encountered an error from a call to\n"
         "close() which could not be handled. Errno had a value of: \n"
         + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
+        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
   }
 }
 

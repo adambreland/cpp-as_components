@@ -1,17 +1,13 @@
-// A preliminary header for my FastCGI application interface.
 
-// Questions:
-// 1) Can a socket be inspected to determine whether it is IPv4 or IPv6?
-// 2) Is there a library function which will parse a generalized, comma-
-//    separated list of IPv4 or IPv6 addresses?
-// 3) How should I implement name-value pair processing for FCGI_PARAMS?
-
+// Unix type declarations.
 extern "C"
 {
   #include <sys/types.h>   // For ssize_t.
 }
 
+// C standard library headers present in the C++ standard library.
 #include <cstdlib>         // For uint8_t.
+// C++ standard library headers.
 #include <vector>
 #include <map>
 #include <set>
@@ -31,7 +27,8 @@ public:
 
   // No copy, move, or default construction.
   FCGIApplicationInterface() = delete;
-  FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests);
+  FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests
+    uint16_t role);
   FCGIApplicationInterface(const FCGIApplicationInterface&) = delete;
   FCGIApplicationInterface(FCGIApplicationInterface&&) = delete;
 
@@ -236,12 +233,14 @@ private:
 
   std::vector<RequestIdentifier> Read(int connection);
 
+  void ProcessAddressList(int socket_domain, const char* list_ptr);
+
   // Configuration parameters:
   // TODO change to a light-weight, static-optimized set class.
-  std::set<std::string> valid_ip_address_set_;
-  uint16_t role_;
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
+  uint16_t role_;
+  std::set<std::string> valid_ip_address_set_;
 
   // The state of the application-set overload flag.
   bool application_overload_ {false};
