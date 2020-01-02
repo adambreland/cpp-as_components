@@ -16,6 +16,9 @@ extern "C"
 #include <mutex>
 #include <utility>
 
+#include "include/data_types.h"
+#include "include/fcgi_request.h"
+
 namespace fcgi_synchronous_interface {
 
 class FCGIApplicationInterface {

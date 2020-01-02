@@ -28,9 +28,9 @@ constexpr uint8_t                    FCGI_CANT_MPX_CONN             {1};
 constexpr uint8_t                    FCGI_OVERLOADED                {2};
 constexpr uint8_t                    FCGI_UNKNOWN_ROLE              {3};
   // Default FCGI_GET_VALUES record variables.
-const     std::basic_string<uint8_t> FCGI_MAX_CONNS                 {"FCGI_MAX_CONNS"};
-const     std::basic_string<uint8_t> FCGI_MAX_REQS                  {"FCGI_MAX_REQS"};
-const     std::basic_string<uint8_t> FCGI_MPXS_CONNS                {"FCGI_MPXS_CONNS"};
+const     std::string                FCGI_MAX_CONNS                 {"FCGI_MAX_CONNS"};
+const     std::string                FCGI_MAX_REQS                  {"FCGI_MAX_REQS"};
+const     std::string                FCGI_MPXS_CONNS                {"FCGI_MPXS_CONNS"};
 
 // Implementation Constants (determined by current protocol features)
   // Header byte position definitions
@@ -47,9 +47,12 @@ constexpr uint8_t                    kBeginRequestRoleB1Index       {0};
 constexpr uint8_t                    kBeginRequestRoleB0Index       {1};
 constexpr uint8_t                    kBeginRequestFlagsIndex        {2};
   // Maximum lengths for some record fields.
-constexpr uint8_t                    kNameValuePairSingleByteLength {(1 << 7)  - 1};
-constexpr uint32_t                   kNameValuePairFourByteLength   {(1 << 31) - 1};
-constexpr uint16_t                   kMaxRecordContentByteLength    {(1 << 16) - 1};
+constexpr uint8_t                    kNameValuePairSingleByteLength {(1LU << 7)  - 1};
+constexpr uint32_t                   kNameValuePairFourByteLength   {(1LU << 31) - 1};
+      // Use LU suffix to avoid overflow - a 32-bit signed integer cannot hold
+      // 1 << 31.
+constexpr uint16_t                   kMaxRecordContentByteLength(-1);
+      // Largest possible value per implicit conversions.
 
 // Enum class for header type values.
 enum class FCGIType : uint8_t
@@ -80,7 +83,7 @@ public:
   RequestIdentifier& operator=(const RequestIdentifier& request_id) = default;
   RequestIdentifier& operator=(RequestIdentifier&& request_id) = default;
   operator bool();
-  bool operator<(const RequestIdentifier& lhs, const RequestIdentifier& rhs);
+  bool operator<(const RequestIdentifier& rhs);
 
   ~RequestIdentifier() = default;
 
@@ -92,8 +95,8 @@ enum class RequestStatus {kRequestPending, kRequestAssigned};
 
 class RequestData {
 public:
-  friend fcgi_synchronous_interface::
-         FCGIRequest(fcgi_synchronous_interface::RequestIdentifier);
+  // TODO Add a member function which is essentially a helper function
+  // for FCGIRequest.
 
   using size = std::allocator_traits<std::allocator<uint8_t>>::size_type;
 
@@ -109,11 +112,11 @@ public:
 
   bool get_PARAMS_completion() const;
   void CompletePARAMS();
-  void AppendToPARAMS(const uint8_t* buffer_ptr, size count)
+  void AppendToPARAMS(const uint8_t* buffer_ptr, size count);
 
   bool get_STDIN_completion() const;
   void CompleteSTDIN();
-  void AppenToSTDIN(const uint8_t* buffer_ptr, size count);
+  void AppendToSTDIN(const uint8_t* buffer_ptr, size count);
 
   bool get_DATA_completion() const;
   void CompleteDATA();
@@ -128,7 +131,7 @@ public:
   RequestData& operator=(const RequestData&) = delete;
   RequestData& operator=(RequestData&&) = delete;
 
-  ~RequestData = default;
+  ~RequestData() = default;
 
 private:
   // request data and completion status

@@ -3,15 +3,19 @@
 #include "include/data_types.h"
 
 fcgi_synchronous_interface::RequestIdentifier::
-RequestIdentifier(int descriptor, int FCGI_id)
+RequestIdentifier(int descriptor, uint16_t FCGI_id)
 : pair_ {descriptor, FCGI_id}
 {
   if((pair_.first < 0) || (pair_.second < 0))
-    throw std::invalid_argument
-    {"A value less than zero was encountered when constructing"
-     "a RequestIdentifier."
-     + '\n' + __FILE__ + '\n'
-     + "Line: " + std::to_string(__LINE__) + '\n'};
+  {
+    std::string error_message {"A value less than zero was encountered when constructing a RequestIdentifier.\n"};
+    error_message += __FILE__;
+    error_message += "\nLine :";
+    error_message += std::to_string(__LINE__);
+    error_message += '\n';
+
+    throw std::invalid_argument {error_message};
+  }
 }
 
 fcgi_synchronous_interface::RequestIdentifier::operator bool()
@@ -20,10 +24,10 @@ fcgi_synchronous_interface::RequestIdentifier::operator bool()
 }
 
 bool fcgi_synchronous_interface::RequestIdentifier::
-operator<(const RequestIdentifier& lhs, const RequestIdentifier& rhs)
+operator<(const RequestIdentifier& rhs)
 {
   // Lexical ordering on Connections X RequestIDs.
-  return std::less(lhs.pair_, rhs.pair_);
+  return (pair_ < rhs.pair_);
 }
 
 int fcgi_synchronous_interface::RequestIdentifier::descriptor()
@@ -31,7 +35,7 @@ int fcgi_synchronous_interface::RequestIdentifier::descriptor()
   return pair_.first;
 }
 
-int fcgi_synchronous_interface::RequestIdentifier::FCGI_id()
+uint16_t fcgi_synchronous_interface::RequestIdentifier::FCGI_id()
 {
   return pair_.second;
 }

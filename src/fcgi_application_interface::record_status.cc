@@ -5,6 +5,7 @@
 
 #include "include/data_types.h"
 #include "include/fcgi_application_interface.h"
+#include "include/fcgi_request.h"
 
 fcgi_synchronous_interface::FCGIApplicationInterface::RecordStatus::
 RecordStatus()
