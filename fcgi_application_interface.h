@@ -31,7 +31,7 @@ public:
 
   // No copy, move, or default construction.
   FCGIApplicationInterface() = delete;
-  FCGIApplicationInterface(int max_connections, int max_requests);
+  FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests);
   FCGIApplicationInterface(const FCGIApplicationInterface&) = delete;
   FCGIApplicationInterface(FCGIApplicationInterface&&) = delete;
 

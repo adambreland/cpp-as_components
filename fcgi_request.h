@@ -1,4 +1,3 @@
-
 extern "C"
 {
   #include <sys/types.h>   // For ssize_t.
@@ -7,23 +6,17 @@ extern "C"
 #include <map>
 #include <cstdlib>         // For uint8_t.
 
-#ifndef FCGI_SYNCRHONOUS_INTERFACE_DATA_TYPES_H_
-#define FCGI_SYNCRHONOUS_INTERFACE_DATA_TYPES_H_
-#include "fcgi_synchronous_interface_data_types.h"
-#endif
-
 namespace fcgi_synchronous_interface {
 
 class FCGIRequest {
 public:
-  friend std::vector<FCGIRequest> AcceptRequests();
-
   const std::map<std::basic_string<uint8_t>, std::basic_string<uint8_t>>&
   get_environment_map() const;
   const std::basic_string<uint8_t>& get_STDIN() const;
   const std::basic_string<uint8_t>& get_DATA() const;
 
   bool get_abort() const;
+  uint16_t get_role() const;
 
   void Write(std::basic_string<uint8_t> response) const;
   void WriteError(std::basic_string<uint8_t> error_message) const;
@@ -45,6 +38,8 @@ public:
   ~FCGIRequest() = default;
 
 private:
+  friend std::vector<FCGIRequest> AcceptRequests();
+
   // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects.
   FCGIRequest(RequestIdentifier request_id);

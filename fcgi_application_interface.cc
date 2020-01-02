@@ -7,9 +7,10 @@ extern "C" {
   #include <sys/time.h>     // For select().
   #include <sys/select.h>
   #include <syslog.h>       // For central logging.
-  #include <errno.h>        // To check system call error values.
 }
 
+#include <cstring>
+#include <cerrno>
 #include <cstdlib>          // For std::getenv().
 #include <stdexcept>
 #include <mutex>            // For std::lock_guard
@@ -17,7 +18,7 @@ extern "C" {
 // Public member functions
 
 fcgi_synchronous_interface::FCGIApplicationInterface::
-FCGIApplicationInterface(int max_connections, int max_requests);
+FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests);
 : maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests}
 {
@@ -25,21 +26,27 @@ FCGIApplicationInterface(int max_connections, int max_requests);
   int flags = fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
   {
-    throw; // TODO
+    throw std::runtime_error(
+      "An error from a call to fcntl() with F_GETFL could not be handled.\n"
+      "Errno had a value of:\n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
   }
   flags |= O_NONBLOCK;
   if(fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
      F_SETFL, flags) == -1)
   {
-    throw; // TODO
+    throw std::runtime_error(
+      "An error from a call to fcntl() with F_SETFL could not be handled.\n"
+      "Errno had a value of:\n"
+      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
+      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n');
   }
   // Access environment variables and check for valid IP addresses.
   if(const char* ip_addresses_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS"))
-    // TODO: Create or find a function to call to parse textual,
-    // comma-delimited IP addresses.
+  {
 
-  // TODO add error checking against values for max_connections
-  // and max_requests
+  }
 }
 
 std::vector<fcgi_synchronous_interface::FCGIRequest>
