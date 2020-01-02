@@ -21,6 +21,10 @@ extern "C" {
 #include <stdexcept>        // For the standard exception classes.
 #include <mutex>
 
+#include "include/data_types.h"
+#include "include/fcgi_application_interface.h"
+#include "include/fcgi_request.h"
+
 // Public member functions
 
 fcgi_synchronous_interface::FCGIApplicationInterface::

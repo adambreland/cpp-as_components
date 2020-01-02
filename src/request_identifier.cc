@@ -1,5 +1,7 @@
 #include <stdexcept>
 
+#include "include/data_types.h"
+
 fcgi_synchronous_interface::RequestIdentifier::
 RequestIdentifier(int descriptor, int FCGI_id)
 : pair_ {descriptor, FCGI_id}
@@ -8,7 +10,8 @@ RequestIdentifier(int descriptor, int FCGI_id)
     throw std::invalid_argument
     {"A value less than zero was encountered when constructing"
      "a RequestIdentifier."
-     + '\n' + __FILE__ + ':' + std::to_string(__LINE__)};
+     + '\n' + __FILE__ + '\n'
+     + "Line: " + std::to_string(__LINE__) + '\n'};
 }
 
 fcgi_synchronous_interface::RequestIdentifier::operator bool()

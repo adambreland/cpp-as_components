@@ -1,3 +1,11 @@
+// C standard library headers present in the C++ standard library.
+#include <cstdlib>         // For uint32_t.
+// C++ standard library headers.
+#include <mutex>
+
+#include "include/data_types.h"
+#include "include/fcgi_application_interface.h"
+
 fcgi_synchronous_interface::FCGIApplicationInterface::RecordStatus::
 RecordStatus()
 : bytes_received {0}, content_bytes_expected {0}, padding_bytes_expected {0},

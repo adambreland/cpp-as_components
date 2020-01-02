@@ -1,3 +1,5 @@
+#ifndef FCGI_APPLICATION_INTERFACE_FCGI_APPLICATION_INTERFACE_H_
+#define FCGI_APPLICATION_INTERFACE_FCGI_APPLICATION_INTERFACE_H_
 
 // Unix type declarations.
 extern "C"
@@ -352,3 +354,5 @@ private:
 };
 
 } // namespace fcgi_synchronous_interface.
+
+#endif // FCGI_APPLICATION_INTERFACE_FCGI_APPLICATION_INTERFACE_H_

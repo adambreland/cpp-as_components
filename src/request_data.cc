@@ -1,3 +1,7 @@
+// C standard library headers present in the C++ standard library.
+#include <cstdlib>         // For uint16_t.
+
+#include "include/data_types.h"
 
 fcgi_synchronous_interface::RequestData::
 RequestData(uint16_t role, bool close_connection)

@@ -1,10 +1,17 @@
+#ifndef FCGI_APPLICATION_INTERFACE_FCGI_REQUEST_H_
+#define FCGI_APPLICATION_INTERFACE_FCGI_REQUEST_H_
+
+// Unix type declarations.
 extern "C"
 {
   #include <sys/types.h>   // For ssize_t.
 }
 
-#include <map>
+// C standard library headers present in the C++ standard library.
 #include <cstdlib>         // For uint8_t.
+// C++ standard headers.
+#include <map>
+
 
 namespace fcgi_synchronous_interface {
 
@@ -65,3 +72,5 @@ private:
 };
 
 } // namespace fcgi_synchronous_interface
+
+#endif // FCGI_APPLICATION_INTERFACE_FCGI_REQUEST_H_
