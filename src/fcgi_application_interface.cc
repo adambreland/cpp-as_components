@@ -23,6 +23,8 @@ extern "C" {
 #include <mutex>
 #include <regex>
 
+#include "external/error_handling/include/error_handling.h"
+
 #include "include/data_types.h"
 #include "include/fcgi_application_interface.h"
 #include "include/fcgi_request.h"
@@ -38,31 +40,22 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
 {
   // Check that the role is supported.
   if(role_ != FCGI_RESPONDER)
-    throw std::runtime_error {
-      "An FCGIApplicationInterface object could not be constructed\n"
+  {
+    std::string message {"An FCGIApplicationInterface object could not be constructed\n"
       "as the provided role is not supported.\n"
-      "Provided role: " + std::to_string(role_) + '\n'};
+      "Provided role: "};
+    message += std::to_string(role_);
+    throw std::runtime_error {ERROR_STRING(message)};
+  }
 
   // Ensure that the listening socket is non_blocking.
   int flags = fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
-  {
-    throw std::runtime_error {
-      "An error from a call to fcntl() with F_GETFL could not be handled.\n"
-      "Errno had a value of:\n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
-  }
+    throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
   flags |= O_NONBLOCK;
   if(fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
      F_SETFL, flags) == -1)
-  {
-    throw std::runtime_error {
-      "An error from a call to fcntl() with F_SETFL could not be handled.\n"
-      "Errno had a value of:\n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
-  }
+    throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
   // Determine the socket domain. Internet domains may have a list of
   // authorized IP addresses bound to FCGI_WEB_SERVER_ADDRS.
@@ -73,13 +66,7 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
     (struct sockaddr*)&passive_socket_address,
     &address_size)) == -1 && errno == EINTR){}
   if(getsockname_return == -1)
-  {
-    throw std::runtime_error {
-      "An error from a call to getsockname() could not be handled.\n"
-      "Errno had a value of:\n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
-  }
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockname")};
   sa_family_t socket_domain {passive_socket_address.ss_family};
 
   // For internet domains, check for IP addresses which the parent process
@@ -87,42 +74,44 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   // empty value, any address is authorized. If no valid addresses are found
   // after processing a list, an error is thrown. Otherwise, the list of
   // authorized addresses is stored in the FCGIApplicationInterface object.
-  if(!(socket_domain == AF_INET || socket_domain == AF_INET6))
-    return;
-
-  const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS")
-  std::string ip_address_list {(ip_address_list_ptr) ?
-    std::string(ip_address_list_ptr) : ""};
-  if(ip_address_list) // A non-empty address list was bound.
+  if(socket_domain == AF_INET || socket_domain == AF_INET6)
   {
-    // Declare appropriate variables to use with inet_pton() and inet_ntop().
-    // These structs are internal to struct sockaddr_in and struct sockaddr_in6.
-    struct in_addr ipv4_internal_address;
-    struct in6_addr ipv6_internal_address;
-    void* inet_address_subaddress_ptr {nullptr};
-    if(socket_domain == AF_INET)
-      inet_address_subaddress_ptr = &(ipv4_internal_address);
-    else
-      inet_address_subaddress_ptr = &(ipv6_internal_address);
-    // Allocate enough space for a maximal normalized address string.
-    char normalized_address[INET6_ADDRSTRLEN];
-
-    // Construct a tokenizer to split the string into address tokens.
-    std::regex comma_tokenizer {","};
-    std::sregex_token_iterator token_it {ip_address_list.begin(),
-      ip_address_list.end(), comma_tokenizer, -1};
-    std::sregex_token_iterator end {};
-
-    // Iterate over tokens and add the normalized textual representation of
-    // every well-formed address to the set of authorized addresses.
-    for(; token_it != end; ++token_it)
+    const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS")
+    std::string ip_address_list {(ip_address_list_ptr) ?
+      std::string(ip_address_list_ptr) : ""};
+    if(ip_address_list) // A non-empty address list was bound.
     {
+      // Declare appropriate variables to use with inet_pton() and inet_ntop().
+      // These structs are internal to struct sockaddr_in and struct sockaddr_in6.
+      struct in_addr ipv4_internal_address;
+      struct in6_addr ipv6_internal_address;
+      void* inet_address_subaddress_ptr {nullptr};
+      if(socket_domain == AF_INET)
+        inet_address_subaddress_ptr = &(ipv4_internal_address);
+      else
+        inet_address_subaddress_ptr = &(ipv6_internal_address);
+      // Allocate enough space for a maximal normalized address string.
+      char normalized_address[INET6_ADDRSTRLEN];
 
+      // Construct a tokenizer to split the string into address tokens.
+      std::regex comma_tokenizer {","};
+      std::sregex_token_iterator token_it {ip_address_list.begin(),
+        ip_address_list.end(), comma_tokenizer, -1};
+      std::sregex_token_iterator end {};
 
-
-
+      // Iterate over tokens and add the normalized textual representation of
+      // every well-formed address to the set of authorized addresses.
+      for(; token_it != end; ++token_it)
+      {
+        if(inet_pton(socket_domain, (token_it->str()).data(),
+          inet_address_subaddress_ptr) == 1)
+        {
+          if(!inet_ntop(socket_domain, inet_address_subaddress_ptr,
+            normalized_address, INET6_ADDRSTRLEN))
+            throw std::runtime_error {ERRNO_ERROR_STRING("inet_ntop")};
+        }
+      }
     }
-
   }
 }
 
@@ -236,13 +225,9 @@ Read(int connection)
         return {};
       }
 
-      if((errno != EAGAIN) && (errno != EWOULDBLOCK))
-      // Unrecoverable error.
-      throw std::runtime_error {
-        "NonblockingSocketRead() encountered an error from a call to\n"
-        "read() which could not be handled. Errno had a value of: \n"
-        + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
+      if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
+        throw std::runtime_error
+          {ERRNO_ERROR_STRING("read from a call to NonblockingSocketRead")};
     }
 
     // Process bytes received (if any). This check is needed as blocking
@@ -387,11 +372,8 @@ bool SendRecord(int connection, const std::basic_string<uint8_t>& result)
   if(number_written < result.size())
     if(errno == EPIPE)
       return false;
-    else throw std::runtime_error {
-      "NonblockingPollingSocketWrite() encountered an error from a call to\n"
-      "write() which could not be handled. Errno had a value of: \n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
+    else throw std::runtime_error
+      {ERRNO_ERROR_STRING("write from a call to NonblockingPollingSocketWrite")};
   return true;
 }
 
