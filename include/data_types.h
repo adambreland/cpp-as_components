@@ -52,7 +52,7 @@ constexpr uint32_t                   kNameValuePairFourByteLength   {(1LU << 31)
       // Use LU suffix to avoid overflow - a 32-bit signed integer cannot hold
       // 1 << 31.
 constexpr uint16_t                   kMaxRecordContentByteLength(-1);
-      // Largest possible value per implicit conversions.
+      // Largest possible value for the type per implicit conversions.
 
 // Enum class for header type values.
 enum class FCGIType : uint8_t

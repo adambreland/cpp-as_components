@@ -2,10 +2,7 @@
 #define FCGI_APPLICATION_INTERFACE_FCGI_APPLICATION_INTERFACE_H_
 
 // Unix type declarations.
-extern "C"
-{
-  #include <sys/types.h>   // For ssize_t.
-}
+#include <sys/types.h>   // For ssize_t.
 
 // C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint8_t.
@@ -15,6 +12,7 @@ extern "C"
 #include <set>
 #include <mutex>
 #include <utility>
+#include <memory>
 
 #include "include/data_types.h"
 #include "include/fcgi_request.h"
@@ -43,58 +41,35 @@ public:
   ~FCGIApplicationInterface();
 
 private:
-  // TODO need to set a value for "try again" versus "fatal error."
-
-  // Accept() performs socket error checking and FastCGI IP address validation.
-  // Returns -1 on an error or rejection and the file descriptor on success.
-  ssize_t Accept();
+  // AcceptConnection wraps the accept system call. It performs socket error
+  // checking and FastCGI IP address validation.
+  //
+  // Parameters: none.
+  //
+  // Requires:
+  // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
+  //    a listening socket.
+  // 2) May implicitly acquire interface_state_mutex_. This must be allowed.
+  //
+  // Effects:
+  // 1) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the
+  //    connection was validated after being accepted, a new connected socket
+  //    with a descriptor equal to the returned value is present. The socket
+  //    is non-blocking. The returned socket descriptor is added to
+  //    record_status_map_, write_mutex_map_, and request_count_map_. The
+  //    appropriate default values are added as map values for the descriptor.
+  // 2) If the connection request was accepted and then rejected or was
+  //    accepted and a non-terminal, non-blocking error was returned by
+  //    accept, 0 is returned. A call to AcceptConnection may be made again.
+  // 3) If a blocking error was returned by accept, -1 is returned.
+  // 4) If accept returned an error which could not be handled, a
+  //    std::runtime_error object is thrown with information on the value of
+  //    errno set by the call to accept.
+  // 5) If another system call returned an error which could not be handled, a
+  //    std::runtime_error object will be thrown with information on errno.
+  ssize_t AcceptConnection();
 
   void RemoveConnectionFromSharedState(int connection);
-
-  // A utility wrapper to write() which keeps writing despite errors with EINTR,
-  // EAGAIN, or EWOULDBLOCK errno values. Intended to be used with a file
-  // descriptor which refers to a non-blocking, connected socket.
-  // Can't return with a short count and errno equal to EINTR, EAGAIN, or
-  // EWOULDBLOCK. Check for short counts as for a call to write().
-  //
-  // Parameters:
-  // fd: the socket descriptor on which the write will occur.
-  // buffer_ptr: a pointer to the location in the byte array to be written.
-  // count: the number of bytes to be written.
-  //
-  // Requires:
-  // 1) If the socket may be written to concurrently, synchronization
-  //    must be guaranteed by the caller.
-  // 2) The caller must ensure that SIGPIPE signals are appropriately handled.
-  //
-  // Effects:
-  // 1) The value returned is between 0 and count (inclusive). The value
-  //    returned indicates the number of bytes written to the socket.
-  // 2) If the value returned is less than count, an error other than
-  //    EINTR, EAGAIN, or EWOULDBLOCK prevented further writes.
-  // 3) Does not modify errno.
-  size_t NonblockingPollingSocketWrite(int fd, const uint8_t* buffer_ptr, size_t count);
-
-  // Reads from a non-blocking socket while automatically re-calling read()
-  // if EINTR is encountered. If a short count is returned, errno should be
-  // checked. See below.
-  //
-  // Parameters:
-  // fd: the socket descriptor which will be read.
-  // buffer_ptr: points to the first location where data read will be written.
-  // count: the number of bytes to attemp to read.
-  //
-  // Requires:
-  // 1) buffer_ptr must be large enough to accommodate count bytes.
-  //
-  // Effects:
-  // 1) Returns the number of bytes read and written starting at buffer_ptr.
-  // 2) If the number returned is less than count, errno will either hold 0
-  //    or the error returned by the call to read() which prevented further
-  //    reads. If errno == 0, EOF was reached. Otherwise, an error occurred.
-  //    As EINTR is handled, errno will never be equal to EINTR after the call
-  //    returns.
-  size_t NonblockingSocketRead(int fd, uint8_t* buffer_ptr, size_t count);
 
   // Returns the length in bytes of a name or value when it is encoded
   // using four bytes in the FastCGI name-value pair encoding. Names and
@@ -238,10 +213,9 @@ private:
 
   std::vector<RequestIdentifier> Read(int connection);
 
-  void ProcessAddressList(int socket_domain, const char* list_ptr);
-
   // Configuration parameters:
   // TODO change to a light-weight, static-optimized set class.
+  int socket_domain_;
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
   uint16_t role_;
@@ -272,7 +246,7 @@ private:
   //
   // This map is only accessed by the interface. It is not accessed through
   // application calls on an FCGIRequest object.
-  std::map<int, std::mutex> write_mutex_map_;
+  std::map<int, std::unique_pointer<std::mutex>> write_mutex_map_;
 
   // This set holds the status of socket closure requests from FCGIRequest
   // objects. This is necessary as a web server can indicate in the

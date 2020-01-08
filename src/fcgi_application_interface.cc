@@ -1,29 +1,31 @@
 // Unix system call headers.
-extern "C" {
   // General headers.
-  #include <unistd.h>
-  #include <sys/types.h>    // General. Also included for portability for
-                            // <sys/socket.h>.
-  #include <fcntl.h>        // For file status flag manipulation.
-  #include <syslog.h>       // For central logging.
+#include <unistd.h>
+#include <sys/types.h>    // General. Also included for portability for
+                          // <sys/socket.h>.
+#include <fcntl.h>        // For file status flag manipulation.
+#include <syslog.h>       // For central logging.
   // Socket headers.
-  #include <sys/socket.h>
-  #include <netinet/in.h>   // Defines constants for use with inet_ntop().
-  #include <arpa/inet.h>    // For inet_pton() and inet_ntop().
+#include <sys/socket.h>
+#include <netinet/in.h>   // Defines constants for use with inet_ntop().
+#include <arpa/inet.h>    // For inet_pton() and inet_ntop().
   // I/O multiplexing headers.
-  #include <sys/time.h>     // For portability for <sys/select.h>.
-  #include <sys/select.h>
-}
+#include <sys/time.h>     // For portability for <sys/select.h>.
+#include <sys/select.h>
 
 // C standard library headers in the C++ standard library.
 #include <cerrno>
-#include <cstdlib>          // For std::getenv() and uint8_t etc.
+#include <cstdint>          // For std::uint8_t and others.
+#include <cstdlib>          // For std::getenv() and std::size_t.
 // C++ standard library headers.
 #include <stdexcept>        // For the standard exception classes.
 #include <mutex>
 #include <regex>
+#include <utility>
+#include <memory>
 
 #include "external/error_handling/include/error_handling.h"
+#include "external/linux_scw/include/linux_scw.h"
 
 #include "include/data_types.h"
 #include "include/fcgi_application_interface.h"
@@ -38,17 +40,41 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   maximum_request_count_per_connection_ {max_requests},
   role_ {role}
 {
+  // Check that the arguments are within the domain.
+  std::string error_message {};
+  bool construction_argument_error {false};
   // Check that the role is supported.
   if(role_ != FCGI_RESPONDER)
   {
-    std::string message {"An FCGIApplicationInterface object could not be constructed\n"
-      "as the provided role is not supported.\n"
-      "Provided role: "};
-    message += std::to_string(role_);
-    throw std::runtime_error {ERROR_STRING(message)};
+    construction_argument_error = true;
+    error_message += "An FCGIApplicationInterface object could not be constructed\n";
+    error_message += "as the provided role is not supported.\n";
+    error_message += "Provided role: "};
+    error_message += std::to_string(role_);
   }
+  if(max_connections_ == 0)
+  {
+    if(construction_argument_error)
+      error_message += '\n';
+    else
+      construction_argument_error = true;
+    error_message += "A value of zero was given for the maximum number of transport connections.\n";
+    error_message += "This value must be greater than or equal to one.";
+  }
+  if(max_requests_ == 0)
+  {
+    if(construction_argument_error)
+      error_message += '\n';
+    else
+      construction_argument_error = true;
+    error_message += "A value of zero was given for the maximum number of concurrent requests.\n";
+    error_message += "This value must be greater than or equal to one.";
+  }
+  if(construction_argument_error)
+    throw std::invalid_argument {ERROR_STRING(error_message)};
 
-  // Ensure that the listening socket is non_blocking.
+  // Ensure that the supplied listening socket is non-blocking. This property
+  // is assumed in the design of the AcceptRequests() loop.
   int flags = fcntl(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
@@ -57,29 +83,53 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
      F_SETFL, flags) == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
-  // Determine the socket domain. Internet domains may have a list of
-  // authorized IP addresses bound to FCGI_WEB_SERVER_ADDRS.
-  struct sockaddr_storage passive_socket_address;
-  socklen_t address_size {sizeof(struct sockaddr_storage)};
-  int getsockname_return {};
-  while((getsockname_return = getsockname(FCGI_LISTENSOCK_FILENO,
-    (struct sockaddr*)&passive_socket_address,
-    &address_size)) == -1 && errno == EINTR){}
-  if(getsockname_return == -1)
-    throw std::runtime_error {ERRNO_ERROR_STRING("getsockname")};
-  sa_family_t socket_domain {passive_socket_address.ss_family};
+  // Check socket options.
+  // 1) Determine the socket domain. Internet domains may have a list of
+  //    authorized IP addresses bound to "FCGI_WEB_SERVER_ADDRS".
+  // 2) Check that the socket is a stream socket.
+  // 3) Check that the socket is listening.
+  int getsockopt_int_buffer {};
+  socklen_t getsockopt_int_buffer_size {sizeof(int)};
+  int getsockopt_return {};
+
+  while((getsockopt_return = getsockopt(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
+    SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 && errno == EINTR){}
+  if(getsockopt_return == -1)
+    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN"));
+  sa_family_t socket_domain {getsockopt_int_buffer};
+  socket_domain_ = socket_domain;
+
+  getsockopt_int_buffer_size = sizeof(int);
+  while((getsockopt_return = getsockopt(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
+    SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 & errno == EINTR){}
+  if(getsockopt_return == -1)
+    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_TYPE"));
+  if(getsockopt_int_buffer != SOCK_STREAM)
+    throw std::runtime_error(ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a stream socket."));
+
+  getsockopt_int_buffer_size = sizeof(int);
+  while((getsockopt_return = getsockopt(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
+    SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 & errno == EINTR){}
+  if(getsockopt_return == -1)
+    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_ACCEPTCONN"));
+  if(getsockopt_int_buffer != 1) // The value 1 is used to indicate listening status.
+    throw std::runtime_error(ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a listening socket."));
 
   // For internet domains, check for IP addresses which the parent process
   // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
   // empty value, any address is authorized. If no valid addresses are found
-  // after processing a list, an error is thrown. Otherwise, the list of
-  // authorized addresses is stored in the FCGIApplicationInterface object.
+  // after processing a list, an error is thrown. Otherwise, a list of
+  // well-formed addresses which have been converted to a normalized
+  // presentation format is stored in the FCGIApplicationInterface object.
   if(socket_domain == AF_INET || socket_domain == AF_INET6)
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS")
     std::string ip_address_list {(ip_address_list_ptr) ?
       std::string(ip_address_list_ptr) : ""};
-    if(ip_address_list) // A non-empty address list was bound.
+    if(ip_address_list.size() != 0) // A non-empty address list was bound.
     {
       // Declare appropriate variables to use with inet_pton() and inet_ntop().
       // These structs are internal to struct sockaddr_in and struct sockaddr_in6.
@@ -94,6 +144,7 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
       char normalized_address[INET6_ADDRSTRLEN];
 
       // Construct a tokenizer to split the string into address tokens.
+      // The -1 option selects non-matching substrings and, hence, tokens.
       std::regex comma_tokenizer {","};
       std::sregex_token_iterator token_it {ip_address_list.begin(),
         ip_address_list.end(), comma_tokenizer, -1};
@@ -103,16 +154,20 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
       // every well-formed address to the set of authorized addresses.
       for(; token_it != end; ++token_it)
       {
-        if(inet_pton(socket_domain, (token_it->str()).data(),
-          inet_address_subaddress_ptr) == 1)
+        int inet_pton_return {};
+        if((inet_pton_return = inet_pton(socket_domain, (token_it->str()).data(),
+          inet_address_subaddress_ptr)) == 1)
         {
           if(!inet_ntop(socket_domain, inet_address_subaddress_ptr,
             normalized_address, INET6_ADDRSTRLEN))
             throw std::runtime_error {ERRNO_ERROR_STRING("inet_ntop")};
+          valid_ip_address_set_.insert(normalized_address);
         }
+        else if(inet_pton_return == -1)
+          throw std::runtime_error {ERRNO_ERROR_STRING("inet_pton")};
       }
-    }
-  }
+    } // End non-empty environment variable value check.
+  } // End internet domain check.
 }
 
 std::vector<fcgi_synchronous_interface::FCGIRequest>
@@ -132,7 +187,7 @@ AcceptRequests()
   if((auto map_reverse_iter {record_status_map_.rbegin()}) !=
      record_status_map_.rend()) // Reverse to access highest fd immediately.
   {
-    number_for_select = (map_reverse_iter->first) + 1; // Use highest fd + 1.
+    number_for_select = (map_reverse_iter->first) + 1; // Use (highest fd) + 1.
     for(; map_reverse_iter != record_status_map_.rend(); ++map_reverse_iter)
       FD_SET(map_reverse_iter->first, &read_set);
   }
@@ -670,82 +725,101 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   return result; // Default (null) RequestIdentifier if not assinged to.
 } // Release interface_state_mutex_.
 
-// TODO Refactor with new cases for implicit calls to accept.
 ssize_t fcgi_synchronous_interface::FCGIApplicationInterface::
-Accept()
+AcceptConnection()
 {
-  sockaddr new_connection_address_struct;
-  socklen_t new_connection_address_length;
-  int new_connection_descriptor = accept(0, &new_connection_address_struct, &new_connection_address_length);
-  if(new_connection_descriptor == -1)
-    // TODO Errno check on socket errors.
-    return -1;
-  if(valid_ip_address_list_.size())
+  struct sockaddr_storage new_connection_address;
+  socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
+  int accept_return {};
+  while((accept_return = accept(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
+    &new_connection_address, &new_connection_address_length)) == -1
+    && errno == EINTR){}
+  if(accept_return == -1)
   {
-    std::string address_string {} // = TODO Address-to-string conversion function.
-    if (valid_ip_address_set_.find(address_string) == valid_ip_address_set_.end())
-    {
-      // Invalid connection; reject.
-      new_connection_descriptor.close();
-      // TODO write the address of the invalid connection to a log.
+    if(errno == EWOULDBLOCK || errno == EAGAIN)
       return -1;
-    }
+    else if(errno == ECONNABORTED)
+        return 0;
+    else
+      throw std::runtime_error(ERRNO_ERROR_STRING("accept"));
   }
-  // Make accepted connections non-blocking.
-  int flags = fcntl(new_connection_descriptor, F_GETFL);
+  // The call to accept() returned a file descriptor for a new connected socket.
+  int new_socket_descriptor {accept_return};
+
+  // Check that the connected socket has the same domain as the listening
+  // socket and that it is a stream socket.
+  int getsockopt_int_buffer {};
+  socklen_t getsockopt_int_buffer_size {sizeof(int)};
+  int getsockopt_return {};
+
+  while((getsockopt_return = getsockopt(new_socket_descriptor,
+    SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 && errno == EINTR){}
+  if(getsockopt_return == -1)
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
+  int new_socket_domain {getsockopt_int_buffer};
+
+  getsockopt_int_buffer_size = sizeof(int);
+  while((getsockopt_return = getsockopt(new_socket_descriptor,
+    SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 && errno == EINTR){}
+  if(getsockopt_return == -1)
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
+  int new_socket_type {getsockopt_int_buffer};
+
+  // Perform address validation against the list of authorized addresses
+  // if applicable. A non-empty set implies an internet domain.
+  std::string new_address {};
+  if(valid_ip_address_set_.size())
+  {
+    char address_array[INET6_ADDRSTRLEN];
+    void* addr_ptr {(new_socket_domain == AF_INET) ?
+      &(((struct sockaddr_in*)&new_connection_address)->in_addr)
+      : &(((struct sockaddr_in6*)&new_connection_address)->in6_addr)}
+    if(!inet_ntop(new_socket_domain, addr_ptr, address_array, INET6_ADDRSTRLEN))
+      throw std::runtime_error {ERRNO_ERROR_STRING("inet_ntop")};
+    new_address = address_array;
+  }
+
+  // Validate the new connected socket against the gathered information.
+  if(new_socket_domain != socket_domain_ || new_socket_type != SOCK_STREAM
+     || (valid_ip_address_set_.size() > 0
+         && (valid.find(new_address) == valid_ip_address_set_.end())))
+  {
+    try {linux_scw::CloseWithErrorCheck(new_socket_descriptor)}
+    catch(std::runtime_error& e)
+    {
+      std::string error_message {e.what()};
+      error_message += ERROR_STRING("A call to CloseWithErrorCheck threw an error which could not be handled.")
+      throw std::runtime_error {error_message};
+    }
+    return 0;
+  }
+
+  // Make the accepted connected sockets non-blocking.
+  int flags {};
+  while((flags = fcntl(new_connection_descriptor, F_GETFL)) == -1
+    && errno == EINTR){}
   if(flags == -1);
-    // TODO: error reporting procedure?
+    throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
+
   flags |= O_NONBLOCK;
-  if(fcntl(new_connection_descriptor, F_SETFL, flags) == -1);
-    // TODO: error reporting procedure? See above.
-  return new_connection_descriptor;
-}
 
-size_t fcgi_synchronous_interface::FCGIApplicationInterface::
-NonblockingPollingSocketWrite(int fd, const uint8_t* buffer_ptr, size_t count)
-{
-  size_t number_remaining {count};
-  ssize_t number_returned {};
+  while((flags = fcntl(new_connection_descriptor, F_SETFL)) == -1
+    && errno == EINTR){}
+  if(flags == -1);
+    throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
-  while(number_remaining > 0)
-  {
-    number_returned = write(fd, static_cast<void*>(buffer_ptr), number_remaining);
-    if(number_returned == -1)
-    {
-      if(errno == EINTR || errno = EAGAIN || errno = EWOULDBLOCK)
-        number_returned = 0;
-      else break; // Error value that doesn't permit re-calling write().
-    }
-    number_remaining -= number_returned;
-    buffer_ptr += number_returned;
-  }
-  return count - number_remaining;
-}
+  // Update interface state to reflect the new connection.
+  record_status_map_[new_socket_descriptor] = RecordStatus {};
+  std::unique_pointer<std::mutex> new_mutex_manager {new std::mutex};
+  // Acquire interface_state_mutex_ to access shared state.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  write_mutex_map_[new_socket_descriptor] = std::move(new_mutex_manager);
+  request_count_map_[new_socket_descriptor] = 0;
 
-size_t fcgi_synchronous_interface::FCGIApplicationInterface::
-NonblockingSocketRead(int fd, uint8_t* buffer_ptr, size_t count)
-{
-  size_t number_remaining {count};
-  ssize_t number_returned {};
-
-  while(number_remaining > 0)
-  {
-    number_returned = read(fd, static_cast<void*>(buffer_ptr), number_remaining);
-    if(number_returned == 0)
-    {
-      errno = 0;
-      break;
-    }
-    else if(number_returned == -1)
-    {
-      if(errno == EINTR) number_returned = 0;
-      else break;
-    }
-    number_remaining -= number_returned;
-    buffer_ptr += number_returned;
-  }
-  return count - number_remaining;
-}
+  return new_socket_descriptor;
+} // Release interface_state_mutex_.
 
 uint32_t fcgi_synchronous_interface::FCGIApplicationInterface::
 ExtractFourByteLength(const uint8_t* content_ptr) const
@@ -841,18 +915,17 @@ void RemoveConnectionFromSharedState(int connection)
   application_closure_request_set_.erase(connection);
   request_count_map_.erase(connection);
 
-  // Error checking on close() is currently dependent on how
-  // Linux implements close(). For most errors, Linux guarantees
-  // that the descriptor is closed.
-  if(close(connection) == -1)
+  try
   {
-    if(errno != EINTR)
-      throw std::runtime_error {
-        "RemoveConnectionFromSharedState() encountered an error from a call to\n"
-        "close() which could not be handled. Errno had a value of: \n"
-        + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-        + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
+    linux_system_call_wrappers::CloseWithErrorCheck(connection);
   }
+  catch(std::runtime_error& e)
+  {
+    std::string message {e.what()}
+    message += "A call to RemoveConnectionFromSharedState encountered an error which\n could not be handled from a call to CloseWithErrorCheck."
+    throw std::runtime_error {ERROR_STRING(message)};
+  }
+
 }
 
 void
