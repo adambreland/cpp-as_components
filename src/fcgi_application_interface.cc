@@ -26,6 +26,7 @@
 
 #include "external/error_handling/include/error_handling.h"
 #include "external/linux_scw/include/linux_scw.h"
+#include "external/socket_functions/include/socket_functions.h"
 
 #include "include/data_types.h"
 #include "include/fcgi_application_interface.h"
@@ -96,7 +97,7 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
     SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1 && errno == EINTR){}
   if(getsockopt_return == -1)
-    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN"));
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
   sa_family_t socket_domain {getsockopt_int_buffer};
   socket_domain_ = socket_domain;
 
@@ -105,18 +106,18 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1 & errno == EINTR){}
   if(getsockopt_return == -1)
-    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_TYPE"));
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_TYPE")};
   if(getsockopt_int_buffer != SOCK_STREAM)
-    throw std::runtime_error(ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a stream socket."));
+    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a stream socket.")};
 
   getsockopt_int_buffer_size = sizeof(int);
   while((getsockopt_return = getsockopt(fcgi_synchronous_interface::FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1 & errno == EINTR){}
   if(getsockopt_return == -1)
-    throw std::runtime_error(ERRNO_ERROR_STRING("getsockopt with SO_ACCEPTCONN"));
+    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_ACCEPTCONN")};
   if(getsockopt_int_buffer != 1) // The value 1 is used to indicate listening status.
-    throw std::runtime_error(ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a listening socket."));
+    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a listening socket.")};
 
   // For internet domains, check for IP addresses which the parent process
   // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
@@ -170,6 +171,24 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   } // End internet domain check.
 }
 
+inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
+get_overload() const
+{
+  return application_overload_;
+}
+
+inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
+set_overload()
+{
+  application_overload_ = true;
+}
+
+inline int fcgi_synchronous_interface::FCGIApplicationInterface::
+connection_count() const
+{
+  return record_status_map_.size();
+}
+
 std::vector<fcgi_synchronous_interface::FCGIRequest>
 fcgi_synchronous_interface::FCGIApplicationInterface::
 AcceptRequests()
@@ -199,11 +218,7 @@ AcceptRequests()
     select(number_for_select, &read_set, nullptr, nullptr, nullptr))
     == -1 && (errno == EINTR || errno == EAGAIN)){}
   if(select_return == -1) // Unrecoverable error from select().
-    throw std::runtime_error {
-      "An error from a call to select() could not be handled.\n"
-      "Errno had a value of:\n"
-      + std::to_string(errno) + '\n' + std::strerror(errno) + '\n'
-      + __FILE__ + "\n" + "Line: " + std::to_string(__LINE__) + '\n'};
+    throw std::runtime_error {ERRNO_ERROR_STRING("select")};
 
   // Start reading data from ready connections.
   // Check connected sockets (as held in record_status_map_) before the
@@ -228,26 +243,11 @@ AcceptRequests()
   }
 }
 
-inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
-get_overload() const
-{
-  return application_overload_;
-}
 
-inline bool fcgi_synchronous_interface::FCGIApplicationInterface::
-set_overload()
-{
-  application_overload_ = true;
-}
-
-inline std::map<int, RecordStatus>::size_type
-fcgi_synchronous_interface::FCGIApplicationInterface::
-connection_count() const
-{
-  return record_status_map_.size();
-}
 
 // Helper functions
+
+
 
 std::vector<RequestIdentifier>
 fcgi_synchronous_interface::FCGIApplicationInterface::
@@ -267,7 +267,7 @@ Read(int connection)
     // Read from socket.
     int number_bytes_processed = 0;
     int number_bytes_received =
-      NonblockingSocketRead(connection, read_buffer, kBufferSize);
+      socket_functions::NonblockingSocketRead(connection, read_buffer, kBufferSize);
 
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
@@ -401,7 +401,6 @@ Read(int connection)
           if(request_id) request_identifiers.push_back(request_id);
         }
         // Loop to check if more received bytes need to be processed.
-
       } // On exit, looped through all received data as partitioned by record
         // segments.
     }
@@ -410,7 +409,6 @@ Read(int connection)
     // were handled above.
     if(bytes_received < kBufferSize)
     break;
-
   } // On exit, end while loop which keeps reading from the socket.
 
   return request_identifiers;
@@ -422,7 +420,7 @@ bool SendRecord(int connection, const std::basic_string<uint8_t>& result)
   std::lock_guard<std::mutex> write_lock {write_mutex_map_[connection]};
 
   // Send record.
-  size_t number_written = NonblockingPollingSocketWrite(connection,
+  size_t number_written = socket_functions::NonblockingPollingSocketWrite(connection,
     result.data(), result.size());
   if(number_written < result.size())
     if(errno == EPIPE)
@@ -436,9 +434,9 @@ bool fcgi_synchronous_interface::FCGIApplicationInterface::
 SendGetValueResult(int connection, const RecordStatus& record_status)
 {
   std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-    get_value_pairs
-    {ProcessBinaryNameValuePairs(record_status.local_record_content_buffer.size(),
-     record_status.local_record_content_buffer.data())};
+    get_value_pairs {fcgi_synchronous_interface::
+      ProcessBinaryNameValuePairs(record_status.local_record_content_buffer.size(),
+      record_status.local_record_content_buffer.data())};
 
   std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
     result_pairs {};
@@ -479,12 +477,14 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
     uint32_t item_size(pair_iter->first.size());
     (item_size <= fcgi_synchronous_interface::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      EncodeFourByteLength(four_byte_mask | item_size, &result);
+      fcgi_synchronous_interface::EncodeFourByteLength(four_byte_mask | item_size,
+        &result);
     // Encode value temp_length
     item_size = pair_iter->second.size();
     (item_size <= fcgi_synchronous_interface::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      EncodeFourByteLength(four_byte_mask | item_size, &result);
+      fcgi_synchronous_interface::EncodeFourByteLength(four_byte_mask | item_size,
+        &result);
     // Append character bytes of name and value.
     result.append(pair_iter->first);
     result.append(pair_iter->second);
@@ -821,95 +821,8 @@ AcceptConnection()
   return new_socket_descriptor;
 } // Release interface_state_mutex_.
 
-uint32_t fcgi_synchronous_interface::FCGIApplicationInterface::
-ExtractFourByteLength(const uint8_t* content_ptr) const
-{
-  uint32_t length {*content_ptr & 0x7f}; // mask out leading 1;
-  // Perform three shifts by 8 bits to extract all four bytes.
-  for(char i {0}; i < 3; i++)
-  {
-    length <<= 8;
-    content_ptr++;
-    length += *content_ptr;
-  }
-  return length;
-}
-
-void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
-{
-  for(char i {0}; i < 4; i++)
-  {
-    string_ptr->push_back(length >> (24 - (8*i)));
-  }
-}
-
-std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-fcgi_synchronous_interface::FCGIApplicationInterface::
-ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
-{
-  int bytes_processed {0};
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-  result {};
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-  error_result {};
-
-  while(bytes_processed < content_length)
-  {
-    uint32_t name_length;
-    uint32_t value_length;
-    bool name_length_bit = *content_ptr >> 7;
-    bool value_length_bit;
-
-    // Extract name length.
-    if(name_length_bit)
-    {
-      if((bytes_processed + 3) > content_length)
-        return error_result; // Not enough information to continue.
-      name_length = ExtractFourByteLength(content_ptr);
-      bytes_processed += 4;
-      content_ptr += 4;
-    }
-    else
-    {
-      name_length = *content_ptr;
-      bytes_processed += 1;
-      content_ptr += 1;
-    }
-
-    // Extract value length.
-    if((bytes_processed + 1) > content_length)
-      return error_result;
-    value_length_bit = *content_ptr >> 7;
-    if(value_length_bit)
-    {
-      if((bytes_processed + 3) > content_length)
-        return error_result; // Not enough information to continue.
-      value_length = ExtractFourByteLength(content_ptr);
-      bytes_processed += 4;
-      content_ptr += 4;
-    }
-    else
-    {
-      value_length = *content_ptr;
-      bytes_processed += 1;
-      content_ptr += 1;
-    }
-
-    // Extract name and value as byte strings.
-    if((bytes_processed + name_length + value_length) > content_length)
-      return error_result; // Not enough information to continue.
-    std::basic_string<uint8_t> name {content_ptr, name_length};
-    content_ptr += name_length;
-    std::basic_string<uint8_t> value {content_ptr, value_length};
-    content_ptr += value_length;
-    bytes_processed += (name_length + value_length);
-    result.emplace_back(std::move(name), std::move(value));
-  } // End while (no more pairs to process).
-
-  return result;
-}
-
-void RemoveConnectionFromSharedState(int connection)
+void fcgi_synchronous_interface::FCGIApplicationInterface::
+RemoveConnectionFromSharedState(int connection)
 {
   write_mutex_map_.erase(connection);
   application_closure_request_set_.erase(connection);
@@ -925,11 +838,9 @@ void RemoveConnectionFromSharedState(int connection)
     message += "A call to RemoveConnectionFromSharedState encountered an error which\n could not be handled from a call to CloseWithErrorCheck."
     throw std::runtime_error {ERROR_STRING(message)};
   }
-
 }
 
-void
-fcgi_synchronous_interface::FCGIApplicationInterface::
+void fcgi_synchronous_interface::FCGIApplicationInterface::
 ClosedConnectionFoundDuringAcceptRequests(int connection)
 {
   // Remove the connection from the record_status_map_ so that it is not

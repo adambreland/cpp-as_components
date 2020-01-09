@@ -41,7 +41,8 @@ public:
   ~FCGIRequest() = default;
 
 private:
-  friend std::vector<FCGIRequest> AcceptRequests();
+  friend std::vector<FCGIRequest>
+  fcgi_synchronous_interface::FCGIApplicationInterface::AcceptRequests();
 
   // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects.
@@ -65,6 +66,10 @@ private:
   // values (empty containers, false) or have no effect (e.g. a second
   // call to complete).
   bool completed_;
+
+  // Synchronization
+  const std::unique_pointer<std::mutex>& write_access_ref_;
+  std::mutex& interface_state_mutex_ref_;
 };
 
 } // namespace fcgi_synchronous_interface

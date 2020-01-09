@@ -21,12 +21,12 @@ namespace fcgi_synchronous_interface {
 
 class FCGIApplicationInterface {
 public:
-  std::vector<FCGIRequest> AcceptRequests();
-
   bool get_overload() const;
   void set_overload(bool overload_status);
 
-  std::map<int, RecordStatus>::size_type connection_count() const;
+  int connection_count() const;
+
+  std::vector<FCGIRequest> AcceptRequests();
 
   // No copy, move, or default construction.
   FCGIApplicationInterface() = delete;
@@ -71,25 +71,6 @@ private:
 
   void RemoveConnectionFromSharedState(int connection);
 
-  // Returns the length in bytes of a name or value when it is encoded
-  // using four bytes in the FastCGI name-value pair encoding. Names and
-  // values are variable length byte arrays.
-  //
-  // Parameters:
-  // content_ptr: points to the first byte of the byte sequence which
-  // determines the length of the corresponding name or value byte sequence.
-  //
-  // Requires:
-  // 1) The byte pointed to by content_ptr and the next three bytes constitute
-  //    a four-byte length as per the FastCGI name-value encoding.
-  //
-  // Effects:
-  // 1) The value returned is the length in bytes of the corresponding name or
-  //    value byte array.
-  uint32_t ExtractFourByteLength(const uint8_t* content_ptr) const;
-
-  void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr);
-
   bool SendRecord(int connection, const std::basic_string<uint8_t>& result);
 
   bool SendGetValueResult(int connection, const RecordStatus& record_status);
@@ -98,32 +79,6 @@ private:
 
   bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                           uint8_t protocol_status, int32_t app_status);
-
-  // Extracts a collection of name-value pairs when they are encoded as a
-  // sequence of bytes in the FastCGI name-value pair encoding.
-  // Note: Checking if content_length is zero before calling allows for
-  // the detection of an empty collection of name-value pairs.
-  //
-  // Parameters:
-  // content_length: the total size of the sequence of bytes which constitutes
-  // the collection of name-value pairs.
-  // content_ptr: points to the first byte of the byte sequence.
-  //
-  // Requires:
-  // 1) The value of content_length is exactly equal to the number of bytes
-  //    which represent the collection of name-value parirs. This number does
-  //    not include the byte length of a FastCGI record header.
-  //
-  // Effects:
-  // 1) If a sequential application of the encoding rules to the encountered
-  //    length values gives a length which is equal to content_length, a vector
-  //    is returned of the name-value pairs extracted from content_length bytes.
-  //    The pairs are of type:
-  //    std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>.
-  // 2) If content_length was not long enough for the extracted sequence of
-  //    name-value pairs, an empty vector is returned.
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-  ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
 
   // Examines the completed record associated with the connected socket
   // represented by connection and performs various actions according to
