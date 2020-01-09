@@ -8,7 +8,7 @@
 #include <mutex>
 #include <utility>
 
-namespace fcgi_synchronous_interface {
+namespace fcgi_si {
 
 // Protocol Constants
   // General
@@ -108,7 +108,9 @@ public:
 
   bool IsRequestComplete() const;
 
-  fcgi_synchronous_interface::RequestStatus get_status() const;
+  fcgi_si::RequestStatus get_status() const;
+
+  bool ProcessFCGI_PARAMS();
 
   bool get_PARAMS_completion() const;
   void CompletePARAMS();
@@ -134,7 +136,11 @@ public:
   ~RequestData() = default;
 
 private:
-  // request data and completion status
+  // Make FCGIRequest a friend class as its constructor will move data
+  // from the representation of RequestData objects.
+  friend class FCGIRequest;
+
+  // Request data and completion status
   bool FCGI_PARAMS_complete_;
   bool FCGI_STDIN_complete_;
   bool FCGI_DATA_complete_;
@@ -142,7 +148,11 @@ private:
   std::basic_string<uint8_t> FCGI_STDIN_;
   std::basic_string<uint8_t> FCGI_DATA_;
 
-  // request metadata
+  // Map to hold processed FCGI_PARAMS_ data.
+  std::map<std::basic_string<uint8_t>, std::basic_string<unint8_t>>
+    environment_map_;
+
+  // Request metadata
   uint16_t role_;
   bool abort_;
   bool close_connection_;
@@ -194,6 +204,6 @@ void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_pt
 std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
 
-} // namespace fcgi_synchronous_interface
+} // namespace fcgi_si
 
 #endif // FCGI_APPLICATION_INTERFACE_DATA_TYPES_H_

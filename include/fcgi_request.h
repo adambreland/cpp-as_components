@@ -9,7 +9,7 @@
 // C++ standard headers.
 #include <map>
 
-namespace fcgi_synchronous_interface {
+namespace fcgi_si {
 
 class FCGIRequest {
 public:
@@ -41,12 +41,14 @@ public:
   ~FCGIRequest() = default;
 
 private:
-  friend std::vector<FCGIRequest>
-  fcgi_synchronous_interface::FCGIApplicationInterface::AcceptRequests();
+  friend std::vector<FCGIRequest> fcgi_si::FCGIApplicationInterface::
+    AcceptRequests();
 
   // Constructor made private as only an FCGIApplicationInterface object
-  // should create FCGIRequest objects.
-  FCGIRequest(RequestIdentifier request_id);
+  // should create FCGIRequest objects through calls to AcceptRequests().
+  FCGIRequest(fcgi_si::RequestIdentifier request_id,
+    fcgi_si::Request_Data* request_data_ptr, <std::mutex>* write_mutex_ptr,
+    std::mutex* interface_state_mutex_ptr);
 
   RequestIdentifier request_identifier_;
 
@@ -68,10 +70,10 @@ private:
   bool completed_;
 
   // Synchronization
-  const std::unique_pointer<std::mutex>& write_access_ref_;
-  std::mutex& interface_state_mutex_ref_;
+  std::mutex* write_mutex_ptr_;
+  std::mutex* interface_state_mutex_ptr_;
 };
 
-} // namespace fcgi_synchronous_interface
+} // namespace fcgi_si
 
 #endif // FCGI_APPLICATION_INTERFACE_FCGI_REQUEST_H_

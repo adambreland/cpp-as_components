@@ -4,7 +4,7 @@
 
 #include "include/data_types.h"
 
-fcgi_synchronous_interface::RequestIdentifier::
+fcgi_si::RequestIdentifier::
 RequestIdentifier(int descriptor, uint16_t FCGI_id)
 : pair_ {descriptor, FCGI_id}
 {
@@ -16,24 +16,24 @@ RequestIdentifier(int descriptor, uint16_t FCGI_id)
   }
 }
 
-fcgi_synchronous_interface::RequestIdentifier::operator bool()
+fcgi_si::RequestIdentifier::operator bool()
 {
   return (pair_.first || pair_.second) ? true : false;
 }
 
-bool fcgi_synchronous_interface::RequestIdentifier::
+bool fcgi_si::RequestIdentifier::
 operator<(const RequestIdentifier& rhs)
 {
   // Lexical ordering on Connections X RequestIDs.
   return (pair_ < rhs.pair_);
 }
 
-int fcgi_synchronous_interface::RequestIdentifier::descriptor()
+int fcgi_si::RequestIdentifier::descriptor()
 {
   return pair_.first;
 }
 
-uint16_t fcgi_synchronous_interface::RequestIdentifier::FCGI_id()
+uint16_t fcgi_si::RequestIdentifier::FCGI_id()
 {
   return pair_.second;
 }

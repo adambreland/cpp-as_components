@@ -1,4 +1,4 @@
-uint32_t fcgi_synchronous_interface::
+uint32_t fcgi_si::
 ExtractFourByteLength(const uint8_t* content_ptr) const
 {
   uint32_t length {*content_ptr & 0x7f}; // mask out leading 1;
@@ -12,7 +12,7 @@ ExtractFourByteLength(const uint8_t* content_ptr) const
   return length;
 }
 
-void fcgi_synchronous_interface::
+void fcgi_si::
 EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
 {
   for(char i {0}; i < 4; i++)
@@ -22,7 +22,7 @@ EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
 }
 
 std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
-fcgi_synchronous_interface::
+fcgi_si::
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
 {
   int bytes_processed {0};

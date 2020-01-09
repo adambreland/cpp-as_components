@@ -17,7 +17,7 @@
 #include "include/data_types.h"
 #include "include/fcgi_request.h"
 
-namespace fcgi_synchronous_interface {
+namespace fcgi_si {
 
 class FCGIApplicationInterface {
 public:
@@ -75,7 +75,7 @@ private:
 
   bool SendGetValueResult(int connection, const RecordStatus& record_status);
 
-  bool SendFCGIUnknownType(int connection, fcgi_synchronous_interface::FCGIType type);
+  bool SendFCGIUnknownType(int connection, fcgi_si::FCGIType type);
 
   bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                           uint8_t protocol_status, int32_t app_status);
@@ -267,8 +267,8 @@ private:
     uint16_t content_bytes_expected;
     uint8_t padding_bytes_expected;
 
-    fcgi_synchronous_interface::FCGIType type;
-    fcgi_synchronous_interface::RequestIdentifier request_id;
+    fcgi_si::FCGIType type;
+    fcgi_si::RequestIdentifier request_id;
 
     // When the header is completed, the record is either rejected or
     // accepted. This is performed by UpdateAfterHeaderCompletion.
@@ -285,6 +285,6 @@ private:
 
 };
 
-} // namespace fcgi_synchronous_interface.
+} // namespace fcgi_si.
 
 #endif // FCGI_APPLICATION_INTERFACE_FCGI_APPLICATION_INTERFACE_H_
