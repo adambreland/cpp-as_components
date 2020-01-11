@@ -332,7 +332,7 @@ fcgi_si::FCGIApplicationInterface::Read(int connection)
 
             // Update record_status as header has been completed.
             // Part of this update is conditionally setting the rejected flag.
-            record_status.UpdateAfterHeaderCompletion(connection);
+            record_status.UpdateAfterHeaderCompletion(this, connection);
           }
           else // Need more than we have to complete header.
           {
@@ -930,4 +930,4 @@ ClosedConnectionFoundDuringAcceptRequests(int connection)
     RemoveConnectionFromSharedState(connection);
   else
     connections_found_closed_set_.insert(connection);
-}
+} // Release interface_state_mutex_.

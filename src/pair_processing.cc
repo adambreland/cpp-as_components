@@ -1,7 +1,13 @@
+#include <cstdint>
+#include <vector>
+
+#include "include/data_types.h"
+
 uint32_t fcgi_si::
-ExtractFourByteLength(const uint8_t* content_ptr) const
+ExtractFourByteLength(const uint8_t* content_ptr)
 {
-  uint32_t length {*content_ptr & 0x7f}; // mask out leading 1;
+  // mask out leading 1;
+  uint32_t length {static_cast<uint32_t>(*content_ptr & 0x7f)};
   // Perform three shifts by 8 bits to extract all four bytes.
   for(char i {0}; i < 3; i++)
   {
@@ -43,7 +49,7 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
     {
       if((bytes_processed + 3) > content_length)
         return error_result; // Not enough information to continue.
-      name_length = ExtractFourByteLength(content_ptr);
+      name_length = fcgi_si::ExtractFourByteLength(content_ptr);
       bytes_processed += 4;
       content_ptr += 4;
     }
@@ -62,7 +68,7 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
     {
       if((bytes_processed + 3) > content_length)
         return error_result; // Not enough information to continue.
-      value_length = ExtractFourByteLength(content_ptr);
+      value_length = fcgi_si::ExtractFourByteLength(content_ptr);
       bytes_processed += 4;
       content_ptr += 4;
     }
@@ -76,14 +82,26 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
     // Extract name and value as byte strings.
     if((bytes_processed + name_length + value_length) > content_length)
       return error_result; // Not enough information to continue.
-    std::vector<uint8_t> name {content_ptr, name_length};
+    std::vector<uint8_t> name {fcgi_si::ConvertToByteVector(content_ptr, name_length)};
     content_ptr += name_length;
-    std::vector<uint8_t> value {content_ptr, value_length};
+    std::vector<uint8_t> value {fcgi_si::ConvertToByteVector(content_ptr, value_length)};
     content_ptr += value_length;
     bytes_processed += (name_length + value_length);
     result.emplace_back(std::move(name), std::move(value));
   } // End while (no more pairs to process).
 
+  return result;
+}
+
+std::vector<uint8_t>
+fcgi_si::ConvertToByteVector(const uint8_t* content_ptr, uint32_t content_length)
+{
+  std::vector<uint8_t> result {};
+  for(uint32_t i {0}; i < content_length; i++)
+  {
+    result.push_back(*content_ptr);
+    content_ptr++;
+  }
   return result;
 }
 

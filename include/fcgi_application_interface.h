@@ -58,8 +58,10 @@ private:
   // 4) The header of every record is stored locally. Valid header bytes are
   //    determined by the value of bytes_received.
   struct RecordStatus {
+
     // May implicitly acquire interface_state_mutex_.
-    void UpdateAfterHeaderCompletion(int connection);
+    void UpdateAfterHeaderCompletion(FCGIApplicationInterface* i_ptr,
+      int connection);
 
     uint32_t ExpectedBytes();
 

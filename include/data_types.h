@@ -216,6 +216,9 @@ void EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* string_ptr);
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
 
+std::vector<uint8_t>
+ConvertToByteVector(const uint8_t* content_ptr, uint32_t content_length);
+
 std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si

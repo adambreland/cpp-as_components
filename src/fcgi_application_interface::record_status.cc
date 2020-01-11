@@ -10,10 +10,12 @@
 fcgi_si::FCGIApplicationInterface::RecordStatus::
 RecordStatus()
 : bytes_received {0}, content_bytes_expected {0}, padding_bytes_expected {0},
-  type {0}, request_id {}, invalid_record {false}
+  type {static_cast<fcgi_si::FCGIType>(0)}, request_id {}, invalid_record {false}
 {}
 
-RecordStatus& operator=(RecordStatus&& record_status)
+fcgi_si::FCGIApplicationInterface::RecordStatus&
+fcgi_si::FCGIApplicationInterface::RecordStatus::
+operator=(RecordStatus&& record_status)
 {
   if(this != &record_status)
   {
@@ -27,14 +29,14 @@ RecordStatus& operator=(RecordStatus&& record_status)
     padding_bytes_expected = record_status.padding_bytes_expected;
     type = record_status.type;
     request_id = record_status.request_id;
-    rejected = record_status.rejected;
+    invalid_record = record_status.invalid_record;
     local_record_content_buffer = std::move(record_status.local_record_content_buffer);
   }
   return *this;
 }
 
 void fcgi_si::FCGIApplicationInterface::RecordStatus::
-UpdateAfterHeaderCompletion(int connection)
+UpdateAfterHeaderCompletion(FCGIApplicationInterface* i_ptr, int connection)
 {
   // Extract number of content bytes from two bytes.
   content_bytes_expected =
@@ -48,7 +50,7 @@ UpdateAfterHeaderCompletion(int connection)
     header[fcgi_si::kHeaderPaddingLengthIndex];
 
   // Extract type and request_id.
-  type = header[fcgi_si::kHeaderTypeIndex];
+  type = static_cast<fcgi_si::FCGIType>(header[fcgi_si::kHeaderTypeIndex]);
   uint16_t FCGI_request_id =
     header[fcgi_si::kHeaderRequestIDB1Index];
   FCGI_request_id << 8; // one byte
@@ -66,36 +68,36 @@ UpdateAfterHeaderCompletion(int connection)
 
   // Not a management record. Use type to determine rejection.
   // Acquire the interface state mutex to access current RequestIdentifiers.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-  auto request_map_iter {request_map_.find(request_id)};
+  std::lock_guard<std::mutex> interface_state_lock {i_ptr->interface_state_mutex_};
+  auto request_map_iter {i_ptr->request_map_.find(request_id)};
   switch(type)
   {
     case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
-      invalid_record = (request_map_iter != request_map_.end())
+      invalid_record = (request_map_iter != i_ptr->request_map_.end());
       break;
     }
     case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
-      invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_abort())
+      invalid_record = (request_map_iter == i_ptr->request_map_.end()
+        || request_map_iter->second.get_abort());
       break;
     }
     case fcgi_si::FCGIType::kFCGI_PARAMS : {
-      invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_FCGI_PARAMS_completion())
+      invalid_record = (request_map_iter == i_ptr->request_map_.end()
+        || request_map_iter->second.get_PARAMS_completion());
       break;
     }
     case fcgi_si::FCGIType::kFCGI_STDIN : {
-      invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_FCGI_STDIN_completion())
+      invalid_record = (request_map_iter == i_ptr->request_map_.end()
+        || request_map_iter->second.get_STDIN_completion());
       break;
     }
     case fcgi_si::FCGIType::kFCGI_DATA : {
-      invalid_record = request_map_iter == request_map_.end()
-        || request_map_iter->second.get_FCGI_DATA_completion())
+      invalid_record = (request_map_iter == i_ptr->request_map_.end()
+        || request_map_iter->second.get_DATA_completion());
       break;
     }
     // No other cases should occur. Reject any others.
-    default {
+    default : {
       invalid_record = true;
     }
   } // end switch
