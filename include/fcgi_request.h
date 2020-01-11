@@ -13,6 +13,8 @@
 
 namespace fcgi_si {
 
+class FCGIApplicationInterface;
+
 class FCGIRequest {
 public:
   const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
@@ -43,7 +45,7 @@ public:
   ~FCGIRequest() = default;
 
 private:
-  //friend std::vector<FCGIRequest> FCGIApplicationInterface::AcceptRequests();
+  friend class fcgi_si::FCGIApplicationInterface;
 
   // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects through calls to AcceptRequests().

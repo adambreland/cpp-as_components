@@ -4,6 +4,10 @@
 
 #include "include/data_types.h"
 
+fcgi_si::RequestIdentifier::RequestIdentifier()
+: pair_ {0, 0}
+{}
+
 fcgi_si::RequestIdentifier::
 RequestIdentifier(int descriptor, uint16_t FCGI_id)
 : pair_ {descriptor, FCGI_id}
@@ -16,18 +20,6 @@ RequestIdentifier(int descriptor, uint16_t FCGI_id)
   }
 }
 
-fcgi_si::RequestIdentifier::operator bool()
-{
-  return (pair_.first || pair_.second) ? true : false;
-}
-
-bool fcgi_si::RequestIdentifier::
-operator<(const RequestIdentifier& rhs)
-{
-  // Lexical ordering on Connections X RequestIDs.
-  return (pair_ < rhs.pair_);
-}
-
 int fcgi_si::RequestIdentifier::descriptor() const
 {
   return pair_.first;
@@ -36,4 +28,40 @@ int fcgi_si::RequestIdentifier::descriptor() const
 uint16_t fcgi_si::RequestIdentifier::FCGI_id() const
 {
   return pair_.second;
+}
+
+bool fcgi_si::RequestIdentifier::operator==(const RequestIdentifier& rhs) const
+{
+  return pair_ == rhs.pair_;
+}
+
+bool fcgi_si::RequestIdentifier::operator!=(const RequestIdentifier& rhs) const
+{
+  return pair_ != rhs.pair_;
+}
+
+bool fcgi_si::RequestIdentifier::operator<(const RequestIdentifier& rhs) const
+{
+  // Lexical ordering on Connections X RequestIDs.
+  return (pair_ < rhs.pair_);
+}
+
+bool fcgi_si::RequestIdentifier::operator<=(const RequestIdentifier& rhs) const
+{
+  return (pair_ <= rhs.pair_);
+}
+
+bool fcgi_si::RequestIdentifier::operator>(const RequestIdentifier& rhs) const
+{
+  return (pair_ > rhs.pair_);
+}
+
+bool fcgi_si::RequestIdentifier::operator>=(const RequestIdentifier& rhs) const
+{
+  return (pair_ >= rhs.pair_);
+}
+
+fcgi_si::RequestIdentifier::operator bool() const
+{
+  return (pair_.first || pair_.second) ? true : false;
 }

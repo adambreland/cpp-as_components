@@ -4,6 +4,7 @@
 // C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint8_t.
 // C++ standard headers.
+#include <vector>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -78,7 +79,7 @@ public:
   int descriptor() const;
   uint16_t FCGI_id() const;
 
-  RequestIdentifier() = default;
+  RequestIdentifier();
   RequestIdentifier(int descriptor, uint16_t FCGI_id);
   RequestIdentifier(const RequestIdentifier& request_id) = default;
   RequestIdentifier(RequestIdentifier&& request_id) = default;
@@ -86,7 +87,15 @@ public:
   RequestIdentifier& operator=(const RequestIdentifier& request_id) = default;
   RequestIdentifier& operator=(RequestIdentifier&& request_id) = default;
 
-  bool operator<(const RequestIdentifier& rhs);
+  bool operator==(const RequestIdentifier& rhs) const;
+  bool operator!=(const RequestIdentifier& rhs) const;
+
+  bool operator<(const RequestIdentifier& rhs) const;
+  bool operator<=(const RequestIdentifier& rhs) const;
+  bool operator>(const RequestIdentifier& rhs) const;
+  bool operator>=(const RequestIdentifier& rhs) const;
+
+  explicit operator bool() const;
 
   ~RequestIdentifier() = default;
 
@@ -128,13 +137,13 @@ public:
   void AppendToDATA(const uint8_t* buffer_ptr, size count);
 
   // No copy or move.
-  RequestData() = delete;
+  RequestData() = default;
   RequestData(uint16_t role, bool close_connection);
   RequestData(const RequestData&) = delete;
-  RequestData(RequestData&&) = delete;
+  RequestData(RequestData&&) = default;
 
   RequestData& operator=(const RequestData&) = delete;
-  RequestData& operator=(RequestData&&) = delete;
+  RequestData& operator=(RequestData&&) = default;
 
   ~RequestData() = default;
 
@@ -206,6 +215,8 @@ void EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* string_ptr);
 //    name-value pairs, an empty vector is returned.
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
+
+std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si
 

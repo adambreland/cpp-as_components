@@ -86,3 +86,12 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
 
   return result;
 }
+
+std::vector<uint8_t> fcgi_si::uint32_tToUnsignedCharacterVector(uint32_t c)
+{
+  std::string c_string {std::to_string(c)};
+  std::vector<uint8_t> c_vector {};
+  for(int i {0}; i < c_string.size(); i++)
+    c_vector.push_back(static_cast<uint8_t>(c_string[i]));
+  return c_vector;
+}

@@ -245,8 +245,9 @@ AcceptRequests()
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
             request_data_ptr = &(request_map_.find(request_id)->second);
           } // Release interface_state_mutex_.
-          requests.emplace_back(request_id, request_data_ptr, write_mutex_ptr,
-            interface_state_mutex_ptr);
+          fcgi_si::FCGIRequest request {request_id, request_data_ptr, write_mutex_ptr,
+            interface_state_mutex_ptr};
+          requests.push_back(std::move(request));
         }
       }
     }
@@ -478,17 +479,18 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
     if(iter->first == fcgi_si::FCGI_MAX_CONNS)
     {
       result_pairs.emplace_back(iter->first,
-        std::to_string(maximum_connection_count_));
+        fcgi_si::uint32_tToUnsignedCharacterVector(maximum_connection_count_));
     }
     else if(iter->first == fcgi_si::FCGI_MAX_REQS)
     {
       result_pairs.emplace_back(iter->first,
-        std::to_string(maximum_request_count_per_connection_));
+        fcgi_si::uint32_tToUnsignedCharacterVector(maximum_request_count_per_connection_));
     }
     else if(iter->first == fcgi_si::FCGI_MPXS_CONNS)
     {
-      result_pairs.emplace_back(iter->first,
-        (maximum_request_count_per_connection_ > 1) ? "1" : "0");
+      std::vector<uint8_t> v {(maximum_request_count_per_connection_ > 1) ?
+        static_cast<uint8_t>('1') : static_cast<uint8_t>('0')};
+      result_pairs.emplace_back(iter->first, v);
     }
   }
 
@@ -662,8 +664,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   {}
   else // The record must be a valid application record. Process it.
   {
-    fcgi_si::RequestIdentifier request_id
-      {connection, record_status.request_id.FCGI_id()};
+    fcgi_si::RequestIdentifier request_id {record_status.request_id};
 
     // Obtain interface_state_mutex_ to access state.
     std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
@@ -703,7 +704,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
                   fcgi_si::kBeginRequestFlagsIndex]
                 & fcgi_si::FCGI_KEEP_CONN);
 
-            request_map_.emplace(request_id, role, close_connection);
+            request_map_[request_id] = RequestData(role, close_connection);
             request_count_it->second++;
           }
         }

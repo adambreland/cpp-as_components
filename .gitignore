@@ -3,5 +3,7 @@
 *.a
 *.so
 *.out
+*.s
+*.i
 
 external/*
