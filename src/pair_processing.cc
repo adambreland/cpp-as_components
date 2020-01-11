@@ -13,22 +13,22 @@ ExtractFourByteLength(const uint8_t* content_ptr) const
 }
 
 void fcgi_si::
-EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr)
+EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* vector_ptr)
 {
   for(char i {0}; i < 4; i++)
   {
-    string_ptr->push_back(length >> (24 - (8*i)));
+    vector_ptr->push_back(length >> (24 - (8*i)));
   }
 }
 
-std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 fcgi_si::
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
 {
   int bytes_processed {0};
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
   result {};
-  std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
   error_result {};
 
   while(bytes_processed < content_length)
@@ -76,9 +76,9 @@ ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
     // Extract name and value as byte strings.
     if((bytes_processed + name_length + value_length) > content_length)
       return error_result; // Not enough information to continue.
-    std::basic_string<uint8_t> name {content_ptr, name_length};
+    std::vector<uint8_t> name {content_ptr, name_length};
     content_ptr += name_length;
-    std::basic_string<uint8_t> value {content_ptr, value_length};
+    std::vector<uint8_t> value {content_ptr, value_length};
     content_ptr += value_length;
     bytes_processed += (name_length + value_length);
     result.emplace_back(std::move(name), std::move(value));

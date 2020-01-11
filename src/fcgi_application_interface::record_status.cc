@@ -13,21 +13,23 @@ RecordStatus()
   type {0}, request_id {}, invalid_record {false}
 {}
 
-RecordStatus& operator=(const RecordStatus& record_status)
+RecordStatus& operator=(RecordStatus&& record_status)
 {
-  for(char i {0}; i < fcgi_si::FCGI_HEADER_LEN; i++)
+  if(this != &record_status)
   {
-    header[i] = record_status.header[i];
+    for(char i {0}; i < fcgi_si::FCGI_HEADER_LEN; i++)
+    {
+      header[i] = record_status.header[i];
+    }
+
+    bytes_received = record_status.bytes_received;
+    content_bytes_expected = record_status.content_bytes_expected;
+    padding_bytes_expected = record_status.padding_bytes_expected;
+    type = record_status.type;
+    request_id = record_status.request_id;
+    rejected = record_status.rejected;
+    local_record_content_buffer = std::move(record_status.local_record_content_buffer);
   }
-
-  bytes_received = record_status.bytes_received;
-  content_bytes_expected = record_status.content_bytes_expected;
-  padding_bytes_expected = record_status.padding_bytes_expected;
-  type = record_status.type;
-  request_id = record_status.request_id;
-  rejected = record_status.rejected;
-  local_record_content_buffer = record_status.local_record_content_buffer;
-
   return *this;
 }
 

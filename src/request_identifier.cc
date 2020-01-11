@@ -28,12 +28,12 @@ operator<(const RequestIdentifier& rhs)
   return (pair_ < rhs.pair_);
 }
 
-int fcgi_si::RequestIdentifier::descriptor()
+int fcgi_si::RequestIdentifier::descriptor() const
 {
   return pair_.first;
 }
 
-uint16_t fcgi_si::RequestIdentifier::FCGI_id()
+uint16_t fcgi_si::RequestIdentifier::FCGI_id() const
 {
   return pair_.second;
 }

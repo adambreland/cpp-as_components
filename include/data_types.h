@@ -12,25 +12,28 @@ namespace fcgi_si {
 
 // Protocol Constants
   // General
-constexpr int                        FCGI_LISTENSOCK_FILENO         {0};
-constexpr int                        FCGI_HEADER_LEN                {8};
-constexpr uint8_t                    FCGI_VERSION_1                 {1};
-constexpr uint16_t                   FCGI_NULL_REQUEST_ID           {0};
+constexpr int                          FCGI_LISTENSOCK_FILENO         {0};
+constexpr int                          FCGI_HEADER_LEN                {8};
+constexpr uint8_t                      FCGI_VERSION_1                 {1};
+constexpr uint16_t                     FCGI_NULL_REQUEST_ID           {0};
   // Flags
-constexpr uint8_t                    FCGI_KEEP_CONN                 {1};
+constexpr uint8_t                      FCGI_KEEP_CONN                 {1};
   // Roles
-constexpr uint16_t                   FCGI_RESPONDER                 {1};
-constexpr uint16_t                   FCGI_AUTHORIZER                {2};
-constexpr uint16_t                   FCGI_FILTER                    {3};
+constexpr uint16_t                     FCGI_RESPONDER                 {1};
+constexpr uint16_t                     FCGI_AUTHORIZER                {2};
+constexpr uint16_t                     FCGI_FILTER                    {3};
   // Protocol status values for FCGI_END_REQUEST records.
-constexpr uint8_t                    FCGI_REQUEST_COMPLETE          {0};
-constexpr uint8_t                    FCGI_CANT_MPX_CONN             {1};
-constexpr uint8_t                    FCGI_OVERLOADED                {2};
-constexpr uint8_t                    FCGI_UNKNOWN_ROLE              {3};
+constexpr uint8_t                      FCGI_REQUEST_COMPLETE          {0};
+constexpr uint8_t                      FCGI_CANT_MPX_CONN             {1};
+constexpr uint8_t                      FCGI_OVERLOADED                {2};
+constexpr uint8_t                      FCGI_UNKNOWN_ROLE              {3};
   // Default FCGI_GET_VALUES record variables.
-const     std::string                FCGI_MAX_CONNS                 {"FCGI_MAX_CONNS"};
-const     std::string                FCGI_MAX_REQS                  {"FCGI_MAX_REQS"};
-const     std::string                FCGI_MPXS_CONNS                {"FCGI_MPXS_CONNS"};
+const     std::vector<uint8_t>   FCGI_MAX_CONNS
+            {70, 67, 71, 73, 95, 77, 65, 88, 95, 67, 79, 78, 78, 83};
+const     std::vector<uint8_t>   FCGI_MAX_REQS
+            {70, 67, 71, 73, 95, 77, 65, 88, 95, 82, 69, 81, 83};
+const     std::vector<uint8_t>   FCGI_MPXS_CONNS
+            {70, 67, 71, 73, 95, 77, 80, 88, 83, 95, 67, 79, 78, 78, 83};
 
 // Implementation Constants (determined by current protocol features)
   // Header byte position definitions
@@ -72,8 +75,8 @@ enum class FCGIType : uint8_t
 
 class RequestIdentifier {
 public:
-  int descriptor();
-  uint16_t FCGI_id();
+  int descriptor() const;
+  uint16_t FCGI_id() const;
 
   RequestIdentifier() = default;
   RequestIdentifier(int descriptor, uint16_t FCGI_id);
@@ -82,7 +85,7 @@ public:
 
   RequestIdentifier& operator=(const RequestIdentifier& request_id) = default;
   RequestIdentifier& operator=(RequestIdentifier&& request_id) = default;
-  operator bool();
+
   bool operator<(const RequestIdentifier& rhs);
 
   ~RequestIdentifier() = default;
@@ -144,12 +147,12 @@ private:
   bool FCGI_PARAMS_complete_;
   bool FCGI_STDIN_complete_;
   bool FCGI_DATA_complete_;
-  std::basic_string<uint8_t> FCGI_PARAMS_;
-  std::basic_string<uint8_t> FCGI_STDIN_;
-  std::basic_string<uint8_t> FCGI_DATA_;
+  std::vector<uint8_t> FCGI_PARAMS_;
+  std::vector<uint8_t> FCGI_STDIN_;
+  std::vector<uint8_t> FCGI_DATA_;
 
   // Map to hold processed FCGI_PARAMS_ data.
-  std::map<std::basic_string<uint8_t>, std::basic_string<unint8_t>>
+  std::map<std::vector<uint8_t>, std::vector<uint8_t>>
     environment_map_;
 
   // Request metadata
@@ -174,9 +177,9 @@ private:
 // Effects:
 // 1) The value returned is the length in bytes of the corresponding name or
 //    value byte array.
-uint32_t ExtractFourByteLength(const uint8_t* content_ptr) const;
+uint32_t ExtractFourByteLength(const uint8_t* content_ptr);
 
-void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_ptr);
+void EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* string_ptr);
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
@@ -198,10 +201,10 @@ void EncodeFourByteLength(uint32_t length, std::basic_string<uint8_t>* string_pt
 //    length values gives a length which is equal to content_length, a vector
 //    is returned of the name-value pairs extracted from content_length bytes.
 //    The pairs are of type:
-//    std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>.
+//    std::pair<std::vector<uint8_t>, std::vector<uint8_t>>.
 // 2) If content_length was not long enough for the extracted sequence of
 //    name-value pairs, an empty vector is returned.
-std::vector<std::pair<std::basic_string<uint8_t>, std::basic_string<uint8_t>>>
+std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
 
 } // namespace fcgi_si

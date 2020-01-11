@@ -1,3 +1,5 @@
+#include <utility>
+
 #include "include/data_types.h"
 
 fcgi_si::FCGIRequest(fcgi_si::RequestIdentifier request_id,
@@ -12,4 +14,6 @@ fcgi_si::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   completed_                 {false},
   write_mutex_ptr_           {write_mutex_ptr},
   interface_state_mutex_ptr_ {interface_state_mutex_ptr}
-{}
+{
+  request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
+}

@@ -51,7 +51,8 @@ inline void fcgi_si::RequestData::CompletePARAMS()
 void fcgi_si::RequestData::
 AppendToPARAMS(const uint8_t* buffer_ptr, size count)
 {
-  FCGI_PARAMS_.append(buffer_ptr, count);
+  for(int i {0}; i < count; i++)
+    FCGI_PARAMS_.push_back(*(buffer_ptr + i));
 }
 
 // STDIN
@@ -69,7 +70,8 @@ inline void fcgi_si::RequestData::CompleteSTDIN()
 void fcgi_si::RequestData::
 AppendToSTDIN(const uint8_t* buffer_ptr, size count)
 {
-  FCGI_STDIN_.append(buffer_ptr, count);
+  for(int i {0}; i < count; i++)
+    FCGI_STDIN_.push_back(*(buffer_ptr + i));
 }
 
 // DATA
@@ -87,5 +89,6 @@ inline void fcgi_si::RequestData::CompleteDATA()
 void fcgi_si::RequestData::
 AppendToDATA(const uint8_t* buffer_ptr, size count)
 {
-  FCGI_DATA_.append(buffer_ptr, count);
+  for(int i {0}; i < count; i++)
+    FCGI_DATA_.push_back(*(buffer_ptr + i));
 }

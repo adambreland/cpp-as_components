@@ -9,20 +9,22 @@
 // C++ standard headers.
 #include <map>
 
+#include "include/fcgi_application_interface.h"
+
 namespace fcgi_si {
 
 class FCGIRequest {
 public:
-  const std::map<std::basic_string<uint8_t>, std::basic_string<uint8_t>>&
+  const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
   get_environment_map() const;
-  const std::basic_string<uint8_t>& get_STDIN() const;
-  const std::basic_string<uint8_t>& get_DATA() const;
+  const std::vector<uint8_t>& get_STDIN() const;
+  const std::vector<uint8_t>& get_DATA() const;
 
   bool get_abort() const;
   uint16_t get_role() const;
 
-  void Write(std::basic_string<uint8_t> response) const;
-  void WriteError(std::basic_string<uint8_t> error_message) const;
+  void Write(std::vector<uint8_t> response) const;
+  void WriteError(std::vector<uint8_t> error_message) const;
 
   ssize_t SendFile(int in_fd, off_t* offset_ptr, size_t count) const;
   ssize_t SendFile(std::string pathname) const;
@@ -41,21 +43,19 @@ public:
   ~FCGIRequest() = default;
 
 private:
-  friend std::vector<FCGIRequest> fcgi_si::FCGIApplicationInterface::
-    AcceptRequests();
+  //friend std::vector<FCGIRequest> FCGIApplicationInterface::AcceptRequests();
 
   // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects through calls to AcceptRequests().
   FCGIRequest(fcgi_si::RequestIdentifier request_id,
-    fcgi_si::Request_Data* request_data_ptr, <std::mutex>* write_mutex_ptr,
+    fcgi_si::RequestData* request_data_ptr, std::mutex* write_mutex_ptr,
     std::mutex* interface_state_mutex_ptr);
 
   RequestIdentifier request_identifier_;
 
-  std::map<std::basic_string<uint8_t>,
-           std::basic_string<uint8_t>> environment_map_;
-  std::basic_string<uint8_t> request_stdin_content_;
-  std::basic_string<uint8_t> request_data_content_;
+  std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;
+  std::vector<uint8_t> request_stdin_content_;
+  std::vector<uint8_t> request_data_content_;
 
   // For inspection of the role requested by the client server.
   uint16_t role_;
