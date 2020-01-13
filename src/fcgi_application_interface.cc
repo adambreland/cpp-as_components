@@ -196,6 +196,42 @@ AcceptRequests()
   // Result to return.
   std::vector<fcgi_si::FCGIRequest> requests {};
 
+  // Process connections which were found to have been closed by the peer
+  // and connections which were requested to be closed through FCGIRequest
+  // objects. Start with connections_found_closed_set_ as we can remove
+  // connections which can be closed in this set from
+  // application_closure_request_set_.
+  std::vector<int> connection_skip_set {};
+  // ACQUIRE interface_state_mutex_.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  for(auto conn_iter {connections_found_closed_set_.begin()};
+      conn_iter != connections_found_closed_set_.end();)
+  {
+    auto request_map_iter
+      {request_map_.lower_bound(RequestIdentifier {connection, 0})};
+    // Check if there are no requests and, hence, no assigned requests.
+    // Unassigned requests were removed when the connection was added to the
+    // set and cannot be generated after that addition from the removal of the
+    // connection from record_status_map_.
+    if(request_map_iter == request_map_.end()
+       || request_map_iter->first > connection)
+      // application_closure_request_set_ is handled by the call.
+    {
+      RemoveConnectionFromSharedState(connection);
+      // Safely remove the connection.
+      auto conn_iter_erase = conn_iter;
+      ++conn_iter;
+      connections_found_closed_set_.erase(conn_iter_erase);
+    }
+    else // Requests are present. There is no point to search again.
+    {
+      connection_skip_set.push_back(*conn_iter);
+      ++conn_iter; // Maintain loop discipline.
+    }
+  }
+  // TODO other set!
+}
+
   // Construct descriptor set to wait on for select.
   fd_set read_set;
   FD_ZERO(&read_set);
@@ -242,9 +278,10 @@ AcceptRequests()
         {
           fcgi_si::RequestData* request_data_ptr {nullptr};
           {
+            // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
             request_data_ptr = &(request_map_.find(request_id)->second);
-          } // Release interface_state_mutex_.
+          } // RELEASE interface_state_mutex_.
           fcgi_si::FCGIRequest request {request_id, request_data_ptr, write_mutex_ptr,
             interface_state_mutex_ptr};
           requests.push_back(std::move(request));

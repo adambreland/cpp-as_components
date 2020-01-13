@@ -108,12 +108,12 @@ private:
   // AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation.
   //
-  // Parameters: none.
-  //
   // Requires:
   // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
   //    a listening socket.
   // 2) May implicitly acquire interface_state_mutex_. This must be allowed.
+  //
+  // Parameters: none.
   //
   // Effects:
   // 1) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the

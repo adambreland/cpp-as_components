@@ -2,7 +2,7 @@
 #define FCGI_APPLICATION_INTERFACE_FCGI_REQUEST_H_
 
 // Unix type declarations.
-#include <sys/types.h>   // For ssize_t.
+#include <sys/types.h>     // For ssize_t.
 
 // C standard library headers in the C++ standard library.
 #include <cstdint>         // For uint8_t.
