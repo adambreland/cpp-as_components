@@ -231,6 +231,8 @@ private:
 
   std::vector<RequestIdentifier> Read(int connection);
 
+  bool UnassignedRequestCleanup(int connection);
+
   // Configuration parameters:
   // TODO change to a light-weight, static-optimized set class.
   int socket_domain_;

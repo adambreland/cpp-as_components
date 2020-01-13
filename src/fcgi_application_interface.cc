@@ -202,35 +202,63 @@ AcceptRequests()
   // connections which can be closed in this set from
   // application_closure_request_set_.
   std::vector<int> connection_skip_set {};
-  // ACQUIRE interface_state_mutex_.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-  for(auto conn_iter {connections_found_closed_set_.begin()};
-      conn_iter != connections_found_closed_set_.end();)
   {
-    auto request_map_iter
-      {request_map_.lower_bound(RequestIdentifier {connection, 0})};
-    // Check if there are no requests and, hence, no assigned requests.
-    // Unassigned requests were removed when the connection was added to the
-    // set and cannot be generated after that addition from the removal of the
-    // connection from record_status_map_.
-    if(request_map_iter == request_map_.end()
-       || request_map_iter->first > connection)
-      // application_closure_request_set_ is handled by the call.
+    // ACQUIRE interface_state_mutex_.
+    std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+    for(auto closed_conn_iter {connections_found_closed_set_.begin()};
+        closed_conn_iter != connections_found_closed_set_.end();
+        /*no-op*/)
     {
-      RemoveConnectionFromSharedState(connection);
-      // Safely remove the connection.
-      auto conn_iter_erase = conn_iter;
-      ++conn_iter;
-      connections_found_closed_set_.erase(conn_iter_erase);
+      // Check if there are no requests and, hence, no assigned requests.
+      // Unassigned requests were removed when the connection was added to the
+      // set and cannot be generated after that addition from the removal of the
+      // connection from record_status_map_.
+      if(request_count_map_[*closed_conn_iter] == 0)
+      {
+        // application_closure_request_set_ is handled by the call.
+        RemoveConnectionFromSharedState(*closed_conn_iter);
+        // Safely remove the connection.
+        auto closed_conn_iter_erase = closed_conn_iter;
+        ++closed_conn_iter;
+        connections_found_closed_set_.erase(closed_conn_iter_erase);
+      }
+      else // Requests are present. There is no point to search again.
+      {
+        connection_skip_set.push_back(*closed_conn_iter);
+        ++closed_conn_iter;
+      }
     }
-    else // Requests are present. There is no point to search again.
+    auto connection_skip_set_iter {connection_skip_set.begin()};
+    for(auto close_request_conn_iter {application_closure_request_set_.begin()};
+        close_request_conn_iter != application_closure_request_set_.end();
+        /*no-op*/)
     {
-      connection_skip_set.push_back(*conn_iter);
-      ++conn_iter; // Maintain loop discipline.
+      // Maintain skip set discipline and skip connections which have requests.
+      if(connection_skip_set_iter != connection_skip_set.end())
+      {
+        if(*close_request_conn_iter > *connection_skip_set_iter)
+          ++connection_skip_set_iter;
+        else if(*close_request_conn_iter == *connection_skip_set_iter)
+        {
+          ++connection_skip_set_iter;
+          ++close_request_conn_iter;
+          continue;
+        }
+      }
+      // Check for requests which have been exposed to the application.
+      // Requests which have not been received in full are deleted.
+      bool assigned_req {UnassignedRequestCleanup(*close_request_conn_iter)};
+      if(!assigned_req)
+      {
+        // Safely remove the connection from application_closure_request_set_.
+        auto close_request_conn_erase_iter {close_request_conn_iter};
+        ++close_request_conn_iter;
+        record_status_map_.erase(*close_request_conn_erase_iter);
+        // Connection removed from application_closure_request_set_ here.
+        RemoveConnectionFromSharedState(*close_request_conn_erase_iter);
+      }
     }
-  }
-  // TODO other set!
-}
+  } // RELEASE interface_state_mutex_.
 
   // Construct descriptor set to wait on for select.
   fd_set read_set;
@@ -941,30 +969,41 @@ ClosedConnectionFoundDuringAcceptRequests(int connection)
 
   // Iterate over requests: delete unassigned requests and check for
   // assigned requests.
-  bool active_requests_present {false};
-  // Acquire interface_state_mutex_ to access and modify shared state.
+  // ACQUIRE interface_state_mutex_ to access and modify shared state.
   std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-  for(auto request_map_iter =
-        request_map_.lower_bound(RequestIdentifier {connection, 0});
-      !(request_map_iter == request_map_.end()
-        || request_map_iter->first.descriptor() > connection);
-      ++request_map_iter)
-  {
-    if(request_map_iter->second.get_status() ==
-       fcgi_si::RequestStatus::kRequestAssigned)
-    {
-      active_requests_present = true;
-    }
-    else
-    {
-      request_map_.erase(request_map_iter);
-      request_count_map_[connection]--;
-    }
-  }
+  bool active_requests_present {UnassignedRequestCleanup(connection)};
   // Check if the connection can be closed or assigned requests require
   // closure to be delayed.
   if(!active_requests_present)
     RemoveConnectionFromSharedState(connection);
   else
     connections_found_closed_set_.insert(connection);
-} // Release interface_state_mutex_.
+} // RELEASE interface_state_mutex_.
+
+bool fcgi_si::FCGIApplicationInterface::
+UnassignedRequestCleanup(int connection)
+{
+  bool active_requests_present {false};
+  for(auto request_map_iter =
+        request_map_.lower_bound(RequestIdentifier {connection, 0});
+      !(request_map_iter == request_map_.end()
+        || request_map_iter->first.descriptor() > connection);
+      /*no-op*/)
+  {
+    if(request_map_iter->second.get_status() ==
+       fcgi_si::RequestStatus::kRequestAssigned)
+    {
+      active_requests_present = true;
+      ++request_map_iter;
+    }
+    else
+    {
+      // Safely erase the request.
+      auto request_map_erase_iter {request_map_iter};
+      ++request_map_iter;
+      request_map_.erase(request_map_erase_iter);
+      request_count_map_[connection]--;
+    }
+  }
+  return active_requests_present;
+}
