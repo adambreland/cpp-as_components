@@ -8,11 +8,13 @@
 #include <cstdint>         // For uint8_t.
 // C++ standard headers.
 #include <map>
-
-#include "include/fcgi_application_interface.h"
+#include <mutex>
+#include <vector>
 
 namespace fcgi_si {
 
+// Forward declaration to break cyclic dependency between FCGIRequest
+// and FCGIApplicationInterface includes.
 class FCGIApplicationInterface;
 
 class FCGIRequest {
@@ -24,12 +26,15 @@ public:
 
   bool get_abort() const;
   uint16_t get_role() const;
+  bool get_completion_status() const;
 
-  void Write(std::vector<uint8_t> response) const;
-  void WriteError(std::vector<uint8_t> error_message) const;
+  bool Write(const std::vector<uint8_t>& ref,
+    std::vector<uint8_t>::const_iterator begin_iter,
+    std::vector<uint8_t>::const_iterator end_iter);
+  bool WriteError(std::vector<uint8_t> error_message);
 
-  ssize_t SendFile(int in_fd, off_t* offset_ptr, size_t count) const;
-  ssize_t SendFile(std::string pathname) const;
+  ssize_t SendFile(int in_fd, off_t* offset_ptr, size_t count);
+  ssize_t SendFile(std::string pathname);
 
   void Complete(int32_t app_status);
 
@@ -50,10 +55,16 @@ private:
   // Constructor made private as only an FCGIApplicationInterface object
   // should create FCGIRequest objects through calls to AcceptRequests().
   FCGIRequest(fcgi_si::RequestIdentifier request_id,
-    fcgi_si::RequestData* request_data_ptr, std::mutex* write_mutex_ptr,
-    std::mutex* interface_state_mutex_ptr);
+    fcgi_si::FCGIApplicationInterface* interface_ptr,
+    fcgi_si::RequestData* request_data_ptr,
+    std::mutex* write_mutex_ptr, std::mutex* interface_state_mutex_ptr);
 
-  RequestIdentifier request_identifier_;
+  void SetComplete();
+
+  void WriteHelper(const uint8_t* message_ptr, uint16_t count)
+
+  fcgi_si::FCGIApplicationInterface* interface_ptr_;
+  fcgi_si::RequestIdentifier request_identifier_;
 
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;
   std::vector<uint8_t> request_stdin_content_;
@@ -65,6 +76,10 @@ private:
   // A flag to inform the call to Complete() that the connection associated
   // with the request should be closed by the interface.
   bool close_connection_;
+
+  // A local abort value that is populated when an abort is detected by
+  // the discovery of a closed connection or by inspection with get_abort().
+  bool was_aborted_;
 
   // Forces the object to act as if it is null. Calls will return null
   // values (empty containers, false) or have no effect (e.g. a second

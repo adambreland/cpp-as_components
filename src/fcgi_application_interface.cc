@@ -1001,9 +1001,24 @@ UnassignedRequestCleanup(int connection)
       // Safely erase the request.
       auto request_map_erase_iter {request_map_iter};
       ++request_map_iter;
-      request_map_.erase(request_map_erase_iter);
-      request_count_map_[connection]--;
+      RemoveRequest(request_map_erase_iter);
     }
   }
   return active_requests_present;
+}
+
+void fcgi_si::FCGIApplicationInterface::
+RemoveRequest(fcgi_si::RequestIdentifier request_id)
+{
+  std::map<RequestIdentifier, RequestData>::size_type erase_return
+    {request_map_.erase(request_id)};
+  if(erase_return)
+    request_count_map_[request_id.descriptor()]--;
+}
+
+void fcgi_si::FCGIApplicationInterface::
+RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
+{
+  request_count_map_[request_map_iter->first.connection()]--;
+  request_map_.erase(request_map_iter);
 }

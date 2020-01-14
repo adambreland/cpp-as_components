@@ -41,6 +41,8 @@ public:
   ~FCGIApplicationInterface();
 
 private:
+  friend class fcgi_si::FCGIRequest;
+
   // A struct describing the status of the record currently being received
   // on the connection. This type is a struct to allow the header and
   // bytes_received variables to be accessed directly. Since writes occur
@@ -232,6 +234,10 @@ private:
   std::vector<RequestIdentifier> Read(int connection);
 
   bool UnassignedRequestCleanup(int connection);
+
+  void RemoveRequest(fcgi_si::RequestIdentifier request_id);
+
+  void RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter);
 
   // Configuration parameters:
   // TODO change to a light-weight, static-optimized set class.
