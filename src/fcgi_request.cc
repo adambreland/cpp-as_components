@@ -15,11 +15,14 @@
 #include "external/error_handling/include/error_handling.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/data_types.h"
+#include "include/fcgi_request.h"
+#include "include/fcgi_server_interface.h"
+#include "include/protocol_constants.h"
+#include "include/request_data.h"
+#include "include/request_identifier.h"
 
-
-fcgi_si::FCGIRequest(fcgi_si::RequestIdentifier request_id,
-  fcgi_si::FCGIApplicationInterface* interface_ptr,
+fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
+  fcgi_si::FCGIServerInterface* interface_ptr,
   fcgi_si::RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr, std::mutex* interface_state_mutex_ptr)
 : interface_ptr_             {interface_ptr},
@@ -42,12 +45,12 @@ fcgi_si::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   // construction of an FCGIRequest which will be exposed to the application.
 
   // NOTE that this constructor should only be called by an
-  // FCGIApplicationInterface object. It is assumed that synchronization is
-  // is implicit and that acquiring the shared state mutex is not necessary.
+  // FCGIServerInterface object. It is assumed that synchronization is
+  // implicit and that acquiring the shared state mutex is not necessary.
   request_data_ptr->request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
 }
 
-fcgi_si::FCGIRequest(FCGIRequest&& request)
+fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
 : interface_ptr_             {request.interface_ptr_},
   request_identifier_        {request.request_identifier_},
   environment_map_           {std::move(request.environment_map_)},
@@ -98,74 +101,107 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
   request.interface_state_mutex_ptr_ = nullptr;
 }
 
-const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
+inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
 fcgi_si::FCGIRequest::get_environment_map() const
 {
-  return environemnt_map_;
+  return environment_map_;
 }
 
-const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_STDIN() const
+inline const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_STDIN() const
 {
   return request_stdin_content_;
 }
 
-const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_DATA() const
+inline const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_DATA() const
 {
   return request_data_content_;
 }
 
-bool fcgi_si::FCGIRequest::get_abort() const
+bool fcgi_si::FCGIRequest::get_abort()
 {
   if(completed_ || was_aborted_)
-    return was_aborted;
+    return was_aborted_;
 
   // ACQUIRE interface_state_mutex_ to determine current abort state.
   std::lock_guard<std::mutex> interface_state_lock {*interface_state_mutex_ptr_};
-  auto request_map_iter {interface_ptr->request_map_.find(request_identifier_)};
+  auto request_map_iter = interface_ptr_->request_map_.find(request_identifier_);
   // Include check for absence of request to prevent undefined method call.
   // This check should always pass.
-  if(request_map_iter != request_map_.end())
+  if(request_map_iter != interface_ptr_->request_map_.end())
     if(request_map_iter->second.get_abort())
       return was_aborted_ = true;
 
   return was_aborted_; // i.e. return false.
 } // RELEASE interface_state_mutex_
 
-uint16_t fcgi_si::FCGIRequest::get_role() const
+inline uint16_t fcgi_si::FCGIRequest::get_role() const
 {
   return role_;
 }
 
-bool fcgi_si::FCGIRequest::get_completion_status()
+inline bool fcgi_si::FCGIRequest::get_completion_status() const
 {
   return completed_;
 }
 
-void fcgi_si::FCGIRequest::
-WriteHelper(const std::vector<uint8_t>& ref,
+inline bool fcgi_si::FCGIRequest::Write(const std::vector<uint8_t>& ref,
   std::vector<uint8_t>::const_iterator begin_iter,
-  std::vector<uint8_t>::const_iterator end_iter) const
+  std::vector<uint8_t>::const_iterator end_iter)
+{
+  return true; // pass
+}
+
+inline bool fcgi_si::FCGIRequest::WriteError(const std::vector<uint8_t>& ref,
+  std::vector<uint8_t>::const_iterator begin_iter,
+  std::vector<uint8_t>::const_iterator end_iter)
+{
+  return true; // pass
+}
+
+void fcgi_si::FCGIRequest::Complete(int32_t app_status)
+{
+  // pass
+}
+
+
+// Helper functions
+
+
+
+void fcgi_si::FCGIRequest::
+PartitionByteSequence(const std::vector<uint8_t>& ref,
+  std::vector<uint8_t>::const_iterator begin_iter,
+  std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type)
 {
   if(completed_ || begin_iter == end_iter)
     return;
 
-  // Initialize state for iterative write.
   auto message_length = std::distance(begin_iter, end_iter);
   auto message_offset = std::distance(ref.begin(), begin_iter);
-  const uint8_t* message_ptr = ref.data() + message_offset
+  const uint8_t* message_ptr = ref.data() + message_offset;
 
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
+}
+
+void fcgi_si::FCGIRequest::
+WriteHelper(const uint8_t* message_ptr, uint16_t message_length,
+  std::unique_lock<std::mutex>* lock_ptr, bool acquire_lock, bool release_lock)
+{
   bool acquired_mutex {false};
 
   int select_descriptor_range {request_identifier_.descriptor() + 1};
   fd_set write_set {};
 
+  // Conditionally ACQUIRE write mutex.
+  if(acquire_lock)
+    lock_ptr->lock();
+
   while(message_length > 0)
   {
-    // Conditionally acquire write mutex.
-    if(!write_lock.owns_lock())
+    // Conditionally ACQUIRE write mutex.
+    if(!lock_ptr->owns_lock())
     {
-      write_lock.lock();
+      lock_ptr->lock();
       acquired_mutex = true;
     }
     // *write_mutex_ptr_ is held.
@@ -179,7 +215,8 @@ WriteHelper(const std::vector<uint8_t>& ref,
       if(errno == EAGAIN || errno == EWOULDBLOCK)
       {
         if(write_return == 0 && acquired_mutex)
-          write_lock.unlock();
+          // Conditionally RELEASE write mutex.
+          lock_ptr->unlock();
         else
         {
           message_ptr += write_return;
@@ -212,7 +249,8 @@ WriteHelper(const std::vector<uint8_t>& ref,
         throw std::runtime_error {ERRNO_ERROR_STRING("write from a call to socket_functions::SocketWrite")};
     }
   }
-  write_lock.unlock(); // RELEASE *write_mutex_ptr_.
+  if(release_lock)
+    lock_ptr->unlock(); // Conditionally RELEASE write mutex.
 }
 
 void fcgi_si::FCGIRequest::SetComplete()
@@ -222,7 +260,7 @@ void fcgi_si::FCGIRequest::SetComplete()
     interface_ptr_->RemoveRequest(request_identifier_);
     completed_ = true;
     if(close_connection_)
-      interface_ptr->application_closure_request_set_.insert(
+      interface_ptr_->application_closure_request_set_.insert(
         request_identifier_.descriptor());
   }
 }

@@ -28,14 +28,18 @@
 #include "external/linux_scw/include/linux_scw.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/fcgi_application_interface.h"
-#include "include/data_types.h"
 #include "include/fcgi_request.h"
+#include "include/fcgi_server_interface.h"
+#include "include/pair_processing.h"
+#include "include/protocol_constants.h"
+#include "include/record_status.h"
+#include "include/request_data.h"
+#include "include/request_identifier.h"
 
 // Public member functions
 
-fcgi_si::FCGIApplicationInterface::
-FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
+fcgi_si::FCGIServerInterface::
+FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   uint16_t role)
 : maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
@@ -48,7 +52,7 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   if(role_ != FCGI_RESPONDER)
   {
     construction_argument_error = true;
-    error_message += "An FCGIApplicationInterface object could not be constructed\n";
+    error_message += "An FCGIServerInterface object could not be constructed\n";
     error_message += "as the provided role is not supported.\n";
     error_message += "Provided role: ";
     error_message += std::to_string(role_);
@@ -108,7 +112,7 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   if(getsockopt_return == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_TYPE")};
   if(getsockopt_int_buffer != SOCK_STREAM)
-    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a stream socket.")};
+    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIServerInterface object\nwas not a stream socket.")};
 
   getsockopt_int_buffer_size = sizeof(int);
   while((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
@@ -117,14 +121,14 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   if(getsockopt_return == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_ACCEPTCONN")};
   if(getsockopt_int_buffer != 1) // The value 1 is used to indicate listening status.
-    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIApplicationInterface object\nwas not a listening socket.")};
+    throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIServerInterface object\nwas not a listening socket.")};
 
   // For internet domains, check for IP addresses which the parent process
   // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
   // empty value, any address is authorized. If no valid addresses are found
   // after processing a list, an error is thrown. Otherwise, a list of
   // well-formed addresses which have been converted to a normalized
-  // presentation format is stored in the FCGIApplicationInterface object.
+  // presentation format is stored in the FCGIServerInterface object.
   if(socket_domain == AF_INET || socket_domain == AF_INET6)
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
@@ -171,26 +175,26 @@ FCGIApplicationInterface(uint32_t max_connections, uint32_t max_requests,
   } // End internet domain check.
 }
 
-inline bool fcgi_si::FCGIApplicationInterface::
+inline bool fcgi_si::FCGIServerInterface::
 get_overload() const
 {
   return application_overload_;
 }
 
-inline void fcgi_si::FCGIApplicationInterface::
+inline void fcgi_si::FCGIServerInterface::
 set_overload(bool overload_status)
 {
   application_overload_ = overload_status;
 }
 
-inline int fcgi_si::FCGIApplicationInterface::
+inline int fcgi_si::FCGIServerInterface::
 connection_count() const
 {
   return record_status_map_.size();
 }
 
 std::vector<fcgi_si::FCGIRequest>
-fcgi_si::FCGIApplicationInterface::
+fcgi_si::FCGIServerInterface::
 AcceptRequests()
 {
   // Result to return.
@@ -310,8 +314,8 @@ AcceptRequests()
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
             request_data_ptr = &(request_map_.find(request_id)->second);
           } // RELEASE interface_state_mutex_.
-          fcgi_si::FCGIRequest request {request_id, request_data_ptr, write_mutex_ptr,
-            interface_state_mutex_ptr};
+          fcgi_si::FCGIRequest request {request_id, this, request_data_ptr,
+            write_mutex_ptr, interface_state_mutex_ptr};
           requests.push_back(std::move(request));
         }
       }
@@ -330,8 +334,76 @@ AcceptRequests()
 
 
 
+void fcgi_si::FCGIServerInterface::
+UpdateAfterHeaderCompletion(RecordStatus* rs_ptr, int connection)
+{
+  // Extract number of content bytes from two bytes.
+  rs_ptr->content_bytes_expected =
+    rs_ptr->header[fcgi_si::kHeaderContentLengthB1Index];
+  rs_ptr->content_bytes_expected <<= 8; // one byte
+  rs_ptr->content_bytes_expected +=
+    rs_ptr->header[fcgi_si::kHeaderContentLengthB0Index];
+
+  // Extract number of padding bytes.
+  rs_ptr->padding_bytes_expected =
+    rs_ptr->header[fcgi_si::kHeaderPaddingLengthIndex];
+
+  // Extract type and request_id.
+  rs_ptr->type = static_cast<fcgi_si::FCGIType>(rs_ptr->header[fcgi_si::kHeaderTypeIndex]);
+  uint16_t FCGI_request_id =
+    rs_ptr->header[fcgi_si::kHeaderRequestIDB1Index];
+  FCGI_request_id << 8; // one byte
+  FCGI_request_id +=
+    rs_ptr->header[fcgi_si::kHeaderRequestIDB0Index];
+  rs_ptr->request_id = fcgi_si::
+    RequestIdentifier(connection, FCGI_request_id);
+
+  // Determine if the record should be rejected based on header
+  // information.
+
+  // Every management record is accepted.
+  if(FCGI_request_id == fcgi_si::FCGI_NULL_REQUEST_ID)
+    return;
+
+  // Not a management record. Use type to determine rejection.
+  // Acquire the interface state mutex to access current RequestIdentifiers.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  auto request_map_iter = request_map_.find(rs_ptr->request_id);
+  switch(rs_ptr->type)
+  {
+    case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
+      rs_ptr->invalid_record = (request_map_iter != request_map_.end());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
+      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_abort());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_PARAMS : {
+      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_PARAMS_completion());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_STDIN : {
+      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_STDIN_completion());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_DATA : {
+      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
+        || request_map_iter->second.get_DATA_completion());
+      break;
+    }
+    // No other cases should occur. Reject any others.
+    default : {
+      rs_ptr->invalid_record = true;
+    }
+  } // end switch
+} // interface_state_mutex_ released here.
+
 std::vector<fcgi_si::RequestIdentifier>
-fcgi_si::FCGIApplicationInterface::Read(int connection)
+fcgi_si::FCGIServerInterface::Read(int connection)
 {
   // Number of bytes read at a time from connected sockets.
   constexpr int kBufferSize {512};
@@ -397,7 +469,7 @@ fcgi_si::FCGIApplicationInterface::Read(int connection)
 
             // Update record_status as header has been completed.
             // Part of this update is conditionally setting the rejected flag.
-            record_status.UpdateAfterHeaderCompletion(this, connection);
+            UpdateAfterHeaderCompletion(&record_status, connection);
           }
           else // Need more than we have to complete header.
           {
@@ -509,7 +581,7 @@ fcgi_si::FCGIApplicationInterface::Read(int connection)
   return request_identifiers;
 }
 
-bool fcgi_si::FCGIApplicationInterface::
+bool fcgi_si::FCGIServerInterface::
 SendRecord(int connection, const std::vector<uint8_t>& result)
 {
   // Obtain the write mutex for the connection.
@@ -526,7 +598,7 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   return true;
 }
 
-bool fcgi_si::FCGIApplicationInterface::
+bool fcgi_si::FCGIServerInterface::
 SendGetValueResult(int connection, const RecordStatus& record_status)
 {
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
@@ -623,7 +695,7 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
   return SendRecord(connection, result);
 }
 
-bool fcgi_si::FCGIApplicationInterface::
+bool fcgi_si::FCGIServerInterface::
 SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
 {
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
@@ -656,7 +728,7 @@ SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
   return SendRecord(connection, result);
 }
 
-bool fcgi_si::FCGIApplicationInterface::
+bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                    uint8_t protocol_status, int32_t app_status)
 {
@@ -710,7 +782,7 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   return SendRecord(connection, result);
 }
 
-fcgi_si::RequestIdentifier fcgi_si::FCGIApplicationInterface::
+fcgi_si::RequestIdentifier fcgi_si::FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
   RequestIdentifier result {};
@@ -845,7 +917,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
-ssize_t fcgi_si::FCGIApplicationInterface::
+ssize_t fcgi_si::FCGIServerInterface::
 AcceptConnection()
 {
   struct sockaddr_storage new_connection_address;
@@ -941,7 +1013,7 @@ AcceptConnection()
   return new_socket_descriptor;
 } // Release interface_state_mutex_.
 
-void fcgi_si::FCGIApplicationInterface::
+void fcgi_si::FCGIServerInterface::
 RemoveConnectionFromSharedState(int connection)
 {
   write_mutex_map_.erase(connection);
@@ -960,7 +1032,7 @@ RemoveConnectionFromSharedState(int connection)
   }
 }
 
-void fcgi_si::FCGIApplicationInterface::
+void fcgi_si::FCGIServerInterface::
 ClosedConnectionFoundDuringAcceptRequests(int connection)
 {
   // Remove the connection from the record_status_map_ so that it is not
@@ -980,7 +1052,7 @@ ClosedConnectionFoundDuringAcceptRequests(int connection)
     connections_found_closed_set_.insert(connection);
 } // RELEASE interface_state_mutex_.
 
-bool fcgi_si::FCGIApplicationInterface::
+bool fcgi_si::FCGIServerInterface::
 UnassignedRequestCleanup(int connection)
 {
   bool active_requests_present {false};
@@ -1007,7 +1079,7 @@ UnassignedRequestCleanup(int connection)
   return active_requests_present;
 }
 
-void fcgi_si::FCGIApplicationInterface::
+void fcgi_si::FCGIServerInterface::
 RemoveRequest(fcgi_si::RequestIdentifier request_id)
 {
   std::map<RequestIdentifier, RequestData>::size_type erase_return
@@ -1016,9 +1088,9 @@ RemoveRequest(fcgi_si::RequestIdentifier request_id)
     request_count_map_[request_id.descriptor()]--;
 }
 
-void fcgi_si::FCGIApplicationInterface::
+void fcgi_si::FCGIServerInterface::
 RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
 {
-  request_count_map_[request_map_iter->first.connection()]--;
+  request_count_map_[request_map_iter->first.descriptor()]--;
   request_map_.erase(request_map_iter);
 }
