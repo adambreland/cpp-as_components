@@ -66,8 +66,8 @@ private:
     std::vector<uint8_t>::const_iterator begin_iter,
     std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type);
 
-  void WriteHelper(const uint8_t* message_ptr, uint16_t message_length,
-    std::unique_lock<std::mutex>* lock_ptr, bool acquire_lock, bool release_lock);
+  void WriteHelper(std::unique_lock<std::mutex>* lock_ptr, const uint8_t* message_ptr,
+    uint16_t message_length, bool acquire_lock, bool release_lock);
 
   fcgi_si::FCGIServerInterface* interface_ptr_;
   fcgi_si::RequestIdentifier request_identifier_;

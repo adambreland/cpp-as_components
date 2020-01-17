@@ -180,12 +180,72 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
   auto message_offset = std::distance(ref.begin(), begin_iter);
   const uint8_t* message_ptr = ref.data() + message_offset;
 
+  // Determine the number of full records and the length of a partial record
+  // if present. Determine the padding length for the partial record.
+  decltype(message_length) full_record_count
+    {message_length / fcgi_si::kMaxRecordContentByteLength};
+  uint16_t partial_record_length
+    {static_cast<uint16_t>(message_length % fcgi_si::kMaxRecordContentByteLength)};
+  uint8_t padding_count {(partial_record_length % 8) ?
+    static_cast<uint8_t>(8 - (partial_record_length % 8))} :
+    static_cast<uint8_t>(0);
+
+  uint8_t padding[8] = {}; // Initialize to all zeroes.
+
+  // Populate header for full records.
+  uint8_t header[8];
+  header[fcgi_si::kHeaderVersionIndex]         =
+    fcgi_si::FCGI_VERSION_1;
+  header[fcgi_si::kHeaderTypeIndex]            =
+    static_cast<uint8_t>(type);
+  header[fcgi_si::kHeaderRequestIDB1Index]     =
+    static_cast<uint8_t>(request_identifier_.FCGI_id() >> 8);
+  header[fcgi_si::kHeaderRequestIDB0Index]     =
+    static_cast<uint8_t>(request_identifier_.FCGI_id());
+  header[fcgi_si::kHeaderContentLengthB1Index] =
+    0xff; // A full record has a content length value with a bit sequence of 8 ones.
+  header[fcgi_si::kHeaderContentLengthB0Index] =
+    0xff;
+  header[fcgi_si::kHeaderPaddingLengthIndex]   =
+    0;
+  header[fcgi_si::kHeaderReservedByteIndex]    =
+    0;
+
+  // Create a lock for use by WriteHelper.
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
+
+  if(full_record_count)
+  {
+    for(decltype(message_length) i {0}; i < full_record_count; i++)
+    {
+      WriteHelper(&write_lock, header, 8, true, false);
+      WriteHelper(&write_lock, message_ptr, fcgi_si::kMaxRecordContentByteLength,
+        false, true);
+      message_ptr += fcgi_si::kMaxRecordContentByteLength;
+    }
+  }
+  if(partial_record_length)
+  {
+    // Modify header for partial record.
+    header[fcgi_si::kHeaderContentLengthB1Index] =
+      static_cast<uint8_t>(partial_record_length >> 8);
+    header[fcgi_si::kHeaderContentLengthB0Index] =
+      static_cast<uint8_t>(partial_record_length);
+    header[fcgi_si::kHeaderPaddingLengthIndex]   =
+      padding_count;
+
+    bool send_padding {padding_count > 0};
+
+    WriteHelper(&write_lock, header, 8, true, false);
+    WriteHelper(&write_lock, message_ptr, partial_record_length, false, !send_padding);
+    if(send_padding)
+      WriteHelper(&write_lock, padding, padding_count, false, true);
+  }
 }
 
 void fcgi_si::FCGIRequest::
-WriteHelper(const uint8_t* message_ptr, uint16_t message_length,
-  std::unique_lock<std::mutex>* lock_ptr, bool acquire_lock, bool release_lock)
+WriteHelper(std::unique_lock<std::mutex>* lock_ptr, const uint8_t* message_ptr,
+  uint16_t message_length, bool acquire_lock, bool release_lock)
 {
   bool acquired_mutex {false};
 
