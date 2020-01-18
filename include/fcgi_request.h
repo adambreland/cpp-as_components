@@ -21,21 +21,44 @@ class FCGIServerInterface;
 
 class FCGIRequest {
 public:
-  const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
-  get_environment_map() const;
-  const std::vector<uint8_t>& get_STDIN() const;
-  const std::vector<uint8_t>& get_DATA() const;
+  inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
+  get_environment_map() const
+  {
+    return environment_map_;
+  }
+  inline const std::vector<uint8_t>& get_STDIN() const
+  {
+    return request_stdin_content_;
+  }
+  inline const std::vector<uint8_t>& get_DATA() const
+  {
+    return request_data_content_;
+  }
 
   bool get_abort();
-  uint16_t get_role() const;
-  bool get_completion_status() const;
+  inline uint16_t get_role() const
+  {
+    return role_;
+  }
+  inline bool get_completion_status() const
+  {
+    return completed_;
+  }
 
-  bool Write(const std::vector<uint8_t>& ref,
+  inline bool Write(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
-    std::vector<uint8_t>::const_iterator end_iter);
-  bool WriteError(const std::vector<uint8_t>& ref,
+    std::vector<uint8_t>::const_iterator end_iter)
+  {
+    return PartitionByteSequence(ref, begin_iter, end_iter,
+      fcgi_si::FCGIType::kFCGI_STDOUT);
+  }
+  inline bool WriteError(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
-    std::vector<uint8_t>::const_iterator end_iter);
+    std::vector<uint8_t>::const_iterator end_iter)
+  {
+    return PartitionByteSequence(ref, begin_iter, end_iter,
+      fcgi_si::FCGIType::kFCGI_STDERR);
+  }
 
   void Complete(int32_t app_status);
 
@@ -62,12 +85,12 @@ private:
 
   void SetComplete();
 
-  void PartitionByteSequence(const std::vector<uint8_t>& ref,
+  bool PartitionByteSequence(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
     std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type);
 
-  void WriteHelper(std::unique_lock<std::mutex>* lock_ptr, const uint8_t* message_ptr,
-    uint16_t message_length, bool acquire_lock, bool release_lock);
+  bool WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
+    std::size_t number_to_write);
 
   fcgi_si::FCGIServerInterface* interface_ptr_;
   fcgi_si::RequestIdentifier request_identifier_;

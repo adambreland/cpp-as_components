@@ -16,28 +16,64 @@ public:
 
   using size = std::allocator_traits<std::allocator<uint8_t>>::size_type;
 
-  bool get_abort() const;
-  void set_abort();
+  inline fcgi_si::RequestStatus get_status() const
+  {
+    return request_status_;
+  }
 
-  bool get_close_connection() const;
-  uint16_t get_role() const;
+  inline bool get_abort() const
+  {
+    return abort_;
+  }
+  inline void set_abort()
+  {
+    abort_ = true;
+  }
 
-  bool IsRequestComplete() const;
+  inline bool get_close_connection() const
+  {
+    return close_connection_;
+  }
+  inline uint16_t get_role() const
+  {
+    return role_;
+  }
 
-  fcgi_si::RequestStatus get_status() const;
+  inline bool IsRequestComplete() const
+  {
+    return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ && FCGI_DATA_complete_;
+  }
 
   bool ProcessFCGI_PARAMS();
 
-  bool get_PARAMS_completion() const;
-  void CompletePARAMS();
+  inline bool get_PARAMS_completion() const
+  {
+    return FCGI_PARAMS_complete_;
+  }
+  inline void CompletePARAMS()
+  {
+    FCGI_PARAMS_complete_ = true;
+  }
   void AppendToPARAMS(const uint8_t* buffer_ptr, size count);
 
-  bool get_STDIN_completion() const;
-  void CompleteSTDIN();
+  inline bool get_STDIN_completion() const
+  {
+    return FCGI_STDIN_complete_;
+  }
+  inline void CompleteSTDIN()
+  {
+    FCGI_STDIN_complete_ = true;
+  }
   void AppendToSTDIN(const uint8_t* buffer_ptr, size count);
 
-  bool get_DATA_completion() const;
-  void CompleteDATA();
+  inline bool get_DATA_completion() const
+  {
+    return FCGI_DATA_complete_;
+  }
+  inline void CompleteDATA()
+  {
+    FCGI_DATA_complete_ = true;
+  }
   void AppendToDATA(const uint8_t* buffer_ptr, size count);
 
   // No copy or move.
@@ -72,7 +108,7 @@ private:
   uint16_t role_;
   bool abort_;
   bool close_connection_;
-  RequestStatus request_status_;
+  fcgi_si::RequestStatus request_status_;
 };
 
 } // namespace fcgi_si

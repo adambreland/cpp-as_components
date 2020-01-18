@@ -2,7 +2,8 @@
 
 #include "external/error_handling/include/error_handling.h"
 
-#include "include/data_types.h"
+#include "include/protocol_constants.h"
+#include "include/request_identifier.h"
 
 fcgi_si::RequestIdentifier::RequestIdentifier()
 : pair_ {0, 0}

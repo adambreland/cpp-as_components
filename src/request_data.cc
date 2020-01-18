@@ -1,6 +1,7 @@
 // C standard library headers in the C++ standard library.
 #include <cstdlib>         // For uint16_t.
 
+#include "include/pair_processing.h"
 #include "include/request_data.h"
 
 fcgi_si::RequestData::
@@ -11,60 +12,11 @@ RequestData(uint16_t role, bool close_connection)
   request_status_ {fcgi_si::RequestStatus::kRequestPending}
 {}
 
-inline bool fcgi_si::RequestData::get_abort() const
-{
-  return abort_;
-}
-
-inline void fcgi_si::RequestData::set_abort()
-{
-  abort_ = true;
-}
-
-inline bool fcgi_si::RequestData::get_close_connection() const
-{
-  return close_connection_;
-}
-
-inline uint16_t fcgi_si::RequestData::get_role() const
-{
-  return role_;
-}
-
-inline bool fcgi_si::RequestData::IsRequestComplete() const
-{
-  return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ && FCGI_DATA_complete_;
-}
-
-// PARAMS
-
-inline bool fcgi_si::RequestData::get_PARAMS_completion() const
-{
-  return FCGI_PARAMS_complete_;
-}
-
-inline void fcgi_si::RequestData::CompletePARAMS()
-{
-  FCGI_PARAMS_complete_ = true;
-}
-
 void fcgi_si::RequestData::
 AppendToPARAMS(const uint8_t* buffer_ptr, size count)
 {
   for(int i {0}; i < count; i++)
     FCGI_PARAMS_.push_back(*(buffer_ptr + i));
-}
-
-// STDIN
-
-inline bool fcgi_si::RequestData::get_STDIN_completion() const
-{
-  return FCGI_STDIN_complete_;
-}
-
-inline void fcgi_si::RequestData::CompleteSTDIN()
-{
-  FCGI_STDIN_complete_ = true;
 }
 
 void fcgi_si::RequestData::
@@ -74,21 +26,30 @@ AppendToSTDIN(const uint8_t* buffer_ptr, size count)
     FCGI_STDIN_.push_back(*(buffer_ptr + i));
 }
 
-// DATA
-
-inline bool fcgi_si::RequestData::get_DATA_completion() const
-{
-  return FCGI_DATA_complete_;
-}
-
-inline void fcgi_si::RequestData::CompleteDATA()
-{
-  FCGI_DATA_complete_ = true;
-}
-
 void fcgi_si::RequestData::
 AppendToDATA(const uint8_t* buffer_ptr, size count)
 {
   for(int i {0}; i < count; i++)
     FCGI_DATA_.push_back(*(buffer_ptr + i));
+}
+
+bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
+{
+  bool result {true};
+  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
+    name_value_pair_list {};
+  if(FCGI_PARAMS_.size())
+  {
+    name_value_pair_list = fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
+      FCGI_PARAMS_.data());
+  }
+  if(name_value_pair_list.size())
+  {
+    // Sort the pairs according to the name which will become the map key.
+    // Sort, but then handle duplicate names during the insertion step.
+    // Duplicate names are accepted if there values are identical. If not,
+    // the parameter list is rejected and the request is rejected.
+  }
+  else
+    result = false;
 }

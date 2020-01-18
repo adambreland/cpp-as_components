@@ -27,11 +27,23 @@ namespace fcgi_si {
 //    determined by the value of bytes_received.
 struct RecordStatus {
 
-  uint32_t ExpectedBytes();
+  inline uint32_t ExpectedBytes()
+  {
+    return padding_bytes_expected + content_bytes_expected
+           + fcgi_si::FCGI_HEADER_LEN;
+  }
 
-  bool IsHeaderComplete();
+  inline bool
+  IsHeaderComplete()
+  {
+    return bytes_received >= fcgi_si::FCGI_HEADER_LEN;
+  }
 
-  bool IsRecordComplete();
+  inline bool
+  IsRecordComplete()
+  {
+    return ExpectedBytes() == bytes_received;
+  }
 
   RecordStatus();
   RecordStatus(const RecordStatus&) = delete;

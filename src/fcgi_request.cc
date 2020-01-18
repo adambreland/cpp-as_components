@@ -1,14 +1,18 @@
-#include <unistd.h>             // For portable use of select.
 #include <sys/select.h>
 #include <sys/time.h>           // For portable use of select.
 #include <sys/types.h>          // For ssize_t and portable use of select.
+#include <sys/uio.h>
+#include <unistd.h>             // For portable use of select among others.
 
 #include <cerrno>
 #include <cstdint>
 
+#include <limits>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -20,6 +24,14 @@
 #include "include/protocol_constants.h"
 #include "include/request_data.h"
 #include "include/request_identifier.h"
+#include "include/utility.h"
+
+// Numerical assumptions:
+// 1) std::size_t >= uint16_t
+// 2) std::size_t >= decltype(std::distance(begin_iter, end_iter)) for
+//    std::vector<uint8_t> iterators.
+
+// Question: Are size_t and std::size_t the same?
 
 fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   fcgi_si::FCGIServerInterface* interface_ptr,
@@ -101,22 +113,6 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
   request.interface_state_mutex_ptr_ = nullptr;
 }
 
-inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
-fcgi_si::FCGIRequest::get_environment_map() const
-{
-  return environment_map_;
-}
-
-inline const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_STDIN() const
-{
-  return request_stdin_content_;
-}
-
-inline const std::vector<uint8_t>& fcgi_si::FCGIRequest::get_DATA() const
-{
-  return request_data_content_;
-}
-
 bool fcgi_si::FCGIRequest::get_abort()
 {
   if(completed_ || was_aborted_)
@@ -134,48 +130,66 @@ bool fcgi_si::FCGIRequest::get_abort()
   return was_aborted_; // i.e. return false.
 } // RELEASE interface_state_mutex_
 
-inline uint16_t fcgi_si::FCGIRequest::get_role() const
-{
-  return role_;
-}
-
-inline bool fcgi_si::FCGIRequest::get_completion_status() const
-{
-  return completed_;
-}
-
-inline bool fcgi_si::FCGIRequest::Write(const std::vector<uint8_t>& ref,
-  std::vector<uint8_t>::const_iterator begin_iter,
-  std::vector<uint8_t>::const_iterator end_iter)
-{
-  return true; // pass
-}
-
-inline bool fcgi_si::FCGIRequest::WriteError(const std::vector<uint8_t>& ref,
-  std::vector<uint8_t>::const_iterator begin_iter,
-  std::vector<uint8_t>::const_iterator end_iter)
-{
-  return true; // pass
-}
-
 void fcgi_si::FCGIRequest::Complete(int32_t app_status)
 {
-  // pass
-}
+  constexpr char seq_num {4};
+  uint8_t header_and_end_content[seq_num][fcgi_si::FCGI_HEADER_LEN];
+
+  fcgi_si::PopulateHeader(&header_and_end_content[0][0], fcgi_si::FCGIType::kFCGI_STDOUT,
+    request_identifier_.FCGI_id(), 0, 0);
+  fcgi_si::PopulateHeader(&header_and_end_content[1][0], fcgi_si::FCGIType::kFCGI_STDERR,
+    request_identifier_.FCGI_id(), 0, 0);
+  fcgi_si::PopulateHeader(&header_and_end_content[2][0], fcgi_si::FCGIType::kFCGI_END_REQUEST,
+    request_identifier_.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
+
+  // Fill end request content.
+  for(char i {0}; i < seq_num ; i++)
+    header_and_end_content[3][i] = static_cast<uint8_t>(
+      app_status >> (24 - (8*i)));
+  header_and_end_content[3][4] = fcgi_si::FCGI_REQUEST_COMPLETE;
+  for(char i {5}; i < fcgi_si::FCGI_HEADER_LEN; i++)
+    header_and_end_content[3][i] = 0;
+
+  // Fill iovec structures
+  struct iovec iovec_array[seq_num];
+  for(char i {0}; i < seq_num; i++)
+  {
+    iovec_array[i].iov_base = &header_and_end_content[i][0];
+    iovec_array[i].iov_len  = fcgi_si::FCGI_HEADER_LEN;
+  }
+
+  // ACQUIRE *interface_state_mutex_ptr_ to allow interface request_map_
+  // update and to prevent race conditions between the client server and
+  // the interface.
+  std::lock_guard<std::mutex> interface_state_lock {*interface_state_mutex_ptr_};
+
+  // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
+  WriteHelper(request_identifier_.descriptor(), iovec_array, seq_num,
+    seq_num*fcgi_si::FCGI_HEADER_LEN);
+
+  // Update interface state.
+  interface_ptr_->RemoveRequest(request_identifier_);
+} // RELEASE **interface_state_mutex_ptr_.
+
 
 
 // Helper functions
 
 
 
-void fcgi_si::FCGIRequest::
+bool fcgi_si::FCGIRequest::
 PartitionByteSequence(const std::vector<uint8_t>& ref,
   std::vector<uint8_t>::const_iterator begin_iter,
   std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type)
 {
-  if(completed_ || begin_iter == end_iter)
-    return;
+  if(completed_)
+    return false;
+  if(begin_iter == end_iter)
+    return true;
 
+  // message_length may be undefined for extremely large vectors as the
+  // difference_type of std::vector may not be able to store the length
+  // of the vector (or the length of an interval of it).
   auto message_length = std::distance(begin_iter, end_iter);
   auto message_offset = std::distance(ref.begin(), begin_iter);
   const uint8_t* message_ptr = ref.data() + message_offset;
@@ -186,131 +200,149 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
     {message_length / fcgi_si::kMaxRecordContentByteLength};
   uint16_t partial_record_length
     {static_cast<uint16_t>(message_length % fcgi_si::kMaxRecordContentByteLength)};
-  uint8_t padding_count {(partial_record_length % 8) ?
-    static_cast<uint8_t>(8 - (partial_record_length % 8))} :
-    static_cast<uint8_t>(0);
+  uint8_t padding_count {(partial_record_length % fcgi_si::FCGI_HEADER_LEN) ?
+    static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN -
+      (partial_record_length % fcgi_si::FCGI_HEADER_LEN)) :
+    static_cast<uint8_t>(0)};
 
-  uint8_t padding[8] = {}; // Initialize to all zeroes.
+  uint8_t padding[fcgi_si::FCGI_HEADER_LEN] = {}; // Initialize to all zeroes.
 
-  // Populate header for full records.
-  uint8_t header[8];
-  header[fcgi_si::kHeaderVersionIndex]         =
-    fcgi_si::FCGI_VERSION_1;
-  header[fcgi_si::kHeaderTypeIndex]            =
-    static_cast<uint8_t>(type);
-  header[fcgi_si::kHeaderRequestIDB1Index]     =
-    static_cast<uint8_t>(request_identifier_.FCGI_id() >> 8);
-  header[fcgi_si::kHeaderRequestIDB0Index]     =
-    static_cast<uint8_t>(request_identifier_.FCGI_id());
+  // Populate header for the partial record.
+  uint8_t header[fcgi_si::FCGI_HEADER_LEN];
+  fcgi_si::PopulateHeader(header, type, request_identifier_.FCGI_id(),
+    partial_record_length, padding_count);
+
+  // Initialize the iovec structures.
+  // Ensure that an overflow does not occur when we initialize iovec_count.
+  // Note that the limit placed on the number of buffers by writev is
+  // (usually) much less than std::numeric_limits<int>::max(). Ensuring that
+  // this limit is not surpassed is required for successful use of
+  // FCGIRequest::Write. A throw may occur if writev returns an invalid size
+  // error.
+
+  // Double the number of records as each record has a header buffer.
+  // Include the padding buffer.
+  decltype(message_length) iovec_count_iter_distance_units
+    {(2*((partial_record_length > 0) + full_record_count))+(padding_count > 0)};
+  if(iovec_count_iter_distance_units > std::numeric_limits<int>::max())
+    throw std::logic_error {ERROR_STRING("PartitionByteSequence received a byte sequence length which resulted\nin more records than the maximum value of int.")};
+  int iovec_count {static_cast<int>(iovec_count_iter_distance_units)};
+  std::unique_ptr<struct iovec[]> iovec_array_ptr {new struct iovec[iovec_count]};
+  // Initialize iovec strcutre for the partial record if there is one.
+  int i {0};
+  if(partial_record_length > 0)
+  {
+    // Header
+    (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
+    (iovec_array_ptr.get()+i)->iov_len  = fcgi_si::FCGI_HEADER_LEN;
+    i++;
+    // Content
+    (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
+    (iovec_array_ptr.get()+i)->iov_len  = partial_record_length;
+    i++;
+    // Update the content pointer.
+    message_ptr += partial_record_length;
+    // Conditionally include padding.
+    if(padding_count)
+    {
+      (iovec_array_ptr.get()+i)->iov_base = padding;
+      (iovec_array_ptr.get()+i)->iov_len  = padding_count;
+      i++;
+    }
+  }
+  // Initialize all other iovec structures for full records.
+  // Update header.
   header[fcgi_si::kHeaderContentLengthB1Index] =
-    0xff; // A full record has a content length value with a bit sequence of 8 ones.
+    0xff; // A full record has a content length value with a bit sequence of 16 ones.
   header[fcgi_si::kHeaderContentLengthB0Index] =
     0xff;
   header[fcgi_si::kHeaderPaddingLengthIndex]   =
     0;
-  header[fcgi_si::kHeaderReservedByteIndex]    =
-    0;
-
-  // Create a lock for use by WriteHelper.
-  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
-
-  if(full_record_count)
+  for(/*no-op*/; i < iovec_count; /*no-op*/)
   {
-    for(decltype(message_length) i {0}; i < full_record_count; i++)
-    {
-      WriteHelper(&write_lock, header, 8, true, false);
-      WriteHelper(&write_lock, message_ptr, fcgi_si::kMaxRecordContentByteLength,
-        false, true);
-      message_ptr += fcgi_si::kMaxRecordContentByteLength;
-    }
+    // Header
+    (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
+    (iovec_array_ptr.get()+i)->iov_len = fcgi_si::FCGI_HEADER_LEN;
+    i++;
+    // Content
+    (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
+    (iovec_array_ptr.get()+i)->iov_len = fcgi_si::kMaxRecordContentByteLength;
+    i++;
+    // Update the content pointer.
+    message_ptr += fcgi_si::kMaxRecordContentByteLength;
   }
-  if(partial_record_length)
-  {
-    // Modify header for partial record.
-    header[fcgi_si::kHeaderContentLengthB1Index] =
-      static_cast<uint8_t>(partial_record_length >> 8);
-    header[fcgi_si::kHeaderContentLengthB0Index] =
-      static_cast<uint8_t>(partial_record_length);
-    header[fcgi_si::kHeaderPaddingLengthIndex]   =
-      padding_count;
-
-    bool send_padding {padding_count > 0};
-
-    WriteHelper(&write_lock, header, 8, true, false);
-    WriteHelper(&write_lock, message_ptr, partial_record_length, false, !send_padding);
-    if(send_padding)
-      WriteHelper(&write_lock, padding, padding_count, false, true);
-  }
+  return WriteHelper(request_identifier_.descriptor(), iovec_array_ptr.get(),
+    iovec_count, message_length);
 }
 
-void fcgi_si::FCGIRequest::
-WriteHelper(std::unique_lock<std::mutex>* lock_ptr, const uint8_t* message_ptr,
-  uint16_t message_length, bool acquire_lock, bool release_lock)
+bool fcgi_si::FCGIRequest::
+WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
+  std::size_t number_to_write)
 {
+  bool connection_open_at_peer {true};
+  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
   bool acquired_mutex {false};
-
-  int select_descriptor_range {request_identifier_.descriptor() + 1};
+  int select_descriptor_range {fd + 1};
   fd_set write_set {};
 
-  // Conditionally ACQUIRE write mutex.
-  if(acquire_lock)
-    lock_ptr->lock();
-
-  while(message_length > 0)
+  while(number_to_write > 0) // Start write loop.
   {
-    // Conditionally ACQUIRE write mutex.
-    if(!lock_ptr->owns_lock())
+    // Conditionally ACQUIRE *write_mutex_ptr_.
+    if(!write_lock.owns_lock())
     {
-      lock_ptr->lock();
+      write_lock.lock();
       acquired_mutex = true;
     }
     // *write_mutex_ptr_ is held.
-    std::size_t write_return {socket_functions::SocketWrite(
-      request_identifier_.descriptor(), message_ptr, message_length)};
-    if(write_return == message_length)
-      message_length == 0;
-    else // write_return < message_length
+    std::tuple<struct iovec*, int, std::size_t> write_return
+      {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
+        number_to_write)};
+    if(std::get<2>(write_return) == 0)
+      number_to_write == 0;
+    else // The number written is less than number_to_write. We must check errno.
     {
-      // EINTR is handled by SocketWrite
+      // EINTR is handled by ScatterGatherSocketWrite.
+      // Handle blocking errors.
       if(errno == EAGAIN || errno == EWOULDBLOCK)
       {
-        if(write_return == 0 && acquired_mutex)
-          // Conditionally RELEASE write mutex.
-          lock_ptr->unlock();
-        else
-        {
-          message_ptr += write_return;
-          message_length -= write_return;
-        }
+        // Check if nothing was written and nothing was written prior.
+        if(std::get<2>(write_return) == number_to_write && acquired_mutex)
+          // RELEASE *write_mutex_ptr_. (As no record content has been written.)
+          write_lock.unlock();
+        else // Some but not all was written.
+          std::tie(iovec_ptr, iovec_count, number_to_write) = write_return;
         // Reset flag for mutex acquisition as the loop will iterate.
         acquired_mutex = false;
-        // Call select with error handling.
-        while(true)
+        // Call select with error handling to wait until a write won't block.
+        while(true) // Start select loop.
         {
           // The loop exits only when writing won't block or an error is thrown.
           FD_ZERO(&write_set);
-          FD_SET(request_identifier_.descriptor(), &write_set);
+          FD_SET(fd, &write_set);
           if(select(select_descriptor_range, nullptr, &write_set, nullptr,
             nullptr) == -1)
           {
             if(errno != EINTR)
               throw std::runtime_error {ERRNO_ERROR_STRING("select")};
+            // else: loop (EINTR is handled)
           }
           else
-            break;
+            break; // Exit select loop.
         }
-      }
+      } // End blocking error handling.
+      // Handle a connection which was closed by the peer.
       else if(errno == EPIPE)
       {
         SetComplete();
-        break;
+        connection_open_at_peer = false;
+        break; // Exit write loop.
       }
       else // Cannot handle the error.
         throw std::runtime_error {ERRNO_ERROR_STRING("write from a call to socket_functions::SocketWrite")};
-    }
-  }
-  if(release_lock)
-    lock_ptr->unlock(); // Conditionally RELEASE write mutex.
+    } // End handling incomplete writes. Loop.
+  } // Exit write loop.
+  write_lock.unlock(); // RELEASE *write_mutex_ptr_.
+  return connection_open_at_peer;
 }
 
 void fcgi_si::FCGIRequest::SetComplete()

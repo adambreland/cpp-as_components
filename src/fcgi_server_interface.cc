@@ -35,6 +35,7 @@
 #include "include/record_status.h"
 #include "include/request_data.h"
 #include "include/request_identifier.h"
+#include "include/utility.h"
 
 // Public member functions
 
@@ -173,24 +174,6 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
       }
     } // End non-empty environment variable value check.
   } // End internet domain check.
-}
-
-inline bool fcgi_si::FCGIServerInterface::
-get_overload() const
-{
-  return application_overload_;
-}
-
-inline void fcgi_si::FCGIServerInterface::
-set_overload(bool overload_status)
-{
-  application_overload_ = overload_status;
-}
-
-inline int fcgi_si::FCGIServerInterface::
-connection_count() const
-{
-  return record_status_map_.size();
 }
 
 std::vector<fcgi_si::FCGIRequest>
@@ -419,7 +402,7 @@ fcgi_si::FCGIServerInterface::Read(int connection)
     // Read from socket.
     int number_bytes_processed = 0;
     int number_bytes_received =
-      socket_functions::NonblockingSocketRead(connection, read_buffer, kBufferSize);
+      socket_functions::SocketRead(connection, read_buffer, kBufferSize);
 
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
@@ -674,23 +657,8 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
     - (header_and_content_length % fcgi_si::FCGI_HEADER_LEN))};
   result.insert(result.end(), pad_length, 0);
 
-  // Update header:
-  result[fcgi_si::kHeaderVersionIndex]            =
-    fcgi_si::FCGI_VERSION_1;
-  result[fcgi_si::kHeaderTypeIndex]               =
-    static_cast<uint8_t>(fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT);
-  result[fcgi_si::kHeaderRequestIDB1Index]        =
-    static_cast<uint8_t>(fcgi_si::FCGI_NULL_REQUEST_ID);
-  result[fcgi_si::kHeaderRequestIDB0Index]        =
-    static_cast<uint8_t>(fcgi_si::FCGI_NULL_REQUEST_ID);
-  result[fcgi_si::kHeaderContentLengthB1Index]    =
-    content_length >> 8;
-  result[fcgi_si::kHeaderContentLengthB0Index]    =
-    content_length;
-  result[fcgi_si::kHeaderPaddingLengthIndex]      =
-    pad_length;
-  result[fcgi_si::kHeaderReservedByteIndex]       =
-    0;
+  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT,
+    fcgi_si::FCGI_NULL_REQUEST_ID, content_length, pad_length);
 
   return SendRecord(connection, result);
 }
@@ -701,22 +669,8 @@ SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
 
   // Set header.
-  result[fcgi_si::kHeaderVersionIndex]            =
-    fcgi_si::FCGI_VERSION_1;
-  result[fcgi_si::kHeaderTypeIndex]               =
-    static_cast<uint8_t>(fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE);
-  result[fcgi_si::kHeaderRequestIDB1Index]        =
-    fcgi_si::FCGI_NULL_REQUEST_ID;
-  result[fcgi_si::kHeaderRequestIDB0Index]        =
-    fcgi_si::FCGI_NULL_REQUEST_ID;
-  result[fcgi_si::kHeaderContentLengthB1Index]    =
-    0;
-  result[fcgi_si::kHeaderContentLengthB0Index]    =
-    8; // One byte.
-  result[fcgi_si::kHeaderPaddingLengthIndex]      =
-    0; // No padding needed.
-  result[fcgi_si::kHeaderReservedByteIndex]       =
-    0;
+  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE,
+    fcgi_si::FCGI_NULL_REQUEST_ID, fcgi_si::FCGI_HEADER_LEN, 0);
   // Set body. (Only the first byte in the body is used.)
   result[1 + fcgi_si::kHeaderReservedByteIndex]   =
     static_cast<uint8_t>(type);
@@ -750,22 +704,8 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   }
 
   // Set header.
-  result[fcgi_si::kHeaderVersionIndex]            =
-    fcgi_si::FCGI_VERSION_1;
-  result[fcgi_si::kHeaderTypeIndex]               =
-    static_cast<uint8_t>(fcgi_si::FCGIType::kFCGI_END_REQUEST);
-  result[fcgi_si::kHeaderRequestIDB1Index]        =
-    request_id_byte_array[0];
-  result[fcgi_si::kHeaderRequestIDB0Index]        =
-    request_id_byte_array[1];
-  result[fcgi_si::kHeaderContentLengthB1Index]    =
-    0;
-  result[fcgi_si::kHeaderContentLengthB0Index]    =
-    8; // One byte.
-  result[fcgi_si::kHeaderPaddingLengthIndex]      =
-    0; // No padding needed.
-  result[fcgi_si::kHeaderReservedByteIndex]       =
-    0;
+  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_END_REQUEST,
+    request_id.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
   // Set body.
   for(char i {0}; i < 4; i++)
   {

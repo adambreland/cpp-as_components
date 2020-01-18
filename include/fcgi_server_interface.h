@@ -23,10 +23,19 @@ namespace fcgi_si {
 
 class FCGIServerInterface {
 public:
-  bool get_overload() const;
-  void set_overload(bool overload_status);
+  inline bool get_overload() const
+  {
+    return application_overload_;
+  }
+  inline void set_overload(bool overload_status)
+  {
+    application_overload_ = overload_status;
+  }
 
-  int connection_count() const;
+  inline int connection_count() const
+  {
+    return record_status_map_.size();
+  }
 
   std::vector<FCGIRequest> AcceptRequests();
 
@@ -40,7 +49,7 @@ public:
   FCGIServerInterface& operator=(const FCGIServerInterface&) = delete;
   FCGIServerInterface& operator=(FCGIServerInterface&&) = delete;
 
-  ~FCGIServerInterface();
+  ~FCGIServerInterface() = default;
 
 private:
   friend class fcgi_si::FCGIRequest;

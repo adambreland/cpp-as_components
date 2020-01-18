@@ -3,9 +3,10 @@
 // C++ standard library headers.
 #include <mutex>
 
-#include "include/data_types.h"
-#include "include/fcgi_application_interface.h"
+#include "include/fcgi_server_interface.h"
 #include "include/fcgi_request.h"
+#include "include/protocol_constants.h"
+#include "include/record_status.h"
 
 fcgi_si::RecordStatus::
 RecordStatus()
@@ -33,26 +34,4 @@ operator=(RecordStatus&& record_status)
     local_record_content_buffer = std::move(record_status.local_record_content_buffer);
   }
   return *this;
-}
-
-inline uint32_t
-fcgi_si::RecordStatus::
-ExpectedBytes()
-{
-  return padding_bytes_expected + content_bytes_expected
-         + fcgi_si::FCGI_HEADER_LEN;
-}
-
-inline bool
-fcgi_si::RecordStatus::
-IsHeaderComplete()
-{
-  return bytes_received >= fcgi_si::FCGI_HEADER_LEN;
-}
-
-inline bool
-fcgi_si::RecordStatus::
-IsRecordComplete()
-{
-  return ExpectedBytes() == bytes_received;
 }

@@ -1,7 +1,8 @@
 #include <cstdint>
 #include <vector>
 
-#include "include/data_types.h"
+#include "include/pair_processing.h"
+#include "include/protocol_constants.h"
 
 uint32_t fcgi_si::
 ExtractFourByteLength(const uint8_t* content_ptr)
