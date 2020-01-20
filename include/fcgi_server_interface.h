@@ -53,6 +53,7 @@ public:
 
 private:
   friend class fcgi_si::FCGIRequest;
+  friend class fcgi_si::RecordStatus;
 
   // May implicitly acquire interface_state_mutex_.
   void UpdateAfterHeaderCompletion(RecordStatus* rs_ptr,
@@ -181,8 +182,6 @@ private:
   //       RequestIdentifier values and missing connections. Absence indicates
   //       that the connection was found to be closed by the interface.
   void ClosedConnectionFoundDuringAcceptRequests(int connection);
-
-  std::vector<RequestIdentifier> Read(int connection);
 
   bool UnassignedRequestCleanup(int connection);
 

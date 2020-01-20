@@ -283,7 +283,8 @@ AcceptRequests()
     if(FD_ISSET(fd, &read_set))
     {
       connections_read++;
-      std::vector<fcgi_si::RequestIdentifier> request_identifiers {Read(fd)};
+      std::vector<fcgi_si::RequestIdentifier> request_identifiers
+        {it->second.Read(fd)};
       if(request_identifiers.size())
       {
         std::mutex* write_mutex_ptr {write_mutex_map_.find(fd)->second.get()};
@@ -317,253 +318,6 @@ AcceptRequests()
 
 
 
-void fcgi_si::FCGIServerInterface::
-UpdateAfterHeaderCompletion(RecordStatus* rs_ptr, int connection)
-{
-  // Extract number of content bytes from two bytes.
-  rs_ptr->content_bytes_expected =
-    rs_ptr->header[fcgi_si::kHeaderContentLengthB1Index];
-  rs_ptr->content_bytes_expected <<= 8; // one byte
-  rs_ptr->content_bytes_expected +=
-    rs_ptr->header[fcgi_si::kHeaderContentLengthB0Index];
-
-  // Extract number of padding bytes.
-  rs_ptr->padding_bytes_expected =
-    rs_ptr->header[fcgi_si::kHeaderPaddingLengthIndex];
-
-  // Extract type and request_id.
-  rs_ptr->type = static_cast<fcgi_si::FCGIType>(rs_ptr->header[fcgi_si::kHeaderTypeIndex]);
-  uint16_t FCGI_request_id =
-    rs_ptr->header[fcgi_si::kHeaderRequestIDB1Index];
-  FCGI_request_id << 8; // one byte
-  FCGI_request_id +=
-    rs_ptr->header[fcgi_si::kHeaderRequestIDB0Index];
-  rs_ptr->request_id = fcgi_si::
-    RequestIdentifier(connection, FCGI_request_id);
-
-  // Determine if the record should be rejected based on header
-  // information.
-
-  // Every management record is accepted.
-  if(FCGI_request_id == fcgi_si::FCGI_NULL_REQUEST_ID)
-    return;
-
-  // Not a management record. Use type to determine rejection.
-  // Acquire the interface state mutex to access current RequestIdentifiers.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-  auto request_map_iter = request_map_.find(rs_ptr->request_id);
-  switch(rs_ptr->type)
-  {
-    case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
-      rs_ptr->invalid_record = (request_map_iter != request_map_.end());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
-      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_abort());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_PARAMS : {
-      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_PARAMS_completion());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_STDIN : {
-      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_STDIN_completion());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_DATA : {
-      rs_ptr->invalid_record = (request_map_iter == request_map_.end()
-        || request_map_iter->second.get_DATA_completion());
-      break;
-    }
-    // No other cases should occur. Reject any others.
-    default : {
-      rs_ptr->invalid_record = true;
-    }
-  } // end switch
-} // interface_state_mutex_ released here.
-
-std::vector<fcgi_si::RequestIdentifier>
-fcgi_si::FCGIServerInterface::Read(int connection)
-{
-  // Number of bytes read at a time from connected sockets.
-  constexpr int kBufferSize {512};
-  uint8_t read_buffer[kBufferSize];
-
-  // Return value to be potentially modified during processing.
-  std::vector<RequestIdentifier> request_identifiers {};
-
-  // Read from the connection until it would block (no more data),
-  // it is found to be disconnected, or an unrecoverable error occurs.
-  while(true)
-  {
-    // Read from socket.
-    int number_bytes_processed = 0;
-    int number_bytes_received =
-      socket_functions::SocketRead(connection, read_buffer, kBufferSize);
-
-    // Check for a disconnected socket or an unrecoverable error.
-    if(number_bytes_received < kBufferSize)
-    {
-      if(errno == 0)
-      {
-        // Connection was closed. Discard any read data and update interface
-        // state.
-        ClosedConnectionFoundDuringAcceptRequests(connection);
-        return {};
-      }
-
-      if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
-        throw std::runtime_error
-          {ERRNO_ERROR_STRING("read from a call to NonblockingSocketRead")};
-    }
-
-    // Process bytes received (if any). This check is needed as blocking
-    // errors may return zero bytes if nothing was read.
-    if(number_bytes_received > 0)
-    {
-      RecordStatus& record_status = record_status_map_[connection];
-      while(number_bytes_processed < number_bytes_received)
-      {
-        int number_bytes_remaining = number_bytes_received
-          - number_bytes_processed;
-
-        // Process received bytes according to header and content/padding
-        // completion. Record completion is checked after header addition.
-
-        // Is the header complete?
-        if(!(record_status.IsHeaderComplete()))
-        {
-          uint32_t remaining_header
-            {fcgi_si::FCGI_HEADER_LEN - record_status.bytes_received};
-          if(remaining_header <= number_bytes_remaining)
-          {
-            for(uint32_t i {record_status.bytes_received};
-                i < fcgi_si::FCGI_HEADER_LEN; i++)
-            {
-              record_status.header[i] = read_buffer[number_bytes_processed];
-              number_bytes_processed++;
-            }
-            // Follow usage discipline for RecordStatus as the header was
-            // modified.
-            record_status.bytes_received += remaining_header;
-
-            // Update record_status as header has been completed.
-            // Part of this update is conditionally setting the rejected flag.
-            UpdateAfterHeaderCompletion(&record_status, connection);
-          }
-          else // Need more than we have to complete header.
-          {
-            for(uint32_t i {record_status.bytes_received};
-              number_bytes_remaining > 0; (i++, number_bytes_remaining--))
-            {
-              record_status.header[i] = read_buffer[number_bytes_processed];
-              number_bytes_processed++;
-            }
-            // Follow usage discipline for RecordStatus as the header was
-            // modified.
-            record_status.bytes_received += remaining_header;
-          }
-        }
-        // Header is complete, but the record is not.
-        // Either the content is complete or it isn't.
-        else
-        {
-          int32_t content_byte_difference {static_cast<int32_t>(fcgi_si::FCGI_HEADER_LEN
-            + record_status.content_bytes_expected - record_status.bytes_received)};
-          int32_t remaining_content {(content_byte_difference > 0) ?
-            content_byte_difference : 0};
-          int32_t number_to_write {};
-
-          if(remaining_content > 0) // Content incomplete.
-          {
-            number_to_write = (remaining_content <= number_bytes_remaining) ?
-              remaining_content : number_bytes_remaining;
-            // Determine what we should do with the bytes based on rejection
-            // and type. Every record is rejected if it is not one of the
-            // six types below. Accordingly, we only need to check for those
-            // types.
-            if(!record_status.invalid_record)
-            {
-              if(record_status.request_id.FCGI_id() == 0
-                 || record_status.type ==
-                    fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST
-                 || record_status.type ==
-                    fcgi_si::FCGIType::kFCGI_ABORT_REQUEST)
-              // Append to local buffer.
-              {
-                for(int i {0}; i < number_to_write; i++)
-                {
-                  record_status.local_record_content_buffer.
-                    push_back(*(&read_buffer[number_bytes_processed]+i));
-                }
-              }
-              else // Append to non-local buffer.
-              {
-                // Acquire interface_state_mutex_ to locate append location.
-                // The key request_id must be present as the record is valid
-                // and it is not a begin request record.
-                std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-                auto request_map_iter = request_map_.find(record_status.request_id);
-                switch(record_status.type) {
-                  case fcgi_si::FCGIType::kFCGI_PARAMS : {
-                    request_map_iter->second.AppendToPARAMS(
-                      &read_buffer[number_bytes_processed], number_to_write);
-                    break;
-                  }
-                  case fcgi_si::FCGIType::kFCGI_STDIN : {
-                    request_map_iter->second.AppendToSTDIN(
-                      &read_buffer[number_bytes_processed], number_to_write);
-                    break;
-                  }
-                  case fcgi_si::FCGIType::kFCGI_DATA : {
-                    request_map_iter->second.AppendToDATA(
-                      &read_buffer[number_bytes_processed], number_to_write);
-                    break;
-                  }
-                }
-              } // interface_state_mutex_ released here.
-              // Follow discipline for local while and usage of RecordStatus
-              // objects.
-              number_bytes_processed += number_to_write;
-              record_status.bytes_received += number_to_write;
-            }
-          }
-          else // Padding incomplete.
-          {
-            int32_t remaining_padding {content_byte_difference
-              + record_status.padding_bytes_expected};
-            number_to_write = (remaining_padding <= number_bytes_remaining) ?
-              remaining_padding : number_bytes_remaining;
-            // Ignore padding. Skip ahead without processing.
-            record_status.bytes_received += number_to_write;
-            number_bytes_processed += number_to_write;
-          }
-        }
-        // Potentially completed a record.
-        if(record_status.IsRecordComplete())
-        {
-          fcgi_si::RequestIdentifier request_id
-            {ProcessCompleteRecord(connection, &record_status)};
-          if(request_id != RequestIdentifier {})
-            request_identifiers.push_back(request_id);
-        }
-        // Loop to check if more received bytes need to be processed.
-      } // On exit, looped through all received data as partitioned by record
-        // segments.
-    }
-    // Check if an additional read should be made on the socket. A short count
-    // can only mean that a call to read() blocked as EOF and other errors
-    // were handled above.
-    if(number_bytes_received < kBufferSize)
-      break;
-  } // On exit, end while loop which keeps reading from the socket.
-
-  return request_identifiers;
-}
-
 bool fcgi_si::FCGIServerInterface::
 SendRecord(int connection, const std::vector<uint8_t>& result)
 {
@@ -586,8 +340,8 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
 {
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
     get_value_pairs {fcgi_si::
-      ProcessBinaryNameValuePairs(record_status.local_record_content_buffer.size(),
-      record_status.local_record_content_buffer.data())};
+      ProcessBinaryNameValuePairs(record_status.get_local_content().size(),
+      record_status.get_local_content().data())};
 
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
     result_pairs {};
@@ -728,35 +482,35 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
 fcgi_si::RequestIdentifier fcgi_si::FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
-  RequestIdentifier result {};
-  RecordStatus& record_status {*record_status_ptr};
+  fcgi_si::RequestIdentifier result {};
+  fcgi_si::RecordStatus& record_status {*record_status_ptr};
 
   // Check if it is a management record.
-  if(record_status.request_id.FCGI_id() == 0)
+  if(record_status.get_request_id().FCGI_id() == 0)
   {
-    if(record_status.type == fcgi_si::FCGIType::kFCGI_GET_VALUES)
+    if(record_status.get_type() == fcgi_si::FCGIType::kFCGI_GET_VALUES)
       SendGetValueResult(connection, record_status);
     else // Unknown type,
-      SendFCGIUnknownType(connection, record_status.type);
+      SendFCGIUnknownType(connection, record_status.get_type());
   }
   // Check if the record is valid. Ignore record if it is not.
-  else if(record_status.invalid_record)
+  else if(record_status.get_invalid_status())
   {}
   else // The record must be a valid application record. Process it.
   {
-    fcgi_si::RequestIdentifier request_id {record_status.request_id};
+    fcgi_si::RequestIdentifier request_id {record_status.get_request_id()};
 
-    // Obtain interface_state_mutex_ to access state.
+    // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
     auto request_data_it {request_map_.find(request_id)};
-    switch(record_status.type)
+    switch(record_status.get_type())
     {
       case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
-        uint16_t role {record_status.local_record_content_buffer[
+        uint16_t role {record_status.get_local_content()[
           fcgi_si::kBeginRequestRoleB1Index]};
         role <<= 8;
-        role += record_status.local_record_content_buffer[
+        role += record_status.get_local_content()[
           fcgi_si::kBeginRequestRoleB0Index];
 
         // Check for rejection based on role, maximum request count,
@@ -780,7 +534,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
           {
             // Extract close_connection value.
             bool close_connection =
-              !(record_status.local_record_content_buffer[
+              !(record_status.get_local_content()[
                   fcgi_si::kBeginRequestFlagsIndex]
                 & fcgi_si::FCGI_KEEP_CONN);
 
@@ -819,11 +573,11 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
       case fcgi_si::FCGIType::kFCGI_STDIN:
       case fcgi_si::FCGIType::kFCGI_DATA: {
         // Should we complete the stream?
-        if(record_status.content_bytes_expected == 0)
+        if(record_status.EmptyRecord())
         {
-          (record_status.type == fcgi_si::FCGIType::kFCGI_PARAMS) ?
+          (record_status.get_type() == fcgi_si::FCGIType::kFCGI_PARAMS) ?
             request_data_it->second.CompletePARAMS() :
-          (record_status.type == fcgi_si::FCGIType::kFCGI_STDIN)  ?
+          (record_status.get_type() == fcgi_si::FCGIType::kFCGI_STDIN)  ?
             request_data_it->second.CompleteSTDIN() :
             request_data_it->second.CompleteDATA();
 
@@ -844,7 +598,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
               request_map_.erase(request_data_it);
               request_count_map_[connection]--;
 
-              SendFCGIEndRequest(connection, request_id, FCGI_REQUEST_COMPLETE,
+              SendFCGIEndRequest(connection, request_id, fcgi_si::FCGI_REQUEST_COMPLETE,
                 EXIT_FAILURE);
             }
           }
@@ -852,10 +606,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         break;
       }
     }
-  } // Release interface_state_mutex_.
-
-  // Clear the record status for the next record.
-  record_status = RecordStatus();
+  } // RELEASE interface_state_mutex_.
 
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
@@ -946,15 +697,15 @@ AcceptConnection()
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
   // Update interface state to reflect the new connection.
-  record_status_map_[new_socket_descriptor] = RecordStatus {};
+  record_status_map_[new_socket_descriptor] = RecordStatus {this};
   std::unique_ptr<std::mutex> new_mutex_manager {new std::mutex};
-  // Acquire interface_state_mutex_ to access shared state.
+  // ACQUIRE interface_state_mutex_ to access shared state.
   std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
   write_mutex_map_[new_socket_descriptor] = std::move(new_mutex_manager);
   request_count_map_[new_socket_descriptor] = 0;
 
   return new_socket_descriptor;
-} // Release interface_state_mutex_.
+} // RELEASE interface_state_mutex_.
 
 void fcgi_si::FCGIServerInterface::
 RemoveConnectionFromSharedState(int connection)

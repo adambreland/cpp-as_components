@@ -4,48 +4,43 @@
 #include <cstdint>
 #include <vector>
 
+#include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
 #include "include/request_identifier.h"
 
 namespace fcgi_si {
 
-// A struct describing the status of the record currently being received
-// on the connection. This type is a struct to allow the header and
-// bytes_received variables to be accessed directly. Since writes occur
-// to other objects but should cause an increment to bytes_received, struct
-// status was deemed appropriate.
-//
-// Usage discipline:
-// 1) The first time that the header is completed as determined by
-//    bytes_received >= 8, UpdateAfterHeaderCompletion() must be called.
-// 2) When associated bytes are processed, the bytes_received accumulator
-//    must be incremented appropriately.
-// 3) FCGI_BEGIN_REQUEST and management records use the local buffer for
-//    data storage. Data should be stored there instead of non-locally in
-//    a RequestData object.
-// 4) The header of every record is stored locally. Valid header bytes are
-//    determined by the value of bytes_received.
-struct RecordStatus {
-
-  inline uint32_t ExpectedBytes()
+class RecordStatus {
+public:
+  inline fcgi_si::RequestIdentifier get_request_id() const
   {
-    return padding_bytes_expected + content_bytes_expected
-           + fcgi_si::FCGI_HEADER_LEN;
+    return request_id_;
   }
 
-  inline bool
-  IsHeaderComplete()
+  inline fcgi_si::FCGIType get_type() const
   {
-    return bytes_received >= fcgi_si::FCGI_HEADER_LEN;
+    return type_;
   }
 
-  inline bool
-  IsRecordComplete()
+  inline bool get_invalid_status() const
   {
-    return ExpectedBytes() == bytes_received;
+    return invalid_record_;
   }
 
-  RecordStatus();
+  inline const std::vector<uint8_t>& get_local_content() const
+  {
+    return {local_record_content_buffer_};
+  }
+
+  inline bool EmptyRecord() const
+  {
+    return content_bytes_expected_ == 0;
+  }
+
+  std::vector<RequestIdentifier> Read(int connection);
+
+  RecordStatus() = default;
+  RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr);
   RecordStatus(const RecordStatus&) = delete;
   RecordStatus(RecordStatus&&) = delete;
 
@@ -54,31 +49,54 @@ struct RecordStatus {
 
   ~RecordStatus() = default;
 
+private:
+  inline uint32_t ExpectedBytes() const
+  {
+    return padding_bytes_expected_ + content_bytes_expected_
+           + fcgi_si::FCGI_HEADER_LEN;
+  }
+
+  inline bool
+  IsHeaderComplete() const
+  {
+    return bytes_received_ >= fcgi_si::FCGI_HEADER_LEN;
+  }
+
+  inline bool
+  IsRecordComplete() const
+  {
+    return ExpectedBytes() == bytes_received_;
+  }
+
+  void UpdateAfterHeaderCompletion(int connection);
+
   // The header of the FCGI record. The number of valid bytes in a
   // prefix of header is determined by the value of bytes received.
-  uint8_t header[8];
+  uint8_t header_[8];
 
   // An accumulator variable to track header, content, and padding
   // completion and, hence, record completion.
-  uint32_t bytes_received;
+  uint32_t bytes_received_;
 
-  uint16_t content_bytes_expected;
-  uint8_t padding_bytes_expected;
+  uint16_t content_bytes_expected_;
+  uint8_t padding_bytes_expected_;
 
-  fcgi_si::FCGIType type;
-  fcgi_si::RequestIdentifier request_id;
+  fcgi_si::FCGIType type_;
+  fcgi_si::RequestIdentifier request_id_;
 
   // When the header is completed, the record is either rejected or
   // accepted. This is performed by UpdateAfterHeaderCompletion.
   // When rejected, all remaining bytes are ignored though the number
   // of bytes received is tracked. Rejection means that the record
   // should not have been sent, hence the name invalid_record.
-  bool invalid_record;
+  bool invalid_record_;
 
   // Management records and an FCGI_BEGIN_REQUEST record require
   // a local buffer as they have non-empty content but do not have
   // an associated application request in which to store the content.
-  std::vector<uint8_t> local_record_content_buffer;
+  std::vector<uint8_t> local_record_content_buffer_;
+
+  fcgi_si::FCGIServerInterface* i_ptr_;
 };
 
 } // namespace fcgi_si
