@@ -55,10 +55,6 @@ private:
   friend class fcgi_si::FCGIRequest;
   friend class fcgi_si::RecordStatus;
 
-  // May implicitly acquire interface_state_mutex_.
-  void UpdateAfterHeaderCompletion(RecordStatus* rs_ptr,
-    int connection);
-
   // AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation.
   //
