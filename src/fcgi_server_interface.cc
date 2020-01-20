@@ -593,6 +593,9 @@ SendGetValueResult(int connection, const RecordStatus& record_status)
     result_pairs {};
 
   // Construct result pairs disregarding any name that is not understood.
+  // TODO Mark each of the three configuration parameters as included or not
+  // and do not include duplicates in the output. This ensures that an over-
+  // flow does not occur.
   for(auto iter {get_value_pairs.begin()};
       iter != get_value_pairs.end(); ++iter)
   {
