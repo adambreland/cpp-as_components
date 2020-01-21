@@ -49,7 +49,7 @@ fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   write_mutex_ptr_           {write_mutex_ptr},
   interface_state_mutex_ptr_ {interface_state_mutex_ptr}
 {
-  if(interface_ptr || request_data_ptr == nullptr || write_mutex_ptr == nullptr
+  if(interface_ptr == nullptr || request_data_ptr == nullptr || write_mutex_ptr == nullptr
      || interface_state_mutex_ptr == nullptr)
     throw std::invalid_argument {ERROR_STRING("A pointer with a nullptr value was used to construct an FCGIRequest object.")};
 
@@ -169,7 +169,7 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
 
   // Update interface state.
   interface_ptr_->RemoveRequest(request_identifier_);
-} // RELEASE **interface_state_mutex_ptr_.
+} // RELEASE *interface_state_mutex_ptr_.
 
 
 

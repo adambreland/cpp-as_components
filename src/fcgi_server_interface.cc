@@ -2,7 +2,7 @@
   // General headers.
 #include <unistd.h>
 #include <sys/types.h>    // General. Also included for portability for
-                          // <sys/socket.h>.
+                          // sys/socket.h>.
 #include <fcntl.h>        // For file status flag manipulation.
 #include <syslog.h>       // For central logging.
   // Socket headers.
@@ -287,21 +287,19 @@ AcceptRequests()
         {it->second.Read(fd)};
       if(request_identifiers.size())
       {
+        // ACQUIRE interface_state_mutex_.
+        std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
         std::mutex* write_mutex_ptr {write_mutex_map_.find(fd)->second.get()};
         // For each request_id, find the associated RequestData object, extract
         // a pointer to it, and create an FCGIRequest object from it.
         for(RequestIdentifier request_id : request_identifiers)
         {
           fcgi_si::RequestData* request_data_ptr {nullptr};
-          {
-            // ACQUIRE interface_state_mutex_.
-            std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-            request_data_ptr = &(request_map_.find(request_id)->second);
-          } // RELEASE interface_state_mutex_.
+          request_data_ptr = &(request_map_.find(request_id)->second);
           fcgi_si::FCGIRequest request {request_id, this, request_data_ptr,
             write_mutex_ptr, interface_state_mutex_ptr};
           requests.push_back(std::move(request));
-        }
+        } // RELEASE interface_state_mutex_.
       }
     }
   }
@@ -321,7 +319,9 @@ AcceptRequests()
 bool fcgi_si::FCGIServerInterface::
 SendRecord(int connection, const std::vector<uint8_t>& result)
 {
-  // Obtain the write mutex for the connection.
+  // ACQUIRE interface_state_mutex_ for searching in write_mutex_map_.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  // ACQUIRE the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {*write_mutex_map_[connection]};
 
   // Send record.
@@ -333,7 +333,8 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
     else throw std::runtime_error
       {ERRNO_ERROR_STRING("write from a call to NonblockingPollingSocketWrite")};
   return true;
-}
+} // RELEASE the write mutex for the connection.
+  // RELEASE interface_state_mutex_.
 
 bool fcgi_si::FCGIServerInterface::
 SendGetValueResult(int connection, const RecordStatus& record_status)
@@ -433,11 +434,14 @@ SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
     static_cast<uint8_t>(type);
   // Remaining bytes were set to zero during string initialization.
 
-  // Obtain the write mutex for the connection.
+  // ACQUIRE interface_state_mutex_ for searching in write_mutex_map_.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  // ACQUIRE the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {*write_mutex_map_[connection]};
 
   return SendRecord(connection, result);
-}
+} // RELEASE the write mutex for the connection.
+  // RELEASE interface_state_mutex_.
 
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
@@ -473,11 +477,14 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
     protocol_status;
   // Remaining bytes were set to zero during string initialization.
 
-  // Obtain the write mutex for the connection.
+  // ACQUIRE interface_state_mutex_ for searching in write_mutex_map_.
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  // ACQUIRE the write mutex for the connection.
   std::lock_guard<std::mutex> write_lock {*write_mutex_map_[connection]};
 
   return SendRecord(connection, result);
-}
+} // RELEASE the write mutex for the connection.
+  // RELEASE interface_state_mutex_.
 
 fcgi_si::RequestIdentifier fcgi_si::FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
