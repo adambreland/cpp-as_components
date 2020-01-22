@@ -113,7 +113,7 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
   request.interface_state_mutex_ptr_ = nullptr;
 }
 
-bool fcgi_si::FCGIRequest::get_abort()
+bool fcgi_si::FCGIRequest::AbortStatus()
 {
   if(completed_ || was_aborted_)
     return was_aborted_;
@@ -171,11 +171,18 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   interface_ptr_->RemoveRequest(request_identifier_);
 } // RELEASE *interface_state_mutex_ptr_.
 
-
-
-// Helper functions
-
-
+void fcgi_si::FCGIRequest::CompleteAfterDiscoveredClosedConnection()
+{
+  if(!completed_)
+  {
+    interface_ptr_->RemoveRequest(request_identifier_);
+    completed_   = true;
+    was_aborted_ = true;
+    if(close_connection_)
+      interface_ptr_->application_closure_request_set_.insert(
+        request_identifier_.descriptor());
+  }
+}
 
 bool fcgi_si::FCGIRequest::
 PartitionByteSequence(const std::vector<uint8_t>& ref,
@@ -217,7 +224,7 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
   // Note that the limit placed on the number of buffers by writev is
   // (usually) much less than std::numeric_limits<int>::max(). Ensuring that
   // this limit is not surpassed is required for successful use of
-  // FCGIRequest::Write. A throw may occur if writev returns an invalid size
+  // FCGIRequest::Write. A throw will occur if writev returns an invalid size
   // error.
 
   // Double the number of records as each record has a header buffer.
@@ -333,7 +340,7 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
       // Handle a connection which was closed by the peer.
       else if(errno == EPIPE)
       {
-        SetComplete();
+        CompleteAfterDiscoveredClosedConnection();
         connection_open_at_peer = false;
         break; // Exit write loop.
       }
@@ -343,16 +350,4 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
   } // Exit write loop.
   write_lock.unlock(); // RELEASE *write_mutex_ptr_.
   return connection_open_at_peer;
-}
-
-void fcgi_si::FCGIRequest::SetComplete()
-{
-  if(!completed_)
-  {
-    interface_ptr_->RemoveRequest(request_identifier_);
-    completed_ = true;
-    if(close_connection_)
-      interface_ptr_->application_closure_request_set_.insert(
-        request_identifier_.descriptor());
-  }
 }

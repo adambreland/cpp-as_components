@@ -21,28 +21,34 @@ class FCGIServerInterface;
 
 class FCGIRequest {
 public:
-  inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
-  get_environment_map() const
+  bool AbortStatus();
+
+  void Complete(int32_t app_status);
+
+  inline bool get_completion_status() const
   {
-    return environment_map_;
+    return completed_;
   }
-  inline const std::vector<uint8_t>& get_STDIN() const
-  {
-    return request_stdin_content_;
-  }
+
   inline const std::vector<uint8_t>& get_DATA() const
   {
     return request_data_content_;
   }
 
-  bool get_abort();
+  inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
+  get_environment_map() const
+  {
+    return environment_map_;
+  }
+
   inline uint16_t get_role() const
   {
     return role_;
   }
-  inline bool get_completion_status() const
+
+  inline const std::vector<uint8_t>& get_STDIN() const
   {
-    return completed_;
+    return request_stdin_content_;
   }
 
   inline bool Write(const std::vector<uint8_t>& ref,
@@ -52,6 +58,7 @@ public:
     return PartitionByteSequence(ref, begin_iter, end_iter,
       fcgi_si::FCGIType::kFCGI_STDOUT);
   }
+
   inline bool WriteError(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
     std::vector<uint8_t>::const_iterator end_iter)
@@ -59,8 +66,6 @@ public:
     return PartitionByteSequence(ref, begin_iter, end_iter,
       fcgi_si::FCGIType::kFCGI_STDERR);
   }
-
-  void Complete(int32_t app_status);
 
   // No copy or default construction.
   FCGIRequest() = delete;
@@ -83,11 +88,11 @@ private:
     fcgi_si::RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr, std::mutex* interface_state_mutex_ptr);
 
-  void SetComplete();
-
   bool PartitionByteSequence(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
     std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type);
+
+  void CompleteAfterDiscoveredClosedConnection();
 
   bool WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write);
@@ -107,7 +112,7 @@ private:
   bool close_connection_;
 
   // A local abort value that is populated when an abort is detected by
-  // the discovery of a closed connection or by inspection with get_abort().
+  // the discovery of a closed connection or by inspection with AbortStatus.
   bool was_aborted_;
 
   // Forces the object to act as if it is null. Calls will return null

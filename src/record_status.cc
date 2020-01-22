@@ -40,68 +40,6 @@ operator=(RecordStatus&& record_status)
   return *this;
 }
 
-void fcgi_si::RecordStatus::UpdateAfterHeaderCompletion(int connection)
-{
-  // Extract number of content bytes from two bytes.
-  content_bytes_expected_ = header_[fcgi_si::kHeaderContentLengthB1Index];
-  content_bytes_expected_ <<= 8; // one byte
-  content_bytes_expected_ += header_[fcgi_si::kHeaderContentLengthB0Index];
-
-  // Extract number of padding bytes.
-  padding_bytes_expected_ = header_[fcgi_si::kHeaderPaddingLengthIndex];
-
-  // Extract type and request_id.
-  type_ = static_cast<fcgi_si::FCGIType>(header_[fcgi_si::kHeaderTypeIndex]);
-  uint16_t FCGI_request_id = header_[fcgi_si::kHeaderRequestIDB1Index];
-  FCGI_request_id << 8; // one byte
-  FCGI_request_id += header_[fcgi_si::kHeaderRequestIDB0Index];
-  request_id_ = fcgi_si::RequestIdentifier(connection, FCGI_request_id);
-
-  // Determine if the record should be rejected based on header
-  // information.
-
-  // Every management record is accepted.
-  if(FCGI_request_id == fcgi_si::FCGI_NULL_REQUEST_ID)
-    return;
-
-  // Not a management record. Use type to determine rejection.
-  // ACQUIRE the interface state mutex to access current RequestIdentifiers.
-  std::lock_guard<std::mutex> interface_state_lock
-    {i_ptr_->interface_state_mutex_};
-  auto request_map_iter = i_ptr_->request_map_.find(request_id_);
-  switch(type_)
-  {
-    case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
-      invalid_record_ = (request_map_iter != i_ptr_->request_map_.end());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
-      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_abort());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_PARAMS : {
-      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_PARAMS_completion());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_STDIN : {
-      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_STDIN_completion());
-      break;
-    }
-    case fcgi_si::FCGIType::kFCGI_DATA : {
-      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_DATA_completion());
-      break;
-    }
-    // No other cases should occur. Reject any others.
-    default : {
-      invalid_record_ = true;
-    }
-  }
-} // RELEASE interface_state_mutex_.
-
 std::vector<fcgi_si::RequestIdentifier>
 fcgi_si::RecordStatus::Read(int connection)
 {
@@ -279,3 +217,65 @@ fcgi_si::RecordStatus::Read(int connection)
 
   return request_identifiers;
 }
+
+void fcgi_si::RecordStatus::UpdateAfterHeaderCompletion(int connection)
+{
+  // Extract number of content bytes from two bytes.
+  content_bytes_expected_ = header_[fcgi_si::kHeaderContentLengthB1Index];
+  content_bytes_expected_ <<= 8; // one byte
+  content_bytes_expected_ += header_[fcgi_si::kHeaderContentLengthB0Index];
+
+  // Extract number of padding bytes.
+  padding_bytes_expected_ = header_[fcgi_si::kHeaderPaddingLengthIndex];
+
+  // Extract type and request_id.
+  type_ = static_cast<fcgi_si::FCGIType>(header_[fcgi_si::kHeaderTypeIndex]);
+  uint16_t FCGI_request_id = header_[fcgi_si::kHeaderRequestIDB1Index];
+  FCGI_request_id << 8; // one byte
+  FCGI_request_id += header_[fcgi_si::kHeaderRequestIDB0Index];
+  request_id_ = fcgi_si::RequestIdentifier(connection, FCGI_request_id);
+
+  // Determine if the record should be rejected based on header
+  // information.
+
+  // Every management record is accepted.
+  if(FCGI_request_id == fcgi_si::FCGI_NULL_REQUEST_ID)
+    return;
+
+  // Not a management record. Use type to determine rejection.
+  // ACQUIRE the interface state mutex to access current RequestIdentifiers.
+  std::lock_guard<std::mutex> interface_state_lock
+    {i_ptr_->interface_state_mutex_};
+  auto request_map_iter = i_ptr_->request_map_.find(request_id_);
+  switch(type_)
+  {
+    case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
+      invalid_record_ = (request_map_iter != i_ptr_->request_map_.end());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
+      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
+        || request_map_iter->second.get_abort());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_PARAMS : {
+      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
+        || request_map_iter->second.get_PARAMS_completion());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_STDIN : {
+      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
+        || request_map_iter->second.get_STDIN_completion());
+      break;
+    }
+    case fcgi_si::FCGIType::kFCGI_DATA : {
+      invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
+        || request_map_iter->second.get_DATA_completion());
+      break;
+    }
+    // No other cases should occur. Reject any others.
+    default : {
+      invalid_record_ = true;
+    }
+  }
+} // RELEASE interface_state_mutex_.

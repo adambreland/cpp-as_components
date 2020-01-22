@@ -12,14 +12,9 @@ namespace fcgi_si {
 
 class RecordStatus {
 public:
-  inline fcgi_si::RequestIdentifier get_request_id() const
+  inline bool EmptyRecord() const
   {
-    return request_id_;
-  }
-
-  inline fcgi_si::FCGIType get_type() const
-  {
-    return type_;
+    return content_bytes_expected_ == 0;
   }
 
   inline bool get_invalid_status() const
@@ -32,9 +27,14 @@ public:
     return {local_record_content_buffer_};
   }
 
-  inline bool EmptyRecord() const
+  inline fcgi_si::RequestIdentifier get_request_id() const
   {
-    return content_bytes_expected_ == 0;
+    return request_id_;
+  }
+
+  inline fcgi_si::FCGIType get_type() const
+  {
+    return type_;
   }
 
   std::vector<RequestIdentifier> Read(int connection);

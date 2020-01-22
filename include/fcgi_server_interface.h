@@ -6,6 +6,7 @@
 
 // C standard library headers in the C++ standard library.
 #include <cstdint>         // For uint8_t.
+#include <cstdlib>
 // C++ standard library headers.
 #include <vector>
 #include <map>
@@ -23,6 +24,13 @@ namespace fcgi_si {
 
 class FCGIServerInterface {
 public:
+  std::vector<FCGIRequest> AcceptRequests();
+
+  inline int connection_count() const
+  {
+    return record_status_map_.size();
+  }
+
   inline bool get_overload() const
   {
     return application_overload_;
@@ -32,17 +40,10 @@ public:
     application_overload_ = overload_status;
   }
 
-  inline int connection_count() const
-  {
-    return record_status_map_.size();
-  }
-
-  std::vector<FCGIRequest> AcceptRequests();
-
   // No copy, move, or default construction.
   FCGIServerInterface() = delete;
   FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
-    uint16_t role);
+    uint16_t role, int32_t app_status_on_abort = EXIT_FAILURE);
   FCGIServerInterface(const FCGIServerInterface&) = delete;
   FCGIServerInterface(FCGIServerInterface&&) = delete;
 
@@ -81,18 +82,31 @@ private:
   //    errno set by the call to accept.
   // 5) If another system call returned an error which could not be handled, a
   //    std::runtime_error object will be thrown with information on errno.
-  ssize_t AcceptConnection();
+  int AcceptConnection();
 
-  void RemoveConnectionFromSharedState(int connection);
+  inline void AddRequest(fcgi_si::RequestIdentifier request_id, uint16_t role,
+    bool close_connection, std::map<int, int>::iterator request_count_it)
+  {
+    request_map_[request_id] = RequestData(role, close_connection);
+    request_count_it->second++;
+  }
 
-  bool SendRecord(int connection, const std::vector<uint8_t>& result);
-
-  bool SendGetValueResult(int connection, const RecordStatus& record_status);
-
-  bool SendFCGIUnknownType(int connection, fcgi_si::FCGIType type);
-
-  bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
-                          uint8_t protocol_status, int32_t app_status);
+  // Called when a closed connection is found from a scope within a call
+  // to AcceptRequests().
+  //
+  // Parameters:
+  // connection: the socket that was found to have been closed by the peer.
+  //
+  // Effects:
+  // 0) Acquires and releases interface_state_mutex_.
+  // 1  a) Removes the connection from all maps with a domain equal to
+  //       the set of connections: record_status_map_, write_mutex_map_,
+  //       closure_request_map_, and request_count_map_.
+  // 1  b) Removes all of the associated requests from request_map_. Note that
+  //       FCGIRequest object methods are implemented to check for missing
+  //       RequestIdentifier values and missing connections. Absence indicates
+  //       that the connection was found to be closed by the interface.
+  void ClosedConnectionFoundDuringAcceptRequests(int connection);
 
   // Examines the completed record associated with the connected socket
   // represented by connection and performs various actions according to
@@ -160,37 +174,42 @@ private:
   //       checked for completion. If complete, the identifier is returned.
   //       If not complete, a null RequestIdentifier object is returned.
   RequestIdentifier ProcessCompleteRecord(int connection,
-                                          RecordStatus* record_status_ptr);
+    RecordStatus* record_status_ptr);
 
-  // Called when a closed connection is found from a scope within a call
-  // to AcceptRequests().
-  //
-  // Parameters:
-  // connection: the socket that was found to have been closed by the peer.
-  //
-  // Effects:
-  // 0) Acquires and releases interface_state_mutex_.
-  // 1  a) Removes the connection from all maps with a domain equal to
-  //       the set of connections: record_status_map_, write_mutex_map_,
-  //       closure_request_map_, and request_count_map_.
-  // 1  b) Removes all of the associated requests from request_map_. Note that
-  //       FCGIRequest object methods are implemented to check for missing
-  //       RequestIdentifier values and missing connections. Absence indicates
-  //       that the connection was found to be closed by the interface.
-  void ClosedConnectionFoundDuringAcceptRequests(int connection);
+  void RemoveConnectionFromSharedState(int connection);
+
+  inline void RemoveRequest(fcgi_si::RequestIdentifier request_id)
+  {
+    std::map<RequestIdentifier, RequestData>::size_type erase_return
+      {request_map_.erase(request_id)};
+    if(erase_return)
+      request_count_map_[request_id.descriptor()]--;
+  }
+
+  inline void
+  RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
+  {
+    request_count_map_[request_map_iter->first.descriptor()]--;
+    request_map_.erase(request_map_iter);
+  }
+
+  bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
+    uint8_t protocol_status, int32_t app_status);
+
+  bool SendFCGIUnknownType(int connection, fcgi_si::FCGIType type);
+
+  bool SendGetValuesResult(int connection, const RecordStatus& record_status);
+
+  bool SendRecord(int connection, const std::vector<uint8_t>& result);
 
   bool UnassignedRequestCleanup(int connection);
 
-  void RemoveRequest(fcgi_si::RequestIdentifier request_id);
-
-  void RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter);
-
   // Configuration parameters:
-  // TODO change to a light-weight, static-optimized set class.
-  int socket_domain_;
+  int32_t app_status_on_abort_;
   uint32_t maximum_connection_count_;
   uint32_t maximum_request_count_per_connection_;
   uint16_t role_;
+  int socket_domain_;
   std::set<std::string> valid_ip_address_set_;
 
   // The state of the application-set overload flag.
@@ -206,8 +225,6 @@ private:
   // still present.
   std::set<int> connections_found_closed_set_;
 
-  //////////////////////// SHARED DATA STRUCTURE START ////////////////////////
-
   // A mutex for shared state. This state is implicitly accessed by calls to
   // FCGIRequest objects associated with the interface. They are also accessed
   // by the interface.
@@ -219,6 +236,8 @@ private:
   // This map is only accessed by the interface. It is not accessed through
   // application calls on an FCGIRequest object.
   std::map<int, std::unique_ptr<std::mutex>> write_mutex_map_;
+
+  //////////////////////// SHARED DATA STRUCTURE START ////////////////////////
 
   // This set holds the status of socket closure requests from FCGIRequest
   // objects. This is necessary as a web server can indicate in the
