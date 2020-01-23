@@ -85,10 +85,10 @@ private:
   int AcceptConnection();
 
   inline void AddRequest(fcgi_si::RequestIdentifier request_id, uint16_t role,
-    bool close_connection, std::map<int, int>::iterator request_count_it)
+    bool close_connection)
   {
     request_map_[request_id] = RequestData(role, close_connection);
-    request_count_it->second++;
+    request_count_map_[request_id.descriptor()]++;
   }
 
   // Called when a closed connection is found from a scope within a call

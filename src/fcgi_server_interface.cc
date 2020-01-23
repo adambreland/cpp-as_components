@@ -41,7 +41,7 @@
 
 fcgi_si::FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
-  uint16_t role, int32_t app_status_on_abort = EXIT_FAILURE)
+  uint16_t role, int32_t app_status_on_abort)
 : maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
   role_ {role},
@@ -397,8 +397,8 @@ AcceptRequests()
           fcgi_si::FCGIRequest request {request_id, this, request_data_ptr,
             write_mutex_ptr, interface_state_mutex_ptr};
           requests.push_back(std::move(request));
-        } // RELEASE interface_state_mutex_.
-      }
+        }
+      } // RELEASE interface_state_mutex_.
     }
   }
   // Accept new connections if some are present.
@@ -467,6 +467,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         else
         {
           bool at_maximum_request_limit {false};
+
           { // Start lock handling block.
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
@@ -492,7 +493,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
                 & fcgi_si::FCGI_KEEP_CONN);
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
-            AddRequest(request_id, role, close_connection, request_count_it);
+            AddRequest(request_id, role, close_connection);
           } // RELEASE interface_state_mutex_.
         }
         break;

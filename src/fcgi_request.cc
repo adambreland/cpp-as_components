@@ -132,7 +132,7 @@ bool fcgi_si::FCGIRequest::AbortStatus()
 
 void fcgi_si::FCGIRequest::Complete(int32_t app_status)
 {
-  constexpr char seq_num {4};
+  constexpr char seq_num {4}; // Three headers and an 8-byte body. 3+1=4
   uint8_t header_and_end_content[seq_num][fcgi_si::FCGI_HEADER_LEN];
 
   fcgi_si::PopulateHeader(&header_and_end_content[0][0], fcgi_si::FCGIType::kFCGI_STDOUT,
@@ -165,7 +165,7 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
   WriteHelper(request_identifier_.descriptor(), iovec_array, seq_num,
-    seq_num*fcgi_si::FCGI_HEADER_LEN);
+    seq_num*fcgi_si::FCGI_HEADER_LEN, true);
 
   // Update interface state.
   interface_ptr_->RemoveRequest(request_identifier_);
@@ -279,12 +279,12 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
     message_ptr += fcgi_si::kMaxRecordContentByteLength;
   }
   return WriteHelper(request_identifier_.descriptor(), iovec_array_ptr.get(),
-    iovec_count, message_length);
+    iovec_count, message_length, false);
 }
 
 bool fcgi_si::FCGIRequest::
 WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
-  std::size_t number_to_write)
+  std::size_t number_to_write, bool interface_mutex_held)
 {
   bool connection_open_at_peer {true};
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
@@ -340,7 +340,16 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
       // Handle a connection which was closed by the peer.
       else if(errno == EPIPE)
       {
-        CompleteAfterDiscoveredClosedConnection();
+        // Conditionally ACQUIRE interface_state_mutex_
+        if(!interface_mutex_held)
+        {
+          // ACQUIRE interface_state_mutex_.
+          std::lock_guard<std::mutex> interface_state_lock
+            {*interface_state_mutex_ptr_};
+          CompleteAfterDiscoveredClosedConnection();
+        } // RELEASE interface_state_mutex_.
+        else
+          CompleteAfterDiscoveredClosedConnection();
         connection_open_at_peer = false;
         break; // Exit write loop.
       }

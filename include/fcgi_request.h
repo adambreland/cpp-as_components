@@ -95,7 +95,7 @@ private:
   void CompleteAfterDiscoveredClosedConnection();
 
   bool WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
-    std::size_t number_to_write);
+    std::size_t number_to_write, bool interface_mutex_held);
 
   fcgi_si::FCGIServerInterface* interface_ptr_;
   fcgi_si::RequestIdentifier request_identifier_;
