@@ -1,4 +1,7 @@
+#include <cstdint>
+
 #include <stdexcept>
+#include <utility>
 
 #include "external/error_handling/include/error_handling.h"
 

@@ -49,8 +49,8 @@ fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   write_mutex_ptr_           {write_mutex_ptr},
   interface_state_mutex_ptr_ {interface_state_mutex_ptr}
 {
-  if(interface_ptr == nullptr || request_data_ptr == nullptr || write_mutex_ptr == nullptr
-     || interface_state_mutex_ptr == nullptr)
+  if(interface_ptr == nullptr || request_data_ptr == nullptr
+     || write_mutex_ptr == nullptr || interface_state_mutex_ptr == nullptr)
     throw std::invalid_argument {ERROR_STRING("A pointer with a nullptr value was used to construct an FCGIRequest object.")};
 
   // Update the status of the RequestData object to reflect its use in the
@@ -126,6 +126,8 @@ bool fcgi_si::FCGIRequest::AbortStatus()
   if(request_map_iter != interface_ptr_->request_map_.end())
     if(request_map_iter->second.get_abort())
       return was_aborted_ = true;
+  // TODO Remove check for request_data_ptr invalidation when there is
+  // confidence that invalidation cannot occur.
 
   return was_aborted_; // i.e. return false.
 } // RELEASE interface_state_mutex_
@@ -158,6 +160,9 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
     iovec_array[i].iov_len  = fcgi_si::FCGI_HEADER_LEN;
   }
 
+  // Update FCGIRequest state.
+  completed_ = true;
+
   // ACQUIRE *interface_state_mutex_ptr_ to allow interface request_map_
   // update and to prevent race conditions between the client server and
   // the interface.
@@ -169,6 +174,9 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
 
   // Update interface state.
   interface_ptr_->RemoveRequest(request_identifier_);
+  if(close_connection_)
+    interface_ptr_->application_closure_request_set_.insert(
+      request_identifier_.descriptor());
 } // RELEASE *interface_state_mutex_ptr_.
 
 void fcgi_si::FCGIRequest::CompleteAfterDiscoveredClosedConnection()
@@ -207,6 +215,7 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
     {message_length / fcgi_si::kMaxRecordContentByteLength};
   uint16_t partial_record_length
     {static_cast<uint16_t>(message_length % fcgi_si::kMaxRecordContentByteLength)};
+  bool partial_record_count {partial_record_length > 0};
   uint8_t padding_count {(partial_record_length % fcgi_si::FCGI_HEADER_LEN) ?
     static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN -
       (partial_record_length % fcgi_si::FCGI_HEADER_LEN)) :
@@ -227,17 +236,18 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
   // FCGIRequest::Write. A throw will occur if writev returns an invalid size
   // error.
 
+  // Determine the number of buffers (which will be the number of iovec structs).
   // Double the number of records as each record has a header buffer.
   // Include the padding buffer.
   decltype(message_length) iovec_count_iter_distance_units
-    {(2*((partial_record_length > 0) + full_record_count))+(padding_count > 0)};
+    {(2*(partial_record_count + full_record_count))+(padding_count > 0)};
   if(iovec_count_iter_distance_units > std::numeric_limits<int>::max())
     throw std::logic_error {ERROR_STRING("PartitionByteSequence received a byte sequence length which resulted\nin more records than the maximum value of int.")};
   int iovec_count {static_cast<int>(iovec_count_iter_distance_units)};
   std::unique_ptr<struct iovec[]> iovec_array_ptr {new struct iovec[iovec_count]};
   // Initialize iovec strcutre for the partial record if there is one.
-  int i {0};
-  if(partial_record_length > 0)
+  int i {0}; // struct iovect structure index in iovec_array on the heap.
+  if(partial_record_count)
   {
     // Header
     (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
@@ -257,29 +267,36 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
       i++;
     }
   }
-  // Initialize all other iovec structures for full records.
-  // Update header.
-  header[fcgi_si::kHeaderContentLengthB1Index] =
-    0xff; // A full record has a content length value with a bit sequence of 16 ones.
-  header[fcgi_si::kHeaderContentLengthB0Index] =
-    0xff;
-  header[fcgi_si::kHeaderPaddingLengthIndex]   =
-    0;
-  for(/*no-op*/; i < iovec_count; /*no-op*/)
+  if(i < iovec_count)
   {
-    // Header
-    (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
-    (iovec_array_ptr.get()+i)->iov_len = fcgi_si::FCGI_HEADER_LEN;
-    i++;
-    // Content
-    (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
-    (iovec_array_ptr.get()+i)->iov_len = fcgi_si::kMaxRecordContentByteLength;
-    i++;
-    // Update the content pointer.
-    message_ptr += fcgi_si::kMaxRecordContentByteLength;
+    // Initialize all other iovec structures for full records.
+    // Update header.
+    header[fcgi_si::kHeaderContentLengthB1Index] =
+      0xff; // A full record has a content length value with a bit sequence of 16 ones.
+    header[fcgi_si::kHeaderContentLengthB0Index] =
+      0xff;
+    header[fcgi_si::kHeaderPaddingLengthIndex]   =
+      0;
+    for(/*no-op*/; i < iovec_count; /*no-op*/)
+    {
+      // Header
+      (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
+      (iovec_array_ptr.get()+i)->iov_len = fcgi_si::FCGI_HEADER_LEN;
+      i++;
+      // Content
+      (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
+      (iovec_array_ptr.get()+i)->iov_len = fcgi_si::kMaxRecordContentByteLength;
+      i++;
+      // Update the content pointer.
+      message_ptr += fcgi_si::kMaxRecordContentByteLength;
+    }
   }
+  decltype(message_length) total_write_length
+    {message_length + padding_count
+    + (fcgi_si::FCGI_HEADER_LEN * (full_record_count + partial_record_count))};
+
   return WriteHelper(request_identifier_.descriptor(), iovec_array_ptr.get(),
-    iovec_count, message_length, false);
+    iovec_count, total_write_length, false);
 }
 
 bool fcgi_si::FCGIRequest::
@@ -305,7 +322,7 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
       {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
         number_to_write)};
     if(std::get<2>(write_return) == 0)
-      number_to_write == 0;
+      number_to_write = 0;
     else // The number written is less than number_to_write. We must check errno.
     {
       // EINTR is handled by ScatterGatherSocketWrite.

@@ -1,13 +1,12 @@
 #ifndef FCGI_SERVER_INTERFACE_PROTOCOL_CONSTANTS_H_
 #define FCGI_SERVER_INTERFACE_PROTOCOL_CONSTANTS_H_
 
-// C standard library headers in the C++ standard library.
 #include <cstdint>         // For uint8_t.
-// C++ standard headers.
-#include <vector>
+
 #include <map>
 #include <mutex>
 #include <utility>
+#include <vector>
 
 namespace fcgi_si {
 
@@ -29,6 +28,7 @@ constexpr uint8_t                      FCGI_CANT_MPX_CONN             {1};
 constexpr uint8_t                      FCGI_OVERLOADED                {2};
 constexpr uint8_t                      FCGI_UNKNOWN_ROLE              {3};
   // Default FCGI_GET_VALUES record variables.
+  // (As character byte sequences encoded in ASCII/UTF-8.)
 const     std::vector<uint8_t>   FCGI_MAX_CONNS
             {70, 67, 71, 73, 95, 77, 65, 88, 95, 67, 79, 78, 78, 83};
 const     std::vector<uint8_t>   FCGI_MAX_REQS

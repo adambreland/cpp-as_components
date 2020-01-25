@@ -1,5 +1,9 @@
 // C standard library headers in the C++ standard library.
-#include <cstdlib>         // For uint16_t.
+#include <cstdint>         // For uint16_t.
+
+#include <algorithm>
+#include <map>
+#include <vector>
 
 #include "include/pair_processing.h"
 #include "include/request_data.h"
@@ -36,20 +40,47 @@ AppendToDATA(const uint8_t* buffer_ptr, size count)
 bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
 {
   bool result {true};
-  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-    name_value_pair_list {};
   if(FCGI_PARAMS_.size())
   {
-    name_value_pair_list = fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
-      FCGI_PARAMS_.data());
-  }
-  if(name_value_pair_list.size())
-  {
-    // Sort the pairs according to the name which will become the map key.
-    // Sort, but then handle duplicate names during the insertion step.
-    // Duplicate names are accepted if there values are identical. If not,
-    // the parameter list is rejected and the request is rejected.
+    std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
+      name_value_pair_list {fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
+      FCGI_PARAMS_.data())};
+    if(name_value_pair_list.size())
+    {
+      using byte_seq_par = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+      auto first_component_comp =
+        [](const byte_seq_par& lhs, const byte_seq_par& rhs)->bool
+        {
+          return lhs.first < rhs.first;
+        };
+      std::sort(name_value_pair_list.begin(), name_value_pair_list.end(),
+        first_component_comp);
+      auto current = name_value_pair_list.begin();
+      auto next = ++name_value_pair_list.begin();
+      while(next != name_value_pair_list.end())
+      {
+        if(current->first == next->first)
+          if(current->second == next->second)
+            ++next;
+          else
+          {
+            result = false;
+            break;
+          }
+        else
+        {
+          environment_map_.emplace_hint(environment_map_.end(), std::move(*current));
+          current = next;
+          ++next;
+        }
+      }
+      if(result)
+        environment_map_.emplace_hint(environment_map_.end(), std::move(*current));
+    }
+    else
+      result = false;
   }
   else
     result = false;
+  return result;
 }

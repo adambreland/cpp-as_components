@@ -2,6 +2,7 @@
 #define FCGI_SERVER_INTERFACE_REQUEST_IDENTIFIER_H_
 
 #include <cstdint>
+
 #include <utility>
 
 namespace fcgi_si {

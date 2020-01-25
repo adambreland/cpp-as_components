@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "include/protocol_constants.h"
-#include "include/request_identifier.h"
 #include "include/request_data.h"
+#include "include/request_identifier.h"
 
 namespace fcgi_si {
 

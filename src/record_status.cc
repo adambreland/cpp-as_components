@@ -1,15 +1,16 @@
-// C standard library headers in the C++ standard library.
-#include <cstdlib>         // For uint32_t.
-// C++ standard library headers.
+#include <cstdint>         // For uint32_t.
+
 #include <mutex>
+#include <vector>
 
 #include "external/error_handling/include/error_handling.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/fcgi_server_interface.h"
 #include "include/fcgi_request.h"
+#include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
 #include "include/record_status.h"
+#include "include/request_identifier.h"
 
 fcgi_si::RecordStatus::
 RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr)
@@ -44,7 +45,7 @@ std::vector<fcgi_si::RequestIdentifier>
 fcgi_si::RecordStatus::Read(int connection)
 {
   // Number of bytes read at a time from connected sockets.
-  constexpr int kBufferSize {1024};
+  constexpr int kBufferSize {512};
   uint8_t read_buffer[kBufferSize];
 
   // Return value to be potentially modified during processing.

@@ -2,6 +2,7 @@
 #define FCGI_SERVER_INTERFACE_REQUEST_DATA_H_
 
 #include <cstdint>
+
 #include <map>
 #include <vector>
 

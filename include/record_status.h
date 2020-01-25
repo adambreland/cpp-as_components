@@ -2,6 +2,7 @@
 #define FCGI_SERVER_INTERFACE_RECORD_STATUS_H_
 
 #include <cstdint>
+
 #include <vector>
 
 #include "include/fcgi_server_interface.h"

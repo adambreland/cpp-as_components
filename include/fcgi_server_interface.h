@@ -1,19 +1,17 @@
 #ifndef FCGI_SERVER_INTERFACE_FCGI_SERVER_INTERFACE_H_
 #define FCGI_SERVER_INTERFACE_FCGI_SERVER_INTERFACE_H_
 
-// Unix type declarations.
 #include <sys/types.h>   // For ssize_t.
 
-// C standard library headers in the C++ standard library.
-#include <cstdint>         // For uint8_t.
+#include <cstdint>       // For uint8_t.
 #include <cstdlib>
-// C++ standard library headers.
-#include <vector>
+
 #include <map>
-#include <set>
-#include <mutex>
-#include <utility>
 #include <memory>
+#include <mutex>
+#include <set>
+#include <utility>
+#include <vector>
 
 #include "include/fcgi_request.h"
 #include "include/record_status.h"
@@ -35,6 +33,7 @@ public:
   {
     return application_overload_;
   }
+
   inline void set_overload(bool overload_status)
   {
     application_overload_ = overload_status;

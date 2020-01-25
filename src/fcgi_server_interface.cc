@@ -1,28 +1,22 @@
-// Unix system call headers.
-  // General headers.
-#include <unistd.h>
-#include <sys/types.h>    // General. Also included for portability for
-                          // <sys/socket.h>.
-#include <fcntl.h>        // For file status flag manipulation.
-#include <syslog.h>       // For central logging.
-  // Socket headers.
-#include <sys/socket.h>
-#include <netinet/in.h>   // Defines constants for use with inet_ntop().
 #include <arpa/inet.h>    // For inet_pton() and inet_ntop().
-  // I/O multiplexing headers.
-#include <sys/time.h>     // For portability for <sys/select.h>.
+#include <fcntl.h>
+#include <netinet/in.h>   // Defines constants for use with inet_ntop().
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>     // For portability for <sys/select.h>.
+#include <sys/types.h>
+#include <syslog.h>
+#include <unistd.h>
 
-// C standard library headers in the C++ standard library.
 #include <cerrno>
 #include <cstdint>          // For std::uint8_t and others.
 #include <cstdlib>          // For std::getenv(), std::size_t, and EXIT_FAILURE.
-// C++ standard library headers.
-#include <stdexcept>        // For the standard exception classes.
+
+#include <memory>
 #include <mutex>
 #include <regex>
+#include <stdexcept>
 #include <utility>
-#include <memory>
 
 #include "external/error_handling/include/error_handling.h"
 #include "external/linux_scw/include/linux_scw.h"
@@ -36,8 +30,6 @@
 #include "include/request_data.h"
 #include "include/request_identifier.h"
 #include "include/utility.h"
-
-// Public member functions
 
 fcgi_si::FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
@@ -255,14 +247,14 @@ AcceptConnection()
   int flags {};
   while((flags = fcntl(new_socket_descriptor, F_GETFL)) == -1
     && errno == EINTR){}
-  if(flags == -1);
+  if(flags == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
 
   flags |= O_NONBLOCK;
 
-  while((flags = fcntl(new_socket_descriptor, F_SETFL)) == -1
+  while((flags = fcntl(new_socket_descriptor, F_SETFL, flags)) == -1
     && errno == EINTR){}
-  if(flags == -1);
+  if(flags == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
   // Update interface state to reflect the new connection.
@@ -660,31 +652,36 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
     result_pairs {};
 
-  // Construct result pairs disregarding any name that is not understood.
-  // TODO Mark each of the three configuration parameters as included or not
-  // and do not include duplicates in the output. This ensures that an over-
-  // flow does not occur.
+  // Construct result pairs disregarding any name that is not understood and
+  // omitting duplicates. Enumerate the cases for the switch.
+  std::map<std::vector<uint8_t>, char> value_present_map
+    {{fcgi_si::FCGI_MAX_CONNS, 0}, {fcgi_si::FCGI_MAX_REQS, 1},
+    {fcgi_si::FCGI_MPXS_CONNS, 2}};
   for(auto iter {get_value_pairs.begin()};
-      iter != get_value_pairs.end(); ++iter)
+      (iter != get_value_pairs.end()) && value_present_set.size(); ++iter)
   {
-    if(iter->first == fcgi_si::FCGI_MAX_CONNS)
+    auto vpm_it {value_present_map.find(iter->first)};
+    if(vpm_it != value_present_map.end())
     {
-      result_pairs.emplace_back(iter->first,
-        fcgi_si::uint32_tToUnsignedCharacterVector(maximum_connection_count_));
-    }
-    else if(iter->first == fcgi_si::FCGI_MAX_REQS)
-    {
-      result_pairs.emplace_back(iter->first,
-        fcgi_si::uint32_tToUnsignedCharacterVector(maximum_request_count_per_connection_));
-    }
-    else if(iter->first == fcgi_si::FCGI_MPXS_CONNS)
-    {
-      std::vector<uint8_t> v {(maximum_request_count_per_connection_ > 1) ?
-        static_cast<uint8_t>('1') : static_cast<uint8_t>('0')};
-      result_pairs.emplace_back(iter->first, v);
+      std::vector<uint8_t> result {};
+      switch(vpm_it->second)
+      {
+        case 0:
+          result = fcgi_si::uint32_tToUnsignedCharacterVector(
+            maximum_connection_count_);
+          break;
+        case 1:
+          result = fcgi_si::uint32_tToUnsignedCharacterVector(
+            maximum_request_count_per_connection_);
+          break;
+        case 2:
+          result.pushback((maximum_request_count_per_connection_ > 1) ?
+            static_cast<uint8_t>('1') : static_cast<uint8_t>('0'));
+      }
+      result_pairs.emplace_back(std::move(iter->first), std::move(result));
+      value_present_map.erase(vpm_it);
     }
   }
-
   // Process result pairs to generate the response string.
 
   // Allocate space for header.
@@ -720,8 +717,6 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   uint64_t header_and_content_length(result.size());
   uint64_t content_length {header_and_content_length
     - fcgi_si::FCGI_HEADER_LEN};
-  if(content_length > kMaxRecordContentByteLength)
-    throw; // TODO what?
 
   // Pad the record to a multiple of FCGI_HEADER_LEN.
   uint8_t pad_length {static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN
