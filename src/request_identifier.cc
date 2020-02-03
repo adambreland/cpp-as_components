@@ -16,11 +16,11 @@ fcgi_si::RequestIdentifier::
 RequestIdentifier(int descriptor, uint16_t FCGI_id)
 : pair_ {descriptor, FCGI_id}
 {
-  if((pair_.first < 0) || (pair_.second < 0))
+  if(pair_.first < 0)
   {
     std::string message
       {"A value less than zero was encountered when constructing a RequestIdentifier."};
-    throw std::invalid_argument {ERRNO_ERROR_STRING(message)};
+    throw std::invalid_argument {ERROR_STRING(message)};
   }
 }
 

@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTEFRACE_PAIR_PROCESSING_H_
-#define FCGI_SERVER_INTEFRACE_PAIR_PROCESSING_H_
+#ifndef FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
+#define FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
 
 #include <cstdint>
 #include <utility>
@@ -7,24 +7,79 @@
 
 namespace fcgi_si {
 
-// Returns the length in bytes of a name or value when it is encoded
-// using four bytes in the FastCGI name-value pair encoding. Names and
-// values are variable length byte arrays.
+// Determines and returns the length in bytes of a name or value when that
+// length was encoded using four bytes in the FastCGI name-value pair format.
 //
 // Parameters:
-// content_ptr: points to the first byte of the byte sequence which
-// determines the length of the corresponding name or value byte sequence.
+// byte_iter: An iterator to the first byte of a four-byte sequence.
 //
 // Requires:
-// 1) The byte pointed to by content_ptr and the next three bytes constitute
-//    a four-byte length as per the FastCGI name-value encoding.
+// 1) byte_iter has the following properties:
+//    a) *byte_iter is convertible to uint8_t.
+//    b) The four-byte sequence pointed to by byte_iter is the encoding
+//       in the FastCGI name-value pair format of the length of another
+//       byte sequence that requires a a four-byte length encoding.
 //
 // Effects:
-// 1) The value returned is the length in bytes of the corresponding name or
-//    value byte array.
-uint32_t ExtractFourByteLength(const uint8_t* content_ptr);
+// 1) The value returned is the number of bytes encoded in the four-byte
+//    sequence pointed to by byte_iter.
+template <typename ByteIter>
+uint32_t ExtractFourByteLength(ByteIter byte_iter)
+{
+  // TODO Add template type property checking with static_asserts.
 
-void EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* string_ptr);
+  // Mask out the leading 1 bit which must be present per the FastCGI
+  // name-value pair format. This bit does not encode length information.
+  // It indicates that the byte sequence has four elements instead of one.
+  uint32_t length {static_cast<uint32_t>(
+    static_cast<uint8_t>(*byte_iter) & 0x7fU)};
+  // Perform three shifts by 8 bits to extract all four bytes.
+  for(char i {0}; i < 3; i++)
+  {
+    length <<= 8;
+    ++byte_iter;
+
+    length += static_cast<uint8_t>(*byte_iter);
+  }
+  return length;
+}
+
+// Encodes length in the FastCGI name-value pair format and stores the
+// output sequence of four bytes in the byte buffer pointed to by byte_iter.
+//
+// Parameters:
+// length:    The length to be encoded per the FastCGI name-value pair
+//            format.
+// byte_iter: An iterator to a byte-buffer which will hold the four-byte
+//            sequence which encodes length.
+//
+// Requires:
+// 1) length requires four bytes when encoded in the FastCGI name-value pair
+//    format. I.e. length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
+// 2) byte_iter has the following properties:
+//    a) *byte_iter is convertible to uint8_t.
+//    b) Four uint8_t values can be appended to the buffer pointer to by
+//       byte_iter.
+//
+// Effects:
+// 1) Four bytes are appended to the buffer pointer to by byte_iter. The
+//    byte sequence encodes length in the FastCGI name-value pair format.
+template<typename ByteIter>
+void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
+{
+  // TODO Add template type property checking with static asserts.
+
+  // Set the leading bit to 1 to indicate that a four-byte sequence is
+  // present.
+  *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
+
+  for(char i {0}; i < 3; i++)
+  {
+    ++byte_iter;
+
+    *byte_iter = length >> (16 - (8*i));
+  }
+}
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
@@ -59,4 +114,4 @@ std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si
 
-#endif // FCGI_SERVER_INTEFRACE_PAIR_PROCESSING_H_
+#endif // FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_

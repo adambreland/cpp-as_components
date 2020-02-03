@@ -1,19 +1,17 @@
-#ifndef FCGI_SERVER_INTERFACE_FCGI_SERVER_INTERFACE_H_
-#define FCGI_SERVER_INTERFACE_FCGI_SERVER_INTERFACE_H_
+#ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_
 
-#include <sys/types.h>   // For ssize_t.
-
-#include <cstdint>       // For uint8_t.
-#include <cstdlib>
+#include <cstdint>       // For uint8_t, ... .
+#include <cstdlib>       // For EXIT_FAILURE.
 
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
-#include <utility>
 #include <vector>
 
 #include "include/fcgi_request.h"
+#include "include/protocol_constants.h"
 #include "include/record_status.h"
 #include "include/request_data.h"
 #include "include/request_identifier.h"
@@ -259,4 +257,4 @@ private:
 
 } // namespace fcgi_si.
 
-#endif // FCGI_SERVER_INTERFACE_FCGI_SERVER_INTERFACE_H_
+#endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_

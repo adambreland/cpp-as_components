@@ -178,6 +178,10 @@ fcgi_si::RecordStatus::Read(int connection)
                       &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
+                  default : {
+                    // TODO add run-time error action as no other types should
+                    // be present.
+                  }
                 }
               } // RELEASE interface_state_mutex_.
               // Follow discipline for local while
@@ -232,7 +236,7 @@ void fcgi_si::RecordStatus::UpdateAfterHeaderCompletion(int connection)
   // Extract type and request_id.
   type_ = static_cast<fcgi_si::FCGIType>(header_[fcgi_si::kHeaderTypeIndex]);
   uint16_t FCGI_request_id = header_[fcgi_si::kHeaderRequestIDB1Index];
-  FCGI_request_id << 8; // one byte
+  FCGI_request_id <<= 8; // one byte
   FCGI_request_id += header_[fcgi_si::kHeaderRequestIDB0Index];
   request_id_ = fcgi_si::RequestIdentifier(connection, FCGI_request_id);
 

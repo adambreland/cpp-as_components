@@ -88,29 +88,33 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
 
 fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
 {
-  interface_ptr_ = request.interface_ptr_;
-  request_identifier_ = request.request_identifier_;
-  environment_map_ = std::move(request.environment_map_);
-  request_stdin_content_ = std::move(request.request_stdin_content_);
-  request_data_content_ = std::move(request.request_data_content_);
-  role_ = request.role_;
-  close_connection_ = request.close_connection_;
-  was_aborted_ = request.was_aborted_;
-  completed_ = request.completed_;
-  write_mutex_ptr_ = request.write_mutex_ptr_;
-  interface_state_mutex_ptr_ = request.interface_state_mutex_ptr_;
+  if(this != &request)
+  {
+    interface_ptr_ = request.interface_ptr_;
+    request_identifier_ = request.request_identifier_;
+    environment_map_ = std::move(request.environment_map_);
+    request_stdin_content_ = std::move(request.request_stdin_content_);
+    request_data_content_ = std::move(request.request_data_content_);
+    role_ = request.role_;
+    close_connection_ = request.close_connection_;
+    was_aborted_ = request.was_aborted_;
+    completed_ = request.completed_;
+    write_mutex_ptr_ = request.write_mutex_ptr_;
+    interface_state_mutex_ptr_ = request.interface_state_mutex_ptr_;
 
-  request.interface_ptr_ = nullptr;
-  request.request_identifier_ = fcgi_si::RequestIdentifier {};
-  request.environment_map_.clear();
-  request.request_stdin_content_.clear();
-  request.request_data_content_.clear();
-  // request.role_ is unchanged.
-  request.close_connection_ = false;
-  request.was_aborted_ = false;
-  request.completed_ = true;
-  request.write_mutex_ptr_ = nullptr;
-  request.interface_state_mutex_ptr_ = nullptr;
+    request.interface_ptr_ = nullptr;
+    request.request_identifier_ = fcgi_si::RequestIdentifier {};
+    request.environment_map_.clear();
+    request.request_stdin_content_.clear();
+    request.request_data_content_.clear();
+    // request.role_ is unchanged.
+    request.close_connection_ = false;
+    request.was_aborted_ = false;
+    request.completed_ = true;
+    request.write_mutex_ptr_ = nullptr;
+    request.interface_state_mutex_ptr_ = nullptr;
+  }
+  return *this;
 }
 
 bool fcgi_si::FCGIRequest::AbortStatus()

@@ -42,14 +42,14 @@ bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
   bool result {true};
   if(FCGI_PARAMS_.size())
   {
-    std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-      name_value_pair_list {fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
+    using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+    std::vector<byte_seq_pair> name_value_pair_list
+      {fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
       FCGI_PARAMS_.data())};
     if(name_value_pair_list.size())
     {
-      using byte_seq_par = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
       auto first_component_comp =
-        [](const byte_seq_par& lhs, const byte_seq_par& rhs)->bool
+        [](const byte_seq_pair& lhs, const byte_seq_pair& rhs)->bool
         {
           return lhs.first < rhs.first;
         };

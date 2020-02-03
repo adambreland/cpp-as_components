@@ -7,3 +7,8 @@
 *.i
 
 external/*
+
+bazel-bin
+bazel-fcgi_si
+bazel-out
+bazel-testlogs

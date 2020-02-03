@@ -5,30 +5,6 @@
 #include "include/pair_processing.h"
 #include "include/protocol_constants.h"
 
-uint32_t fcgi_si::
-ExtractFourByteLength(const uint8_t* content_ptr)
-{
-  // mask out leading 1;
-  uint32_t length {static_cast<uint32_t>(*content_ptr & 0x7f)};
-  // Perform three shifts by 8 bits to extract all four bytes.
-  for(char i {0}; i < 3; i++)
-  {
-    length <<= 8;
-    content_ptr++;
-    length += *content_ptr;
-  }
-  return length;
-}
-
-void fcgi_si::
-EncodeFourByteLength(uint32_t length, std::vector<uint8_t>* vector_ptr)
-{
-  for(char i {0}; i < 4; i++)
-  {
-    vector_ptr->push_back(length >> (24 - (8*i)));
-  }
-}
-
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 fcgi_si::
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)

@@ -12,6 +12,7 @@
 #include <cstdint>          // For std::uint8_t and others.
 #include <cstdlib>          // For std::getenv(), std::size_t, and EXIT_FAILURE.
 
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <regex>
@@ -91,27 +92,27 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
   int getsockopt_return {};
 
-  while((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 && errno == EINTR){}
+    == -1) && (errno == EINTR)){}
   if(getsockopt_return == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
   int socket_domain {getsockopt_int_buffer};
   socket_domain_ = socket_domain;
 
   getsockopt_int_buffer_size = sizeof(int);
-  while((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 & errno == EINTR){}
+    == -1) && (errno == EINTR)){}
   if(getsockopt_return == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_TYPE")};
   if(getsockopt_int_buffer != SOCK_STREAM)
     throw std::runtime_error {ERROR_STRING("The socket used for construction of an FCGIServerInterface object\nwas not a stream socket.")};
 
   getsockopt_int_buffer_size = sizeof(int);
-  while((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 & errno == EINTR){}
+    == -1) && (errno == EINTR)){}
   if(getsockopt_return == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_ACCEPTCONN")};
   if(getsockopt_int_buffer != 1) // The value 1 is used to indicate listening status.
@@ -482,7 +483,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
             bool close_connection =
               !(record_status.get_local_content()[
                   fcgi_si::kBeginRequestFlagsIndex]
-                & fcgi_si::FCGI_KEEP_CONN);
+                && fcgi_si::FCGI_KEEP_CONN);
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
             AddRequest(request_id, role, close_connection);
@@ -658,7 +659,7 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
     {{fcgi_si::FCGI_MAX_CONNS, 0}, {fcgi_si::FCGI_MAX_REQS, 1},
     {fcgi_si::FCGI_MPXS_CONNS, 2}};
   for(auto iter {get_value_pairs.begin()};
-      (iter != get_value_pairs.end()) && value_present_set.size(); ++iter)
+      (iter != get_value_pairs.end()) && value_present_map.size(); ++iter)
   {
     auto vpm_it {value_present_map.find(iter->first)};
     if(vpm_it != value_present_map.end())
@@ -675,7 +676,7 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
             maximum_request_count_per_connection_);
           break;
         case 2:
-          result.pushback((maximum_request_count_per_connection_ > 1) ?
+          result.push_back((maximum_request_count_per_connection_ > 1) ?
             static_cast<uint8_t>('1') : static_cast<uint8_t>('0'));
       }
       result_pairs.emplace_back(std::move(iter->first), std::move(result));
@@ -699,13 +700,13 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
     (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
       fcgi_si::EncodeFourByteLength(four_byte_mask | item_size,
-        &result);
+        std::back_inserter(result));
     // Encode value temp_length
     item_size = pair_iter->second.size();
     (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
       fcgi_si::EncodeFourByteLength(four_byte_mask | item_size,
-        &result);
+        std::back_inserter(result));
     // Append character bytes of name and value.
     result.insert(result.end(), pair_iter->first.begin(), pair_iter->first.end());
     result.insert(result.end(), pair_iter->second.begin(), pair_iter->second.end());

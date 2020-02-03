@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_UTILITY_H_
-#define FCGI_SERVER_INTERFACE_UTILITY_H_
+#ifndef FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
+#define FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
 
 #include <cstdint>
 
@@ -21,6 +21,6 @@ void PopulateHeader(ByteIter byte_iter, fcgi_si::FCGIType type,
   *byte_iter++ = 0;
 }
 
-} // End namespace fcgi_si
+} // namespace fcgi_si
 
-#endif // FCGI_SERVER_INTERFACE_UTILITY_H_
+#endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
