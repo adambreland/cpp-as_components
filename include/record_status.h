@@ -73,7 +73,7 @@ private:
 
   // The header of the FCGI record. The number of valid bytes in a
   // prefix of header is determined by the value of bytes received.
-  uint8_t header_[8];
+  uint8_t header_[fcgi_si::FCGI_HEADER_LEN];
 
   // An accumulator variable to track header, content, and padding
   // completion and, hence, record completion.

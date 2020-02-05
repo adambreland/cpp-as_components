@@ -645,13 +645,14 @@ SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
 bool fcgi_si::FCGIServerInterface::
 SendGetValuesResult(int connection, const RecordStatus& record_status)
 {
-  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-    get_value_pairs {fcgi_si::
-      ProcessBinaryNameValuePairs(record_status.get_local_content().size(),
-      record_status.get_local_content().data())};
+  using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+  std::vector<byte_seq_pair> get_value_pairs {};
+  if(record_status.get_local_content().size())
+    get_value_pairs = fcgi_si::ProcessBinaryNameValuePairs(
+      record_status.get_local_content().size(),
+      record_status.get_local_content().data());
 
-  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-    result_pairs {};
+  std::vector<byte_seq_pair> result_pairs {};
 
   // Construct result pairs disregarding any name that is not understood and
   // omitting duplicates. Enumerate the cases for the switch.
@@ -689,41 +690,39 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   std::vector<uint8_t> result(fcgi_si::FCGI_HEADER_LEN, 0);
 
   // Since only known names are accepted, assume that the lengths of
-  // the names and values can fit in either 7 or 31 bits.
+  // the names and values can fit in either 7 or 31 bits, i.e. 1 or 4 bytes.
+  // (Currently only 1 byte is needed to encode lengths.)
   for(auto pair_iter = result_pairs.begin(); pair_iter != result_pairs.end();
     ++pair_iter)
   {
-    // Mask for encoding four byte lengths.
-    uint32_t four_byte_mask(1LU << 31);
-    // Encode name length;
+    // Encode name length.
     uint32_t item_size(pair_iter->first.size());
     (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      fcgi_si::EncodeFourByteLength(four_byte_mask | item_size,
-        std::back_inserter(result));
-    // Encode value temp_length
+      fcgi_si::EncodeFourByteLength(item_size, std::back_inserter(result));
+    // Encode value length.
     item_size = pair_iter->second.size();
     (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      fcgi_si::EncodeFourByteLength(four_byte_mask | item_size,
-        std::back_inserter(result));
+      fcgi_si::EncodeFourByteLength(item_size, std::back_inserter(result));
     // Append character bytes of name and value.
     result.insert(result.end(), pair_iter->first.begin(), pair_iter->first.end());
     result.insert(result.end(), pair_iter->second.begin(), pair_iter->second.end());
   }
 
   // Prepare to write the response.
-
-  // Check that the content length can be encoded in the header.
+  // Note that it is not currently possible to exceed the limit for the
+  // content size of a singe record (2^16-1 bytes).
+  // Pad the record to a multiple of FCGI_HEADER_LEN.
   uint64_t header_and_content_length(result.size());
   uint64_t content_length {header_and_content_length
     - fcgi_si::FCGI_HEADER_LEN};
-
-  // Pad the record to a multiple of FCGI_HEADER_LEN.
-  uint8_t pad_length {static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN
-    - (header_and_content_length % fcgi_si::FCGI_HEADER_LEN))};
+    // A safe narrowing conversion.
+  uint8_t remainder(header_and_content_length % fcgi_si::FCGI_HEADER_LEN);
+  uint8_t pad_length {
+    (remainder) ? fcgi_si::FCGI_HEADER_LEN - remainder
+                : 0};
   result.insert(result.end(), pad_length, 0);
-
   fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT,
     fcgi_si::FCGI_NULL_REQUEST_ID, content_length, pad_length);
 

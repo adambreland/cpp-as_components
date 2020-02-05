@@ -58,11 +58,11 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 //    format. I.e. length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
 // 2) byte_iter has the following properties:
 //    a) *byte_iter is convertible to uint8_t.
-//    b) Four uint8_t values can be appended to the buffer pointer to by
+//    b) Four uint8_t values can be appended to the buffer pointed to by
 //       byte_iter.
 //
 // Effects:
-// 1) Four bytes are appended to the buffer pointer to by byte_iter. The
+// 1) Four bytes are appended to the buffer pointed to by byte_iter. The
 //    byte sequence encodes length in the FastCGI name-value pair format.
 template<typename ByteIter>
 void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
@@ -106,9 +106,6 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 //    name-value pairs, an empty vector is returned.
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
-
-std::vector<uint8_t>
-ConvertToByteVector(const uint8_t* content_ptr, uint32_t content_length);
 
 std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
