@@ -7,6 +7,138 @@
 
 namespace fcgi_si {
 
+// Determines if a sequence of name-value pairs can be encoded in the
+// binary FastCGI name-value pair format and transmitted to a client
+// using scatter-gather writing.
+//
+// Parameters:
+// pair_iter: an iterator to a range of std::pair objects.
+// end: an iterator to one-past-the-last element in the range of std::pair
+// objects.
+//
+// Requires:
+// 1) [pair_iter, end) is a valid range.
+// 2) When the range [pair_iter, end) is non-empty:
+//    a) pair_iter points to a std::pair object which holds containers
+//       for sequences of bytes.
+//    b) The containers of each std::pair object must store objects
+//       contiguously in memory. In particular, for container c, the
+//       expression [c.data(), c.data()+c.size()) is defined and gives
+//       a valid range of the stored objects.
+//    c) For each container, let T be the type of the elements of the container.
+//       Let p be a pointer of type T*. The following expression is defined:
+//       static_cast<uint8_t*>(p).
+//
+// Effects:
+// 1)
+template<typename ByteSeqPairIter>
+std::tuple<bool, std::vector<struct iovec>, const std::vector<uint8_t>,
+  std::size_t number_to_write>
+EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end)
+{
+  if(pair_iter != end)
+  {
+    // Lambda functions to simplify the loops below.
+    auto size_iter = [&](int i)->std::size_t
+      {
+        if(i == 0)
+          return pair_iter->first.size();
+        else
+          return pair_iter->second.size();
+      };
+
+    auto data_iter = [&](int i)->uint8_t*
+      {
+        if(i == 0)
+          return static_cast<uint8_t*>(pair_iter->first.data());
+        else
+          return static_cast<uint8_t*>(pair_iter->second.data());
+      };
+
+    // A binary sequence of length information encoded in the
+    // FastCGI name-value pair format is created and returned to
+    // the caller.
+    std::vector<uint8_t> encoded_name_value_lengths {};
+    std::vector<std::size_t> length_offsets {0};
+
+    // iovec_list will hold three instances of struct iovec for every
+    // name-value pair. The first instance describes name and value length
+    // information. It points to a range of bytes in encoded_name_value_lengths.
+    // The second and third instances hold name and value information,
+    // repsectively. They point to the buffers of containers from a std::pair
+    // object when such buffers exist.
+    std::vector<struct iovec> iovec_list {};
+    std::vector<std::vector<struct iovec>::size_type> absent_buffer_index_list {};
+
+    // An accumulator for use when checking the return value of a scatter-
+    // gather write function.
+    std::size_t number_to_write {0};
+
+    // Loop iteration continues even if a name or value is rejected.
+    // Rejection status is checked after iteration.
+    bool rejected {false};
+
+    uint8_t* next_name_value_iov_base {nullptr};
+    for(/*no-op*/; pair_iter != end; ++pair_iter)
+    {
+      std::size_t iov_len {0};
+      std::size_t size_array[2];
+      uint8_t* data_array[2];
+
+      for(int i {0}; i < 2; ++i)
+      {
+        size_array[i] = size_iter(i);
+        if(size_array[i])
+          data_array[i] = data_iter(i);
+        else
+        {
+          data_array[i] = nullptr;
+          absent_buffer_index_list.push_back[iovec_list.size() + 1 + i];
+        }
+        if(size <= fcgi_si::kNameValuePairSingleByteLength)
+        {
+          // A safe narrowing of size from std::size_t to uint8_t.
+          encoded_name_value_lengths.push_back(size);
+          iov_len += 1;
+        }
+        else if(size <= fcgi_si::kNameValuePairFourByteLength)
+        {
+          // A safe narrowing of size from std::size_t to a representation of
+          // a subset of the range of uint32_t.
+          EncodeFourByteLength(size, std::back_inserter(encoded_name_value_lengths));
+          iov_len += 4;
+        }
+        else
+        {
+          rejected = true;
+          encoded_name_value_lengths.push_back(0);
+          iov_len += 1;
+        }
+      }
+
+      iovec_list.insert(iovec_list.end(), {{nullptr, iov_len},
+        {data_array[0], size_array[0]}, {data_array[1], size_array[1]}});
+      length_offsets.push_back(iov_len);
+      number_to_write += iov_len + size_array[0] + size_array[1];
+    }
+    // Check for rejection which was detected during length extraction.
+    // Check for rejection based on int overflow on the number of buffers
+    // for scatter-gather writing.
+    if(rejected || iovec_list.size() > std::numeric_limits<int>::max())
+      return {false, {}, {}, 0};
+
+    // Since the memory of encoded_name_value_lengths is stable, fill in
+    // iov_base pointers from encoded_name_value_lengths.data().
+
+
+    // Process any absent name or value buffers.
+
+    return {true, iovec_list, encoded_name_value_lengths, number_to_write};
+
+  }
+  return {true, {}, {}, 0};
+}
+
 // Determines and returns the length in bytes of a name or value when that
 // length was encoded using four bytes in the FastCGI name-value pair format.
 //
