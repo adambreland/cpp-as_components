@@ -7,19 +7,9 @@
 
 namespace fcgi_si {
 
-template<typename ByteIter>
-void PopulateHeader(ByteIter byte_iter, fcgi_si::FCGIType type,
-  uint16_t FCGI_id, uint16_t content_length, uint8_t padding_length)
-{
-  *byte_iter++ = fcgi_si::FCGI_VERSION_1;
-  *byte_iter++ = static_cast<uint8_t>(type);
-  *byte_iter++ = static_cast<uint8_t>(FCGI_id >> 8);
-  *byte_iter++ = static_cast<uint8_t>(FCGI_id);
-  *byte_iter++ = static_cast<uint8_t>(content_length >> 8);
-  *byte_iter++ = static_cast<uint8_t>(content_length);
-  *byte_iter++ = padding_length;
-  *byte_iter++ = 0;
-}
+void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length);
 
 } // namespace fcgi_si
 
