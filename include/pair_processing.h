@@ -1,6 +1,7 @@
 #ifndef FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
 #define FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
 
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -13,6 +14,43 @@
 #include "include/utility.h"
 
 namespace fcgi_si {
+
+// Encodes length in the FastCGI name-value pair format and stores the
+// output sequence of four bytes in the byte buffer pointed to by byte_iter.
+//
+// Parameters:
+// length:    The length to be encoded per the FastCGI name-value pair
+//            format.
+// byte_iter: An iterator to a byte-buffer which will hold the four-byte
+//            sequence which encodes length.
+//
+// Requires:
+// 1) length requires four bytes when encoded in the FastCGI name-value pair
+//    format. I.e. length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
+// 2) byte_iter has the following properties:
+//    a) *byte_iter is convertible to uint8_t.
+//    b) Four uint8_t values can be appended to the buffer pointed to by
+//       byte_iter.
+//
+// Effects:
+// 1) Four bytes are appended to the buffer pointed to by byte_iter. The
+//    byte sequence encodes length in the FastCGI name-value pair format.
+template<typename ByteIter>
+void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
+{
+  // TODO Add template type property checking with static asserts.
+
+  // Set the leading bit to 1 to indicate that a four-byte sequence is
+  // present.
+  *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
+
+  for(char i {0}; i < 3; i++)
+  {
+    ++byte_iter;
+
+    *byte_iter = length >> (16 - (8*i));
+  }
+}
 
 // Determines if a sequence of name-value pairs can be encoded in the
 // binary FastCGI name-value pair format and transmitted to a client
@@ -38,16 +76,19 @@ namespace fcgi_si {
 // Effects:
 // 1)
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::vector<struct iovec>, const std::vector<uint8_t>,
+std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   fcgi_si::FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
 {
   if(pair_iter == end)
-    return {true, {}, {}, 0, end};
+    return {true, 0, {}, {}, 0, end};
 
   const std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
   const ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
+  const uint16_t padding_MAX {fcgi_si::kMaxRecordContentByteLength - 7};
+  // Reduce by 7 to ensure that then length of a "full" records is a
+  // multiple of 8.
 
   // Determine the maximum number of iovec structures that can
   // be used for scatter-gather writing.
@@ -59,151 +100,254 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 
   // Lambda functions to simplify the loops below.
   auto size_iter = [&](int i)->std::size_t
-    {
-      if(i == 0)
-        return pair_iter->first.size();
-      else
-        return pair_iter->second.size();
-    };
+  {
+    if(i == 0)
+      return pair_iter->first.size();
+    else
+      return pair_iter->second.size();
+  };
 
   auto data_iter = [&](int i)->uint8_t*
-    {
-      if(i == 0)
-        return (uint8_t*)(pair_iter->first.data());
-      else
-        return (uint8_t*)(pair_iter->second.data());
-    };
+  {
+    if(i == 0)
+      return (uint8_t*)(pair_iter->first.data());
+    else
+      return (uint8_t*)(pair_iter->second.data());
+  };
 
   // A binary sequence of headers and length information encoded in the
   // FastCGI name-value pair format is created and returned to
   // the caller. A pair which holds an index into iovec_list and an index into
-  // encoded_name_value_lengths is stored whenever a record
+  // local_buffers is stored whenever a record
   // is referred to by an iovec_list element. This pair allows pointer values
-  // to be determined once the memory allocated for encoded_name_value_lengths
+  // to be determined once the memory allocated for local_buffers
   // will no longer change.
-  // An initial header's worth is allocated in encoded_name_value_lengths.
-  std::vector<std::uint8_t> encoded_name_value_lengths(
-    fcgi_si::FCGI_HEADER_LEN);
-  fcgi_si::PopulateHeader(encoded_name_value_lengths.data(), type, FCGI_id,
-    fcgi_si::kMaxRecordContentByteLength, 0);
-  std::vector<std::pair<std::vector<struct iovec>::size_type,
+  // An initial header's worth is allocated in local_buffers.
+  std::vector<std::uint8_t> local_buffers {};
+  std::vector<std::pair<std::vector<iovec>::size_type,
     std::vector<uint8_t>::size_type>> index_pairs {};
 
-  // iovec_list will usually hold three instances of struct iovec for every
+  // iovec_list will usually hold three instances of iovec for every
   // name-value pair. The first instance describes name and value length
-  // information. It points to a range of bytes in encoded_name_value_lengths.
+  // information. It points to a range of bytes in local_buffers.
   // The second and third instances hold name and value information,
   // repsectively. They point to the buffers of containers from a source
-  // std::pair object when such buffers exist. A list of iovec instances
-  // which had zero lengths is kept to allow a default, non-null pointer
-  // value to be used in those instances.
-  std::vector<struct iovec> iovec_list {{nullptr, fcgi_si::FCGI_HEADER_LEN}};
-  std::vector<std::vector<struct iovec>::size_type>
-    absent_buffer_iovec_index_list {};
+  // std::pair object when such buffers exist.
+  std::vector<iovec> iovec_list {};
 
-  std::size_t number_to_write {fcgi_si::FCGI_HEADER_LEN};
+  std::size_t number_to_write {0};
   std::size_t previous_content_length {0};
+  std::vector<uint8_t>::size_type previous_header_offset {0};
+  std::size_t nv_pair_bytes_placed {0};
+  bool incomplete_nv_write {false};
+  bool name_or_value_too_big {false};
+
+  // Determine the initial values of the break variables.
+  std::size_t remaining_iovec_count(iovec_max - 1);
+    // Safe conversion from signed to unsigned.
+  std::size_t remaining_byte_count {ssize_t_MAX - (FCGI_HEADER_LEN - 1)};
 
   for(/*no-op*/; pair_iter != end; ++pair_iter)
   {
+    if(!remaining_iovec_count || !remaining_byte_count)
+      break;
+
     // Variables for name and value information.
-    std::size_t iov_len {0};
-    std::size_t size_array[2];
+    std::size_t size_array[3] = {};
+    std::size_t sums[3] = {};
+    std::vector<uint8_t>::size_type name_value_buffer_offset
+      {local_buffers.size()};
     std::uint8_t* data_array[2];
 
-    // Variables which determine how much we can write.
-    std::size_t remaining_iovec_count(iovec_max - iovec_list.size());
-    std::size_t remaining_byte_count(ssize_t_MAX - number_to_write);
-
-    if(remaining_iovec_count == 0 || remaining_byte_count == 0)
-      return {true, iovec_list, encoded_name_value_lengths, 0, pair_iter};
+    // Reset for a new pair.
+    nv_pair_bytes_placed = offset;
 
     // Collect information about the name and value byte sequences.
-    for(int i {0}; i < 2; ++i)
+    for(int i {1}; i < 3; i++)
     {
-      size_array[i] = size_iter(i);
+      size_array[i] = size_iter(i-1);
       if(size_array[i])
-        data_array[i] = data_iter(i);
+        data_array[i-1] = data_iter(i-1);
       else
-      {
-        data_array[i] = nullptr;
-        absent_buffer_iovec_index_list.push_back[iovec_list.size() + 1 + i];
-        // iovec_list.size() + 1 + i is an index to the struct iovec
-        // instance for the current name if i = 0 or an index to the
-        // struct iovec instance for the current value if i = 1.
-      }
+        data_array[i-1] = nullptr;
       if(size_array[i] <= fcgi_si::kNameValuePairSingleByteLength)
       {
         // A safe narrowing of size_array[i] from std::size_t to std::uint8_t.
-        encoded_name_value_lengths.push_back(size_array[i]);
-        iov_len += 1;
+        local_buffers.push_back(size_array[i]);
+        size_array[0] += 1;
       }
       else if(size_array[i] <= fcgi_si::kNameValuePairFourByteLength)
       {
         // A safe narrowing of size from std::size_t to a representation of
         // a subset of the range of uint32_t.
         EncodeFourByteLength(size_array[i],
-          std::back_inserter(encoded_name_value_lengths));
-        iov_len += 4;
+          std::back_inserter(local_buffers));
+        size_array[0] += 4;
       }
       else
       {
+        name_or_value_too_big = true;
         // TODO figure what to do when we reject immediately.
       }
     }
-    // Determine what information we can send.
+    if(name_or_value_too_big)
+    {
+      //
+    }
+    sums[1] = size_array[0];
     // Check for potential overflows.
-    if(size_array[0] > (size_t_MAX - iov_len))
+    if(size_array[1] > (size_t_MAX - sums[1]))
     {
       // Overflow.
     }
     else
     {
-      std::size_t len_and_name {iov_len + size_array[0]};
-      if(size_array[1] > (size_t_MAX - len_and_name))
+      sums[2] = size_array[1] + sums[1];
+      if(size_array[2] > (size_t_MAX - sums[2]))
       {
         // Overflow.
       }
-      else
+      else // We can proceed normally to iteratively produce FastCGI records.
       {
-        std::size_t total_len {len_and_name + size_array[1]};
-        if(offset) // (Unusual branch - first iteration only)
-        {
-          // The value of previous_content_length must be zero.
-          // Determine what buffer we should start writing from.
-          if(offset < iov_len)
-          {
-            if((iov_len - offset) <)
-          }
-          else if(offset < len_and_name)
-          {
+        std::size_t total_length {size_array[2] + sums[2]};
+        std::size_t remaining_nv_bytes_to_place {total_length
+          - nv_pair_bytes_placed};
 
-          }
-          else
-          {
-
-          }
-        }
-        else // No offset (the usual case).
+        auto determine_index = [&]()->std::size_t
         {
-          //
+          int i {0};
+          for(/*no-op*/; i < 2; i++)
+            if(nv_pair_bytes_placed < sums[i+1])
+              return i;
+          return i;
+        };
+
+        bool padding_limit_reached {false};
+        // Start loop which produces records.
+        while(remaining_nv_bytes_to_place && !padding_limit_reached)
+        {
+          if(!previous_content_length) // Start a new record.
+          {
+            // Need enough iovec structs for a header, data, and padding.
+            // Need enough bytes for a header and some data. An iovec struct
+            // and fcgi_si::FCGI_HEADER_LEN - 1 bytes were reserved.
+            if((remaining_iovec_count >= 2) &&
+               (remaining_byte_count >= (fcgi_si::FCGI_HEADER_LEN + 1)))
+            {
+              previous_header_offset = local_buffers.size();
+              index_pairs.push_back({iovec_list.size(), previous_header_offset});
+              iovec_list.push_back({nullptr, fcgi_si::FCGI_HEADER_LEN});
+              local_buffers.insert(local_buffers.end(), fcgi_si::FCGI_HEADER_LEN, 0);
+              fcgi_si::PopulateHeader(local_buffers.data() + previous_header_offset,
+                type, FCGI_id, 0, 0);
+              number_to_write += fcgi_si::FCGI_HEADER_LEN;
+              remaining_byte_count -= fcgi_si::FCGI_HEADER_LEN;
+              remaining_iovec_count--;
+            }
+            else
+            {
+              incomplete_nv_write = true; // As remaining_nv_bytes_to_place != 0.
+              break;
+            }
+          }
+          // Start loop over the three potential buffers.
+          std::size_t index {determine_index()};
+          for(/*no-op*/; index < 3; index++)
+          {
+            // Variables which determine how much we can write.
+            std::size_t remaining_content_capacity
+              {padding_MAX - previous_content_length};
+            std::size_t current_limit
+              {std::min(remaining_byte_count, remaining_content_capacity)};
+            std::size_t number_to_place
+              {std::min(remaining_nv_bytes_to_place, current_limit)};
+            // Determine how many we can write for a given buffer.
+            std::size_t local_remaining
+              {size_array[index] - (nv_pair_bytes_placed - sums[index])};
+            std::size_t local_number_to_place
+              {std::min(local_remaining, number_to_place)};
+            // Write the determined amount.
+            if(index == 0) // Special processing for name-value length info.
+            {
+              iovec_list.push_back({nullptr, local_number_to_place});
+              index_pairs.push_back({iovec_list.size() - 1,
+                name_value_buffer_offset + nv_pair_bytes_placed});
+              remaining_iovec_count--;
+            }
+            else // Adding an iovec structure for name or value byte sequence.
+            {
+              // Either of size_array[1] or size_array[2] may be zero. For
+              // example, we may add a iovec instance for size_array[0]
+              // that specifies an empty name or value.
+              if(local_number_to_place)
+              {
+                iovec_list.push_back({data_array[index-1] + (size_array[index]
+                  - local_remaining), local_number_to_place});
+                remaining_iovec_count--;
+              }
+            }
+            // Update tracking variables.
+            nv_pair_bytes_placed += local_number_to_place;
+            remaining_nv_bytes_to_place -= local_number_to_place;
+            number_to_write += local_number_to_place;
+            remaining_byte_count -= local_number_to_place;
+            // Update record information.
+            previous_content_length += local_number_to_place;
+            local_buffers[previous_header_offset
+              + fcgi_si::kHeaderContentLengthB1Index]
+              = static_cast<uint8_t>(previous_content_length >> 8);
+            local_buffers[previous_header_offset
+              + fcgi_si::kHeaderContentLengthB0Index]
+              = static_cast<uint8_t>(previous_content_length);
+            // Check if a limit was reached. Need at least an iovec struct for
+            // padding. Need enough bytes for padding. These limits were
+            // reserved in the initialization of remaining_iovec_count and
+            // remaining_byte_count.
+            if(!remaining_iovec_count || !remaining_byte_count)
+            {
+              padding_limit_reached = true;
+              if(nv_pair_bytes_placed < total_length)
+                incomplete_nv_write = true;
+              break;
+            }
+            // Check if the record was finished.
+            if(previous_content_length == padding_MAX)
+            {
+              previous_content_length = 0;
+              break; // Need to start a new record.
+            }
+          }
         }
       }
     }
-
-
-    iovec_list.insert(iovec_list.end(), {{nullptr, iov_len},
-      {data_array[0], size_array[0]}, {data_array[1], size_array[1]}});
-    length_offsets.push_back(iov_len);
-    number_to_write += iov_len + size_array[0] + size_array[1];
+    offset = 0;
+    if(incomplete_nv_write || name_or_value_too_big)
+      break;
+  }
+  // Check if padding is needed.
+  // (Safe narrowing.)
+  uint8_t pad_mod(previous_content_length % fcgi_si::FCGI_HEADER_LEN);
+  if(pad_mod)
+  {
+    uint8_t pad_mod_complement(fcgi_si::FCGI_HEADER_LEN - pad_mod);
+      // Safe narrowing.
+    index_pairs.push_back({iovec_list.size(), local_buffers.size()});
+    iovec_list.push_back({nullptr, pad_mod_complement});
+    local_buffers.insert(local_buffers.end(), pad_mod_complement, 0);
+    local_buffers[previous_header_offset + fcgi_si::kHeaderPaddingLengthIndex]
+      = pad_mod_complement;
+    number_to_write += pad_mod_complement;
   }
 
-  // Since the memory of encoded_name_value_lengths is stable, fill in
-  // iov_base pointers from encoded_name_value_lengths.data().
-
-
-  // Process any absent name or value buffers.
-
+  // Since the memory of local_buffers is stable, fill in
+  // iov_base pointers from local_buffers.data().
+  for(auto pair : index_pairs)
+    iovec_list[pair.first].iov_base =
+      (void*)(local_buffers.data() + pair.second);
+  // Check for rejection based on a limit or name or value that was too big.
+  return std::make_tuple(!name_or_value_too_big, number_to_write,
+    std::move(iovec_list), std::move(local_buffers),
+    ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
 // Determines and returns the length in bytes of a name or value when that
@@ -241,43 +385,6 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
     length += static_cast<uint8_t>(*byte_iter);
   }
   return length;
-}
-
-// Encodes length in the FastCGI name-value pair format and stores the
-// output sequence of four bytes in the byte buffer pointed to by byte_iter.
-//
-// Parameters:
-// length:    The length to be encoded per the FastCGI name-value pair
-//            format.
-// byte_iter: An iterator to a byte-buffer which will hold the four-byte
-//            sequence which encodes length.
-//
-// Requires:
-// 1) length requires four bytes when encoded in the FastCGI name-value pair
-//    format. I.e. length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
-// 2) byte_iter has the following properties:
-//    a) *byte_iter is convertible to uint8_t.
-//    b) Four uint8_t values can be appended to the buffer pointed to by
-//       byte_iter.
-//
-// Effects:
-// 1) Four bytes are appended to the buffer pointed to by byte_iter. The
-//    byte sequence encodes length in the FastCGI name-value pair format.
-template<typename ByteIter>
-void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
-{
-  // TODO Add template type property checking with static asserts.
-
-  // Set the leading bit to 1 to indicate that a four-byte sequence is
-  // present.
-  *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
-
-  for(char i {0}; i < 3; i++)
-  {
-    ++byte_iter;
-
-    *byte_iter = length >> (16 - (8*i));
-  }
 }
 
 // Extracts a collection of name-value pairs when they are encoded as a
