@@ -30,11 +30,11 @@ constexpr uint8_t                      FCGI_UNKNOWN_ROLE              {3};
   // Default FCGI_GET_VALUES record variables.
   // (As character byte sequences encoded in ASCII/UTF-8.)
 const     std::vector<uint8_t>   FCGI_MAX_CONNS
-            {70, 67, 71, 73, 95, 77, 65, 88, 95, 67, 79, 78, 78, 83};
+  {'F', 'C', 'G', 'I', '_', 'M', 'A', 'X', '_', 'C', 'O', 'N', 'N', 'S'};
 const     std::vector<uint8_t>   FCGI_MAX_REQS
-            {70, 67, 71, 73, 95, 77, 65, 88, 95, 82, 69, 81, 83};
+  {'F', 'C', 'G', 'I', '_', 'M', 'A', 'X', '_', 'R', 'E', 'Q', 'S'};
 const     std::vector<uint8_t>   FCGI_MPXS_CONNS
-            {70, 67, 71, 73, 95, 77, 80, 88, 83, 95, 67, 79, 78, 78, 83};
+  {'F', 'C', 'G', 'I', '_', 'M', 'P', 'X', 'S', '_', 'C', 'O', 'N', 'N', 'S'};
 
 // Implementation Constants (determined by current protocol features)
   // Header byte position definitions

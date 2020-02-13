@@ -86,8 +86,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 
   const std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
   const ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
-  const uint16_t padding_MAX {fcgi_si::kMaxRecordContentByteLength - 7};
-  // Reduce by 7 to ensure that then length of a "full" records is a
+  const uint16_t aligned_record_MAX {fcgi_si::kMaxRecordContentByteLength - 7};
+  // Reduce by 7 to ensure that the length of a "full" record is a
   // multiple of 8.
 
   // Determine the maximum number of iovec structures that can
@@ -97,7 +97,12 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   if(iovec_max == -1)
     iovec_max = 1024;
   iovec_max = std::min<long>(iovec_max, std::numeric_limits<int>::max());
-
+  // Determine the initial values of the break variables.
+  // Reduce by one to ensure that a struct for padding is always available.
+    // (Safe conversion from signed to unsigned.)
+  std::size_t remaining_iovec_count(iovec_max - 1);
+  // Reduce by FCGI_HEADER_LEN - 1 to ensure that padding can always be added.
+  std::size_t remaining_byte_count {ssize_t_MAX - (FCGI_HEADER_LEN - 1)};
   // Lambda functions to simplify the loops below.
   auto size_iter = [&](int i)->std::size_t
   {
@@ -114,7 +119,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     else
       return (uint8_t*)(pair_iter->second.data());
   };
-
   // A binary sequence of headers and length information encoded in the
   // FastCGI name-value pair format is created and returned to
   // the caller. A pair which holds an index into iovec_list and an index into
@@ -126,7 +130,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   std::vector<std::uint8_t> local_buffers {};
   std::vector<std::pair<std::vector<iovec>::size_type,
     std::vector<uint8_t>::size_type>> index_pairs {};
-
   // iovec_list will usually hold three instances of iovec for every
   // name-value pair. The first instance describes name and value length
   // information. It points to a range of bytes in local_buffers.
@@ -142,26 +145,18 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   bool incomplete_nv_write {false};
   bool name_or_value_too_big {false};
 
-  // Determine the initial values of the break variables.
-  std::size_t remaining_iovec_count(iovec_max - 1);
-    // Safe conversion from signed to unsigned.
-  std::size_t remaining_byte_count {ssize_t_MAX - (FCGI_HEADER_LEN - 1)};
-
   for(/*no-op*/; pair_iter != end; ++pair_iter)
   {
     if(!remaining_iovec_count || !remaining_byte_count)
       break;
-
     // Variables for name and value information.
     std::size_t size_array[3] = {};
     std::size_t sums[3] = {};
     std::vector<uint8_t>::size_type name_value_buffer_offset
       {local_buffers.size()};
     std::uint8_t* data_array[2];
-
     // Reset for a new pair.
     nv_pair_bytes_placed = offset;
-
     // Collect information about the name and value byte sequences.
     for(int i {1}; i < 3; i++)
     {
@@ -187,141 +182,140 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
       else
       {
         name_or_value_too_big = true;
-        // TODO figure what to do when we reject immediately.
+        break;
       }
-    }
-    if(name_or_value_too_big)
-    {
-      //
     }
     sums[1] = size_array[0];
-    // Check for potential overflows.
-    if(size_array[1] > (size_t_MAX - sums[1]))
+    // Check if processing must stop, including because of an overflow from
+    // name and value lengths.
+    if(name_or_value_too_big || size_array[1] > (size_t_MAX - sums[1])
+       || (sums[2] = size_array[1] + sums[1],
+           size_array[2] > (size_t_MAX - sums[2])))
     {
-      // Overflow.
-    }
-    else
-    {
-      sums[2] = size_array[1] + sums[1];
-      if(size_array[2] > (size_t_MAX - sums[2]))
+      if(size_array[0])
       {
-        // Overflow.
+        local_buffers.erase(local_buffers.end() - size_array[0],
+          local_buffers.end());
       }
-      else // We can proceed normally to iteratively produce FastCGI records.
+      break; // Stop iterating over pairs.
+    }
+    else // We can proceed normally to iteratively produce FastCGI records.
+    {
+      std::size_t total_length {size_array[2] + sums[2]};
+      std::size_t remaining_nv_bytes_to_place {total_length
+        - nv_pair_bytes_placed};
+
+      auto determine_index = [&]()->std::size_t
       {
-        std::size_t total_length {size_array[2] + sums[2]};
-        std::size_t remaining_nv_bytes_to_place {total_length
-          - nv_pair_bytes_placed};
+        int i {0};
+        for(/*no-op*/; i < 2; i++)
+          if(nv_pair_bytes_placed < sums[i+1])
+            return i;
+        return i;
+      };
 
-        auto determine_index = [&]()->std::size_t
+      bool padding_limit_reached {false};
+      // Start loop which produces records.
+      while(remaining_nv_bytes_to_place && !padding_limit_reached)
+      {
+        if(!previous_content_length) // Start a new record.
         {
-          int i {0};
-          for(/*no-op*/; i < 2; i++)
-            if(nv_pair_bytes_placed < sums[i+1])
-              return i;
-          return i;
-        };
-
-        bool padding_limit_reached {false};
-        // Start loop which produces records.
-        while(remaining_nv_bytes_to_place && !padding_limit_reached)
-        {
-          if(!previous_content_length) // Start a new record.
+          // Need enough iovec structs for a header, data, and padding.
+          // Need enough bytes for a header and some data. An iovec struct
+          // and fcgi_si::FCGI_HEADER_LEN - 1 bytes were reserved.
+          if((remaining_iovec_count >= 2) &&
+             (remaining_byte_count >= (fcgi_si::FCGI_HEADER_LEN + 1)))
           {
-            // Need enough iovec structs for a header, data, and padding.
-            // Need enough bytes for a header and some data. An iovec struct
-            // and fcgi_si::FCGI_HEADER_LEN - 1 bytes were reserved.
-            if((remaining_iovec_count >= 2) &&
-               (remaining_byte_count >= (fcgi_si::FCGI_HEADER_LEN + 1)))
+            previous_header_offset = local_buffers.size();
+            index_pairs.push_back({iovec_list.size(), previous_header_offset});
+            iovec_list.push_back({nullptr, fcgi_si::FCGI_HEADER_LEN});
+            local_buffers.insert(local_buffers.end(), fcgi_si::FCGI_HEADER_LEN, 0);
+            fcgi_si::PopulateHeader(local_buffers.data() + previous_header_offset,
+              type, FCGI_id, 0, 0);
+            number_to_write += fcgi_si::FCGI_HEADER_LEN;
+            remaining_byte_count -= fcgi_si::FCGI_HEADER_LEN;
+            remaining_iovec_count--;
+          }
+          else
+          {
+            incomplete_nv_write = true; // As remaining_nv_bytes_to_place != 0.
+            break;
+          }
+        }
+        // Start loop over the three potential buffers.
+        std::size_t index {determine_index()};
+        for(/*no-op*/; index < 3; index++)
+        {
+          // Variables which determine how much we can write.
+          std::size_t remaining_content_capacity
+            {aligned_record_MAX - previous_content_length};
+          std::size_t current_limit
+            {std::min(remaining_byte_count, remaining_content_capacity)};
+          std::size_t number_to_place
+            {std::min(remaining_nv_bytes_to_place, current_limit)};
+          // Determine how many we can write for a given buffer.
+          std::size_t local_remaining
+            {size_array[index] - (nv_pair_bytes_placed - sums[index])};
+          std::size_t local_number_to_place
+            {std::min(local_remaining, number_to_place)};
+          // Write the determined amount.
+          if(index == 0) // Special processing for name-value length info.
+          {
+            iovec_list.push_back({nullptr, local_number_to_place});
+            // If we are in the name value length information byte sequence,
+            // i.e. index == 0, then nv_pair_bytes_placed acts as an offset
+            // into a subsequence of these bytes.
+            index_pairs.push_back({iovec_list.size() - 1,
+              name_value_buffer_offset + nv_pair_bytes_placed});
+            remaining_iovec_count--;
+          }
+          else // Adding an iovec structure for name or value byte sequence.
+          {
+            // Either of size_array[1] or size_array[2] may be zero. For
+            // example, we may add a iovec instance for size_array[0]
+            // that specifies an empty name or value.
+            if(local_number_to_place)
             {
-              previous_header_offset = local_buffers.size();
-              index_pairs.push_back({iovec_list.size(), previous_header_offset});
-              iovec_list.push_back({nullptr, fcgi_si::FCGI_HEADER_LEN});
-              local_buffers.insert(local_buffers.end(), fcgi_si::FCGI_HEADER_LEN, 0);
-              fcgi_si::PopulateHeader(local_buffers.data() + previous_header_offset,
-                type, FCGI_id, 0, 0);
-              number_to_write += fcgi_si::FCGI_HEADER_LEN;
-              remaining_byte_count -= fcgi_si::FCGI_HEADER_LEN;
+              iovec_list.push_back({data_array[index-1] + (size_array[index]
+                - local_remaining), local_number_to_place});
               remaining_iovec_count--;
-            }
-            else
-            {
-              incomplete_nv_write = true; // As remaining_nv_bytes_to_place != 0.
-              break;
             }
           }
-          // Start loop over the three potential buffers.
-          std::size_t index {determine_index()};
-          for(/*no-op*/; index < 3; index++)
+          // Update tracking variables.
+          nv_pair_bytes_placed += local_number_to_place;
+          remaining_nv_bytes_to_place -= local_number_to_place;
+          number_to_write += local_number_to_place;
+          remaining_byte_count -= local_number_to_place;
+          // Update record information.
+          previous_content_length += local_number_to_place;
+          local_buffers[previous_header_offset
+            + fcgi_si::kHeaderContentLengthB1Index]
+            = static_cast<uint8_t>(previous_content_length >> 8);
+          local_buffers[previous_header_offset
+            + fcgi_si::kHeaderContentLengthB0Index]
+            = static_cast<uint8_t>(previous_content_length);
+          // Check if a limit was reached. Need at least an iovec struct for
+          // padding. Need enough bytes for padding. These limits were
+          // reserved in the initialization of remaining_iovec_count and
+          // remaining_byte_count.
+          if(!remaining_iovec_count || !remaining_byte_count)
           {
-            // Variables which determine how much we can write.
-            std::size_t remaining_content_capacity
-              {padding_MAX - previous_content_length};
-            std::size_t current_limit
-              {std::min(remaining_byte_count, remaining_content_capacity)};
-            std::size_t number_to_place
-              {std::min(remaining_nv_bytes_to_place, current_limit)};
-            // Determine how many we can write for a given buffer.
-            std::size_t local_remaining
-              {size_array[index] - (nv_pair_bytes_placed - sums[index])};
-            std::size_t local_number_to_place
-              {std::min(local_remaining, number_to_place)};
-            // Write the determined amount.
-            if(index == 0) // Special processing for name-value length info.
-            {
-              iovec_list.push_back({nullptr, local_number_to_place});
-              index_pairs.push_back({iovec_list.size() - 1,
-                name_value_buffer_offset + nv_pair_bytes_placed});
-              remaining_iovec_count--;
-            }
-            else // Adding an iovec structure for name or value byte sequence.
-            {
-              // Either of size_array[1] or size_array[2] may be zero. For
-              // example, we may add a iovec instance for size_array[0]
-              // that specifies an empty name or value.
-              if(local_number_to_place)
-              {
-                iovec_list.push_back({data_array[index-1] + (size_array[index]
-                  - local_remaining), local_number_to_place});
-                remaining_iovec_count--;
-              }
-            }
-            // Update tracking variables.
-            nv_pair_bytes_placed += local_number_to_place;
-            remaining_nv_bytes_to_place -= local_number_to_place;
-            number_to_write += local_number_to_place;
-            remaining_byte_count -= local_number_to_place;
-            // Update record information.
-            previous_content_length += local_number_to_place;
-            local_buffers[previous_header_offset
-              + fcgi_si::kHeaderContentLengthB1Index]
-              = static_cast<uint8_t>(previous_content_length >> 8);
-            local_buffers[previous_header_offset
-              + fcgi_si::kHeaderContentLengthB0Index]
-              = static_cast<uint8_t>(previous_content_length);
-            // Check if a limit was reached. Need at least an iovec struct for
-            // padding. Need enough bytes for padding. These limits were
-            // reserved in the initialization of remaining_iovec_count and
-            // remaining_byte_count.
-            if(!remaining_iovec_count || !remaining_byte_count)
-            {
-              padding_limit_reached = true;
-              if(nv_pair_bytes_placed < total_length)
-                incomplete_nv_write = true;
-              break;
-            }
-            // Check if the record was finished.
-            if(previous_content_length == padding_MAX)
-            {
-              previous_content_length = 0;
-              break; // Need to start a new record.
-            }
+            padding_limit_reached = true;
+            if(nv_pair_bytes_placed < total_length)
+              incomplete_nv_write = true;
+            break;
+          }
+          // Check if the record was finished.
+          if(previous_content_length == aligned_record_MAX)
+          {
+            previous_content_length = 0;
+            break; // Need to start a new record.
           }
         }
       }
     }
     offset = 0;
-    if(incomplete_nv_write || name_or_value_too_big)
+    if(incomplete_nv_write)
       break;
   }
   // Check if padding is needed.
@@ -338,7 +332,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
       = pad_mod_complement;
     number_to_write += pad_mod_complement;
   }
-
   // Since the memory of local_buffers is stable, fill in
   // iov_base pointers from local_buffers.data().
   for(auto pair : index_pairs)
