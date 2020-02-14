@@ -59,22 +59,75 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 // Parameters:
 // pair_iter: an iterator to a std::pair object.
 // end: an iterator to one-past-the-last element in the range of std::pair
-// objects.
+// objects whose name and value sequences are to be encoded.
 //
 // Requires:
 // 1) [pair_iter, end) is a valid range.
 // 2) When the range [pair_iter, end) is non-empty:
-//    a) pair_iter points to a std::pair object which holds containers
-//       for sequences of bytes.
+//    a) Each std::pair object of the range holds containers for sequences of
+//       bytes.
 //    b) The containers of each std::pair object must store objects
 //       contiguously in memory. In particular, for container c, the
-//       expression [c.data(), c.data()+c.size()) is defined and gives
-//       a valid range of the stored objects.
+//       expression [c.data(), c.data()+c.size()) gives a valid range of the
+//       stored objects.
 //    c) For each container, let T be the type of the elements of the container.
 //       Then sizeof(T) = sizeof(uint8_t).
+// 3) Invalidation of references, pointers, or iterators to elements of the
+//    name and value sequences invalidate the returned vector of iovec
+//    instances.
 //
 // Effects:
-// 1)
+// 0) The sequence of name-value pairs given by [pair_iter, end) is processed
+//    in order.
+// 1) Meaning of returned tuple values:
+//       Access: std::get<0>; Type: bool; Meaning: True if processing occurred
+//    without error. False if processing was halted due to an error. See below.
+//       Access: std::get<1>; Type: std::size_t; Meaning: The total number of
+//    bytes that would be written if all bytes pointed to by the struct iovec
+//    instances of the returned std::vector<struct iovec> instance were written.
+//    This value is equal to the sum of iov_len for each struct iovec instance
+//    in the returned list. This value allows the actual number of bytes
+//    written by a system call to be compared to the expected number.
+//       Access: std::get<2>; Type: std::vector<iovec>; Meaning: A list of
+//    struct iovec instances to be used in a call to writev or a similar
+//    function. For a returned tuple t, std::get<2>(t).data() is a pointer
+//    to the first iovec instance and may be used in a call to writev.
+//       Access: std::get<3>; Type: const std::vector<uint8_t>; Meaning: A
+//    byte sequence that contains FastCGI headers and encoded name and value
+//    length information. Destruction of this vector invalidates pointers
+//    contained in the iovec instances of the vector accessed by std::get<2>.
+//       Access: std::get<4>; Type: std::size_t; Meaning: Zero if all name-
+//    pairs in the encoded range were completely encoded. Non-zero if the last
+//    name-value pair of the encoded range could not be completely encoded.
+//    When non-zero, the value indicates the number of bytes from the encoded
+//    FastCGI name-value byte sequence that will be written. This value is
+//    intended to be passed to EncodeNameValuePairs in a subsequent call so
+//    that the list of iovec structures produced does not contain duplicate
+//    information.
+//       Access: std::get<5>; Type: typename ByteSeqPairIter; Meaning: An
+//    iterator pointing to a std::pair object in the range given by pair_iter
+//    and end. If the returned boolean value is false, the iterator points
+//    to the name-value pair which caused processing to halt. If the returned
+//    boolean value is true and std::get<4>(t) == 0, the iterator points to
+//    either end, if all name-value pairs could be encoded, or to the
+//    name-value pair which should be encoded next. If the returned boolean
+//    value is true and std::get<4>(t) != 0, the iterator points to the name-
+//    value pair which could not be completely encoded.
+// 2) If the range [pair_iter, end) is empty, then the returned tuple is
+//    equal to the tuple initialized by {true, 0, {}, {}, 0, end}.
+// 3) In two cases, the boolean value of the tuple returned by the function
+//    is false. This occurs when values are detected that cause normal
+//    processing to halt. In these cases, any data for previously processed
+//    name-value pairs is returned and no data for the rejected name-value pair
+//    is returned. The returned iterator points to the name-value pair which
+//    caused processing to halt.
+//    a) This occurs if the length of the name or value of a name-value
+//       pair exceeds the limit of the FastCGI name-value pair format. This
+//       limit is 2^31 - 1.
+//    b) This also may occur if the implementation of the function detects
+//       that an internal overflow would occur. Such instances may only
+//       depend on the byte-sequences that make up a name-value pair.
+// 4)
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
@@ -144,6 +197,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   std::size_t nv_pair_bytes_placed {0};
   bool incomplete_nv_write {false};
   bool name_or_value_too_big {false};
+  bool overflow_detected {false};
 
   for(/*no-op*/; pair_iter != end; ++pair_iter)
   {
@@ -197,6 +251,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
         local_buffers.erase(local_buffers.end() - size_array[0],
           local_buffers.end());
       }
+      if(!name_or_value_too_big)
+        overflow_detected = true;
       break; // Stop iterating over pairs.
     }
     else // We can proceed normally to iteratively produce FastCGI records.
@@ -338,8 +394,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     iovec_list[pair.first].iov_base =
       (void*)(local_buffers.data() + pair.second);
   // Check for rejection based on a limit or name or value that was too big.
-  return std::make_tuple(!name_or_value_too_big, number_to_write,
-    std::move(iovec_list), std::move(local_buffers),
+  return std::make_tuple(!name_or_value_too_big && !overflow_detected,
+    number_to_write, std::move(iovec_list), std::move(local_buffers),
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
