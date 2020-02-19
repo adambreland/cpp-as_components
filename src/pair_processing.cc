@@ -1,9 +1,117 @@
 #include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
 #include "include/pair_processing.h"
 #include "include/protocol_constants.h"
+
+std::tuple<bool, bool, std::vector<uint8_t>>
+fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
+{
+  constexpr uint16_t buffer_size {1 << 10};
+  uint8_t byte_buffer[buffer_size];
+
+  uint32_t local_offset {0};
+  ssize_t number_bytes_read {0};
+  uint8_t local_header[FCGI_HEADER_LEN];
+  int header_bytes_read {0};
+  std::vector<uint8_t> content_bytes {};
+  uint16_t FCGI_id {};
+  uint16_t content_length {0};
+  uint16_t content_bytes_read {0};
+  uint8_t padding_length {0};
+  uint8_t padding_bytes_read {0};
+  bool error_found {false};
+  bool sequence_terminated {false};
+  int state {0};
+
+  while((number_bytes_read = read(fd, byte_buffer, buffer_size)) > 0)
+  {
+    local_offset = 0;
+
+    while(local_offset < number_bytes_read)
+    {
+      switch(state) {
+        case 0 : {
+          if(header_bytes_read < FCGI_HEADER_LEN)
+          {
+            // Safe narrowing as this can never exceed FCGI_HEADER_LEN.
+            int header_bytes_to_copy(std::min<ssize_t>(FCGI_HEADER_LEN
+              - header_bytes_read, number_bytes_read - local_offset));
+            std::memcpy((void*)(local_header + header_bytes_read),
+              (void*)(byte_buffer + local_offset), header_bytes_to_copy);
+            local_offset += header_bytes_to_copy;
+            header_bytes_read += header_bytes_to_copy;
+            if(local_offset == number_bytes_read)
+              break;
+          }
+          // The header is complete and there are some bytes left to process.
+
+          // Extract header information.
+          (FCGI_id = local_header[kHeaderRequestIDB1Index]) <<= 8; // One byte.
+          FCGI_id += local_header[kHeaderRequestIDB0Index];
+          (content_length = local_header[kHeaderContentLengthB1Index]) <<= 8;
+          content_length += local_header[kHeaderContentLengthB0Index];
+          padding_length = local_header[kHeaderPaddingLengthIndex];
+          // Verify header information.
+          if(static_cast<FCGIType>(local_header[kHeaderTypeIndex]) != type
+             || FCGI_id != id)
+          {
+            error_found = true;
+            break;
+          }
+          if(content_length == 0)
+          {
+            sequence_terminated = true;
+            break;
+          }
+          // Set or reset state.
+          header_bytes_read = 0;
+          state++;
+          // Fall through to start processing content.
+        }
+        case 1 : {
+          if(content_bytes_read < content_length)
+          {
+            // Safe narrowing as this can never exceed content_length.
+            uint16_t content_bytes_to_copy(std::min<ssize_t>(content_length
+              - content_bytes_read, number_bytes_read - local_offset));
+            content_bytes.insert(content_bytes.end(), byte_buffer + local_offset,
+              byte_buffer + local_offset + content_bytes_to_copy);
+            local_offset += content_bytes_to_copy;
+            content_bytes_read += content_bytes_to_copy;
+            if(local_offset == number_bytes_read)
+              break;
+          }
+          // Set or reset state.
+          content_bytes_read = 0;
+          state++;
+          // Fall through to start processing padding.
+        }
+        case 2 : {
+          if(padding_bytes_read < padding_length)
+          {
+            // Safe narrowing as this can never exceed padding_length.
+            uint8_t padding_bytes_to_process(std::min<ssize_t>(padding_length
+              - padding_bytes_read, number_bytes_read - local_offset));
+            local_offset += padding_bytes_to_process;
+            padding_bytes_read += padding_bytes_to_process;
+            if(local_offset == number_bytes_read)
+              break;
+          }
+          padding_bytes_read = 0;
+          state = 0;
+        }
+      }
+      if(error_found || sequence_terminated)
+        break;
+    }
+    if(error_found || sequence_terminated)
+      break;
+  }
+  return std::make_tuple(!error_found, sequence_terminated, content_bytes);
+}
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 fcgi_si::

@@ -436,6 +436,9 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
+std::tuple<bool, bool, std::vector<uint8_t>>
+ExtractContent(int fd, FCGIType type, uint16_t id);
+
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
 // Note: Checking if content_length is zero before calling allows for

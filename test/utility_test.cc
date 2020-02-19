@@ -394,6 +394,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   EXPECT_EQ(result, std::vector<NameValuePair> {});
 }
 
+TEST(Utility, ExtractContent)
+{
+
+}
+
 TEST(Utility, EncodeNameValuePairs)
 {
   // Testing explanation
@@ -418,57 +423,22 @@ TEST(Utility, EncodeNameValuePairs)
   // 5) Call ProcessBinaryNameValuePairs on the contiguous sequence. Check
   //    that the returned vector of pairs is equal to the source sequence.
 
-  constexpr buffer_size {1 << 10};
-  uint8_t byte_buffer[buffer_size];
 
-  int fd {open(".", O_RDWR | O_TMPFILE | O_EXCL)};
-  if(fd == -1)
-    ; // TODO Add code to nicely handle error using reporting from Googletest.
-
-  // Call to EncodeNameValuePairs here after construction name-value pairs.
-
-  ssize_t number_bytes_read {0};
-  uint32_t header_offset {0};
-  uint32_t local_offset {0};
-  uint16_t content_length {0};
-  uint8_t padding_length {0};
-  int state {0};
-  bool error_found {false};
-
-  while((number_bytes_read = read(fd, byte_buffer, buffer_size)) > 0)
-  {
-    local_offset = 0;
-
-    while(true)
-    {
-      switch(state) {
-        case 0 : {
-          // Extract and verify information from header.
-
-          break;
-        }
-        case 1 : {
-
-          break;
-        }
-        case 2 : {
-
-          break;
-        }
-      }
-
-      if((local_offset == number_bytes_read) || error_found)
-        break;
-    }
-    if(error_found)
-      break;
-  }
-  if(rr == -1)
-    ; // TODO As above.
+  //
+  // int fd {open(".", O_RDWR | O_TMPFILE | O_EXCL)};
+  // if(fd == -1)
+  //   ; // TODO Add code to nicely handle error using reporting from Googletest.
+  //
+  // // Call to EncodeNameValuePairs here after construction name-value pairs.
+  //
+  // if(rr == -1)
+  //   ; // TODO As above.
 
 
 
 }
+
+
 
 TEST(Utility, uint32_tToUnsignedCharacterVector)
 {
