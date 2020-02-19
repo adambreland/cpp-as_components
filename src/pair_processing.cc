@@ -7,9 +7,9 @@
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 fcgi_si::
-ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr)
+ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
 {
-  int bytes_processed {0};
+  uint32_t bytes_processed {0};
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
   result {};
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>

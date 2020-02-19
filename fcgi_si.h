@@ -6,6 +6,7 @@
 #include "include/pair_processing.h"
 #include "include/protocol_constants.h"
 #include "include/record_status.h"
+#include "include/request_data.h"
 #include "include/request_identifier.h"
 #include "include/utility.h"
 

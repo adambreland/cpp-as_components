@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
-#define FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
+#ifndef FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_
+#define FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_
 
 #include <sys/uio.h>
 #include <unistd.h>
@@ -26,14 +26,17 @@ namespace fcgi_si {
 //
 // Requires:
 // 1) length requires four bytes when encoded in the FastCGI name-value pair
-//    format. I.e. length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
+//    format and is less than or equal to the maximum value able to be
+//    encoded. Hence, length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
 // 2) byte_iter has the following properties:
-//    a) *byte_iter is convertible to uint8_t.
-//    b) Four uint8_t values can be appended to the buffer pointed to by
+//    a) The size of the type of the object pointed to by byte_iter is equal
+//       to sizeof(uint8_t).
+//    b) *byte_iter can be assigned a value from uint8_t without narrowing.
+//    b) Four uint8_t values can be written to the buffer pointed to by
 //       byte_iter.
 //
 // Effects:
-// 1) Four bytes are appended to the buffer pointed to by byte_iter. The
+// 1) Four bytes are written to the buffer pointed to by byte_iter. The
 //    byte sequence encodes length in the FastCGI name-value pair format.
 template<typename ByteIter>
 void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
@@ -52,9 +55,45 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
   }
 }
 
-// Determines if a sequence of name-value pairs can be encoded in the
-// binary FastCGI name-value pair format and transmitted to a client
-// using scatter-gather writing.
+// Determines and returns the length in bytes of a name or value when that
+// length was encoded using four bytes in the FastCGI name-value pair format.
+//
+// Parameters:
+// byte_iter: An iterator to the first byte of a four-byte sequence.
+//
+// Requires:
+// The four-byte sequence pointed to by byte_iter is the encoding
+// in the FastCGI name-value pair format of the length of another
+// byte sequence that requires a four-byte length encoding.
+//
+// Effects:
+// 1) The value returned is the number of bytes encoded in the four-byte
+//    sequence pointed to by byte_iter.
+template <typename ByteIter>
+uint32_t ExtractFourByteLength(ByteIter byte_iter)
+{
+  // TODO Add template type property checking with static_asserts.
+
+  // Mask out the leading 1 bit which must be present per the FastCGI
+  // name-value pair format. This bit does not encode length information.
+  // It indicates that the byte sequence has four elements instead of one.
+  uint32_t length {static_cast<uint32_t>(
+    static_cast<uint8_t>(*byte_iter) & 0x7fU)};
+  // Perform three shifts by 8 bits to extract all four bytes.
+  for(char i {0}; i < 3; i++)
+  {
+    length <<= 8;
+    ++byte_iter;
+
+    length += static_cast<uint8_t>(*byte_iter);
+  }
+  return length;
+}
+
+// Processes name-value pairs and returns a tuple containing information which
+// allows a byte sequence to be written via a scatter-gather I/O system call.
+// When written, this byte sequence is the byte sequence of the name-value
+// pairs when they are encoded in the FastCGI name-value pair format.
 //
 // Parameters:
 // pair_iter: an iterator to a std::pair object.
@@ -80,23 +119,23 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 // 0) The sequence of name-value pairs given by [pair_iter, end) is processed
 //    in order.
 // 1) Meaning of returned tuple values:
-//       Access: std::get<0>; Type: bool; Meaning: True if processing occurred
+//       Access: std::get<0>; Type: bool; True if processing occurred
 //    without error. False if processing was halted due to an error. See below.
-//       Access: std::get<1>; Type: std::size_t; Meaning: The total number of
+//       Access: std::get<1>; Type: std::size_t; The total number of
 //    bytes that would be written if all bytes pointed to by the struct iovec
-//    instances of the returned std::vector<struct iovec> instance were written.
+//    instances of the returned std::vector<iovec> instance were written.
 //    This value is equal to the sum of iov_len for each struct iovec instance
 //    in the returned list. This value allows the actual number of bytes
 //    written by a system call to be compared to the expected number.
-//       Access: std::get<2>; Type: std::vector<iovec>; Meaning: A list of
-//    struct iovec instances to be used in a call to writev or a similar
+//       Access: std::get<2>; Type: std::vector<iovec>; A list of
+//    iovec instances to be used in a call to writev or a similar
 //    function. For a returned tuple t, std::get<2>(t).data() is a pointer
 //    to the first iovec instance and may be used in a call to writev.
-//       Access: std::get<3>; Type: const std::vector<uint8_t>; Meaning: A
+//       Access: std::get<3>; Type: const std::vector<uint8_t>; A
 //    byte sequence that contains FastCGI headers and encoded name and value
 //    length information. Destruction of this vector invalidates pointers
 //    contained in the iovec instances of the vector accessed by std::get<2>.
-//       Access: std::get<4>; Type: std::size_t; Meaning: Zero if all name-
+//       Access: std::get<4>; Type: std::size_t; Zero if all name-value
 //    pairs in the encoded range were completely encoded. Non-zero if the last
 //    name-value pair of the encoded range could not be completely encoded.
 //    When non-zero, the value indicates the number of bytes from the encoded
@@ -104,8 +143,8 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 //    intended to be passed to EncodeNameValuePairs in a subsequent call so
 //    that the list of iovec structures produced does not contain duplicate
 //    information.
-//       Access: std::get<5>; Type: typename ByteSeqPairIter; Meaning: An
-//    iterator pointing to a std::pair object in the range given by pair_iter
+//       Access: std::get<5>; Type: typename ByteSeqPairIter; An
+//    iterator pointing to an element of the range given by pair_iter
 //    and end. If the returned boolean value is false, the iterator points
 //    to the name-value pair which caused processing to halt. If the returned
 //    boolean value is true and std::get<4>(t) == 0, the iterator points to
@@ -121,13 +160,11 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 //    name-value pairs is returned and no data for the rejected name-value pair
 //    is returned. The returned iterator points to the name-value pair which
 //    caused processing to halt.
-//    a) This occurs if the length of the name or value of a name-value
+//    a) Processing halts if the length of the name or value of a name-value
 //       pair exceeds the limit of the FastCGI name-value pair format. This
 //       limit is 2^31 - 1.
-//    b) This also may occur if the implementation of the function detects
-//       that an internal overflow would occur. Such instances may only
-//       depend on the byte-sequences that make up a name-value pair.
-// 4)
+//    b) Processing halts if the implementation of the function detects
+//       that an internal overflow would occur.
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
@@ -399,43 +436,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
-// Determines and returns the length in bytes of a name or value when that
-// length was encoded using four bytes in the FastCGI name-value pair format.
-//
-// Parameters:
-// byte_iter: An iterator to the first byte of a four-byte sequence.
-//
-// Requires:
-// 1) byte_iter has the following properties:
-//    a) *byte_iter is convertible to uint8_t.
-//    b) The four-byte sequence pointed to by byte_iter is the encoding
-//       in the FastCGI name-value pair format of the length of another
-//       byte sequence that requires a a four-byte length encoding.
-//
-// Effects:
-// 1) The value returned is the number of bytes encoded in the four-byte
-//    sequence pointed to by byte_iter.
-template <typename ByteIter>
-uint32_t ExtractFourByteLength(ByteIter byte_iter)
-{
-  // TODO Add template type property checking with static_asserts.
-
-  // Mask out the leading 1 bit which must be present per the FastCGI
-  // name-value pair format. This bit does not encode length information.
-  // It indicates that the byte sequence has four elements instead of one.
-  uint32_t length {static_cast<uint32_t>(
-    static_cast<uint8_t>(*byte_iter) & 0x7fU)};
-  // Perform three shifts by 8 bits to extract all four bytes.
-  for(char i {0}; i < 3; i++)
-  {
-    length <<= 8;
-    ++byte_iter;
-
-    length += static_cast<uint8_t>(*byte_iter);
-  }
-  return length;
-}
-
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
 // Note: Checking if content_length is zero before calling allows for
@@ -448,22 +448,21 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 //
 // Requires:
 // 1) The value of content_length is exactly equal to the number of bytes
-//    which represent the collection of name-value parirs. This number does
-//    not include the byte length of a FastCGI record header.
+//    which represent the collection of name-value pairs. This number does
+//    not include the length of a FastCGI record header.
+// 2) content_ptr may only be null if content_length == 0.
 //
 // Effects:
 // 1) If a sequential application of the encoding rules to the encountered
 //    length values gives a length which is equal to content_length, a vector
 //    is returned of the name-value pairs extracted from content_length bytes.
-//    The pairs are of type:
-//    std::pair<std::vector<uint8_t>, std::vector<uint8_t>>.
 // 2) If content_length was not long enough for the extracted sequence of
 //    name-value pairs, an empty vector is returned.
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(int content_length, const uint8_t* content_ptr);
+ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr);
 
 std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si
 
-#endif // FCGI_SERVER_INTEFRACE_INCLUDE_PAIR_PROCESSING_H_
+#endif // FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_

@@ -2,6 +2,7 @@
 #define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_H_
 
 #include <sys/types.h>     // For ssize_t.
+#include <sys/uio.h>
 
 #include <cstdint>         // For uint8_t.
 
