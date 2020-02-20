@@ -192,6 +192,11 @@ TEST(Utility, ExtractFourByteLength)
   EXPECT_EQ((1UL << 31) - 1, length);
 }
 
+TEST(Utility, ExtractContent)
+{
+
+}
+
 TEST(Utility, ProcessBinaryNameValuePairs)
 {
   // Testing explanation
@@ -392,11 +397,6 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
     encoded_nv_pair.data());
   EXPECT_EQ(result, std::vector<NameValuePair> {});
-}
-
-TEST(Utility, ExtractContent)
-{
-
 }
 
 TEST(Utility, EncodeNameValuePairs)

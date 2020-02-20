@@ -3,10 +3,10 @@
 #include <utility>
 #include <vector>
 
-#include "include/pair_processing.h"
 #include "include/protocol_constants.h"
+#include "include/utility.h"
 
-std::tuple<bool, bool, std::vector<uint8_t>>
+std::tuple<bool, bool, bool, std::vector<uint8_t>>
 fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
 {
   constexpr uint16_t buffer_size {1 << 10};
@@ -22,14 +22,25 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
   uint16_t content_bytes_read {0};
   uint8_t padding_length {0};
   uint8_t padding_bytes_read {0};
+  bool read_error {false}
   bool error_found {false};
   bool sequence_terminated {false};
   int state {0};
 
-  while((number_bytes_read = read(fd, byte_buffer, buffer_size)) > 0)
+  while(number_bytes_read = read(fd, byte_buffer, buffer_size))
   {
-    local_offset = 0;
+    if(number_bytes_read == -1)
+    {
+      if(errno == EINTR)
+        continue;
+      else
+      {
+        read_error = true;
+        break;
+      }
+    }
 
+    local_offset = 0;
     while(local_offset < number_bytes_read)
     {
       switch(state) {
@@ -110,7 +121,26 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
     if(error_found || sequence_terminated)
       break;
   }
-  return std::make_tuple(!error_found, sequence_terminated, content_bytes);
+  return std::make_tuple(!read_error, !error_found, sequence_terminated,
+    content_bytes);
+}
+
+void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length)
+{
+  std::uint8_t header_array[fcgi_si::FCGI_HEADER_LEN];
+  header_array[0] = fcgi_si::FCGI_VERSION_1;
+  header_array[1] = static_cast<uint8_t>(type);
+  header_array[2] = static_cast<uint8_t>(FCGI_id >> 8);
+  header_array[3] = static_cast<uint8_t>(FCGI_id);
+  header_array[4] = static_cast<uint8_t>(content_length >> 8);
+  header_array[5] = static_cast<uint8_t>(content_length);
+  header_array[6] = padding_length;
+  header_array[7] = 0;
+
+  std::memcpy((void*)byte_ptr, (void*)header_array,
+    fcgi_si::FCGI_HEADER_LEN);
 }
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>

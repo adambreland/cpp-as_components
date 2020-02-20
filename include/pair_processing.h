@@ -116,9 +116,9 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 //    instances.
 //
 // Effects:
-// 0) The sequence of name-value pairs given by [pair_iter, end) is processed
+// 1) The sequence of name-value pairs given by [pair_iter, end) is processed
 //    in order.
-// 1) Meaning of returned tuple values:
+// 2) Meaning of returned tuple values:
 //       Access: std::get<0>; Type: bool; True if processing occurred
 //    without error. False if processing was halted due to an error. See below.
 //       Access: std::get<1>; Type: std::size_t; The total number of
@@ -152,9 +152,9 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 //    name-value pair which should be encoded next. If the returned boolean
 //    value is true and std::get<4>(t) != 0, the iterator points to the name-
 //    value pair which could not be completely encoded.
-// 2) If the range [pair_iter, end) is empty, then the returned tuple is
+// 3) If the range [pair_iter, end) is empty, then the returned tuple is
 //    equal to the tuple initialized by {true, 0, {}, {}, 0, end}.
-// 3) In two cases, the boolean value of the tuple returned by the function
+// 4) In two cases, the boolean value of the tuple returned by the function
 //    is false. This occurs when values are detected that cause normal
 //    processing to halt. In these cases, any data for previously processed
 //    name-value pairs is returned and no data for the rejected name-value pair
@@ -436,8 +436,44 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
-std::tuple<bool, bool, std::vector<uint8_t>>
+// A utility function used in testing code. ExtractContent reads a file which
+// contains a sequence of FastCGI records. These records are assumed to be
+// from a single, complete record stream. Two operations are performed as the
+// sequence of records is read. First, each header is validated for type
+// and request identifer. Second, the content byte sequence of the records
+// is extracted.
+//
+// Parameters:
+// fd: The file descriptor of the file to be read.
+// type: The expected FastCGI record type of the record sequence.
+// id: The expected FastCGI request identifier of each record in the sequence.
+//
+// Requires:
+// 1) The file offset of fd is assumed to be at the start of the record
+//    sequence.
+// 2) Only EINTR is handled when fd is read. Other errors will cause function
+//    return.
+//
+// Effects:
+// 1) Meaning of returned tuple elements.
+//       Access: std::get<0>; Type: bool; True if no unrecoverable errors
+//    were encounted when the file was read. False otherwise.
+//       Access: std::get<1>; Type: bool; True if no FastCGI type or
+//    identifier error was present. False otherwise.
+//       Access: std::get<2>; Type: bool; True if no reading errors or
+//    header errors occurred while reading the sequence and the sequence
+//    was terminated by a record with a zero content length. False otherwise.
+//       Access: std::get<3>; Type: std::vector<uint8_t>; The extracted
+//    content of the records processed up to:
+//    a) the point of error
+//    b) a record with a zero content length
+//    c) the end of the file.
+std::tuple<bool, bool, bool, std::vector<uint8_t>>
 ExtractContent(int fd, FCGIType type, uint16_t id);
+
+void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length);
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
