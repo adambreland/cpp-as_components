@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_
+#ifndef FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
+#define FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
 
 #include <sys/uio.h>
 #include <unistd.h>
@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "include/protocol_constants.h"
-#include "include/utility.h"
 
 namespace fcgi_si {
 
@@ -89,6 +88,10 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
   }
   return length;
 }
+
+void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length);
 
 // Processes name-value pairs and returns a tuple containing information which
 // allows a byte sequence to be written via a scatter-gather I/O system call.
@@ -438,10 +441,16 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 
 // A utility function used in testing code. ExtractContent reads a file which
 // contains a sequence of FastCGI records. These records are assumed to be
-// from a single, complete record stream. Two operations are performed as the
-// sequence of records is read. First, each header is validated for type
-// and request identifer. Second, the content byte sequence of the records
-// is extracted.
+// from a single, complete record sequence. Multiple records may be present in
+// the sequence when it is associated with a stream type from the FastCGI
+// protocol. Two operations are performed as the sequence of records is read.
+// First, several error checks are performed. Each header is validated for type
+// and request identifer. Also, the actual number of bytes present for each
+// section of a record is compared to the expected number. Header errors
+// terminate sequence processing. Incomplete sections may only occur when the
+// end of the file is reached. Second, the content byte sequence formed from
+// the concatenation of the record content sections is constructed and
+// returned.
 //
 // Parameters:
 // fd: The file descriptor of the file to be read.
@@ -451,15 +460,18 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 // Requires:
 // 1) The file offset of fd is assumed to be at the start of the record
 //    sequence.
-// 2) Only EINTR is handled when fd is read. Other errors will cause function
-//    return.
+// 2) It is assumed that no other data is present in the file.
+// 3) Only EINTR is handled when fd is read. Other errors cause function
+//    return with the first value of the tuple set.
 //
 // Effects:
 // 1) Meaning of returned tuple elements.
 //       Access: std::get<0>; Type: bool; True if no unrecoverable errors
-//    were encounted when the file was read. False otherwise.
-//       Access: std::get<1>; Type: bool; True if no FastCGI type or
-//    identifier error was present. False otherwise.
+//    were encountered when the file was read. False otherwise. The values of
+//    the other members of the tuple are unspecified when this member is false.
+//       Access: std::get<1>; Type: bool; True if neither a FastCGI type nor
+//    an identifier error was present and no incomplete record section was
+//    present. False otherwise.
 //       Access: std::get<2>; Type: bool; True if no reading errors or
 //    header errors occurred while reading the sequence and the sequence
 //    was terminated by a record with a zero content length. False otherwise.
@@ -470,10 +482,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //    c) the end of the file.
 std::tuple<bool, bool, bool, std::vector<uint8_t>>
 ExtractContent(int fd, FCGIType type, uint16_t id);
-
-void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
-  std::uint16_t FCGI_id, std::uint16_t content_length,
-  std::uint8_t padding_length);
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
@@ -504,4 +512,4 @@ std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_PAIR_PROCESSING_H_
+#endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_

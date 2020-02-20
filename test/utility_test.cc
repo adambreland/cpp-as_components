@@ -194,7 +194,34 @@ TEST(Utility, ExtractFourByteLength)
 
 TEST(Utility, ExtractContent)
 {
-
+  // Testing explanation
+  // Examined properties:
+  // 1) Content byte sequence value.
+  // 2) Value of the file descriptor.
+  // 3) Record type: discrete or stream.
+  // 4) For stream types, presence and absence of a terminal record with a
+  //    content length of zero.
+  // 5) Presence or absence of padding.
+  // 6) Presence or absence of an unrecoverable read error (such as a bad
+  //    file descriptor).
+  // 7) Presence or absence of a header error. Two errors categories: type
+  //    and FastCGI request identifier.
+  // 8) Presence or absence of an incomplete section. Three sections gives
+  //    three error categories.
+  //
+  // Test cases:
+  // 1) File descriptor equal to zero, empty file.
+  // 2) Small file descriptor value, single header with a zero content length.
+  // 3) Small file descriptor value, single record with non-zero content
+  //    length, no padding, and no terminal empty record.
+  // 4) As in 3, but with padding. (Regular discrete record.)
+  // 5) Small file descriptor value, a record with non-zero content length,
+  //    padding, and a terminal empty record. (A single record, terminated
+  //    stream.)
+  // 6) Small file descriptor value, multiple records with non-zero content
+  //    lengths. Not terminated.
+  // 7) As in 6, but terminated.
+  // 8)
 }
 
 TEST(Utility, ProcessBinaryNameValuePairs)

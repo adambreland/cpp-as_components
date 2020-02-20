@@ -22,12 +22,12 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
   uint16_t content_bytes_read {0};
   uint8_t padding_length {0};
   uint8_t padding_bytes_read {0};
-  bool read_error {false}
-  bool error_found {false};
+  bool read_error {false};
+  bool header_error {false};
   bool sequence_terminated {false};
   int state {0};
 
-  while(number_bytes_read = read(fd, byte_buffer, buffer_size))
+  while((number_bytes_read = read(fd, byte_buffer, buffer_size)))
   {
     if(number_bytes_read == -1)
     {
@@ -43,6 +43,8 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
     local_offset = 0;
     while(local_offset < number_bytes_read)
     {
+      // Note that, below, the condition "section_bytes_read < expected_amount"
+      // implies that local_offset == number_bytes_read.
       switch(state) {
         case 0 : {
           if(header_bytes_read < FCGI_HEADER_LEN)
@@ -54,7 +56,7 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
               (void*)(byte_buffer + local_offset), header_bytes_to_copy);
             local_offset += header_bytes_to_copy;
             header_bytes_read += header_bytes_to_copy;
-            if(local_offset == number_bytes_read)
+            if(header_bytes_read < FCGI_HEADER_LEN)
               break;
           }
           // The header is complete and there are some bytes left to process.
@@ -69,7 +71,7 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
           if(static_cast<FCGIType>(local_header[kHeaderTypeIndex]) != type
              || FCGI_id != id)
           {
-            error_found = true;
+            header_error = true;
             break;
           }
           if(content_length == 0)
@@ -80,6 +82,8 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
           // Set or reset state.
           header_bytes_read = 0;
           state++;
+          if(local_offset == number_bytes_read)
+            break;
           // Fall through to start processing content.
         }
         case 1 : {
@@ -92,12 +96,14 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
               byte_buffer + local_offset + content_bytes_to_copy);
             local_offset += content_bytes_to_copy;
             content_bytes_read += content_bytes_to_copy;
-            if(local_offset == number_bytes_read)
+            if(content_bytes_read < content_length)
               break;
           }
           // Set or reset state.
           content_bytes_read = 0;
           state++;
+          if(local_offset == number_bytes_read)
+            break;
           // Fall through to start processing padding.
         }
         case 2 : {
@@ -108,21 +114,34 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
               - padding_bytes_read, number_bytes_read - local_offset));
             local_offset += padding_bytes_to_process;
             padding_bytes_read += padding_bytes_to_process;
-            if(local_offset == number_bytes_read)
+            if(padding_bytes_read < padding_length)
               break;
           }
           padding_bytes_read = 0;
           state = 0;
         }
       }
-      if(error_found || sequence_terminated)
+      if(read_error || header_error || sequence_terminated)
         break;
     }
-    if(error_found || sequence_terminated)
+    if(read_error || header_error || sequence_terminated)
       break;
   }
-  return std::make_tuple(!read_error, !error_found, sequence_terminated,
-    content_bytes);
+  // Check for incomplete record sections.
+  // Note that, when no error is present and the sequence wasn't terminated
+  // by a record with a zero content length, state represents a section which
+  // is either incomplete or never began. It is expected that the sequence
+  // ends with a header section that "never began."
+  bool section_error {false};
+  if(!(read_error || header_error || sequence_terminated))
+    if(header_bytes_read != 0)
+      if(!((header_bytes_read == FCGI_HEADER_LEN) &&
+           (content_bytes_read == content_length) &&
+           (padding_bytes_read == padding_length)))
+        section_error = true;
+
+  return std::make_tuple(!read_error, !(header_error || section_error),
+    sequence_terminated, content_bytes);
 }
 
 void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
