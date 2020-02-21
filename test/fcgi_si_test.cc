@@ -206,22 +206,143 @@ TEST(Utility, ExtractContent)
   //    file descriptor).
   // 7) Presence or absence of a header error. Two errors categories: type
   //    and FastCGI request identifier.
-  // 8) Presence or absence of an incomplete section. Three sections gives
+  // 8) Presence or absence of an incomplete section. Three sections produce
   //    three error categories.
   //
   // Test cases:
-  // 1) File descriptor equal to zero, empty file.
-  // 2) Small file descriptor value, single header with a zero content length.
-  // 3) Small file descriptor value, single record with non-zero content
-  //    length, no padding, and no terminal empty record.
-  // 4) As in 3, but with padding. (Regular discrete record.)
-  // 5) Small file descriptor value, a record with non-zero content length,
-  //    padding, and a terminal empty record. (A single record, terminated
-  //    stream.)
-  // 6) Small file descriptor value, multiple records with non-zero content
-  //    lengths. Not terminated.
-  // 7) As in 6, but terminated.
-  // 8)
+  //  1) File descriptor equal to zero, empty file.
+  //  2) Small file descriptor value, single header with a zero content length
+  //     and no padding.
+  //  3) Small file descriptor value, single record with non-zero content
+  //     length, no padding, and no terminal empty record.
+  //  4) As in 3, but with padding. (Regular discrete record.)
+  //  5) Small file descriptor value, a record with non-zero content length,
+  //     padding, and a terminal empty record. (A single-record, terminated
+  //     stream.)
+  //  6) Small file descriptor value, multiple records with non-zero content
+  //     lengths and padding as necessary to reach a multiple of eight. Not
+  //     terminated.
+  //  7) As in 6, but terminated. (A typical, multi-record stream sequence.)
+  //  8) As in 7, but with the maximum file descriptor value.
+  //  9) A bad file descriptor as an unrecoverable read error.
+  // 10) As in 7, but with a header type error in the middle.
+  // 11) As in 7, but with a header FastCGI reqiest identifier error in the
+  //     middle.
+  // 12) A header with a non-zero content length and non-zero padding but no
+  //     no more data. (An incomplete record.) A small file descriptor value.
+  // 13) A small file descriptor value and a sequence of records with non-zero
+  //     content lengths and with padding. The sequence ends with a header with
+  //     a non-zero content length and padding but more additional data.
+  // 14) As in 13, but with a final record for which the content has a length
+  //     that is not equal to the content length given in the final header. No
+  //     additional data is present.
+  // 15) As in 13, but with a final record whose padding does not have a length
+  //     equal to the padding length given in the final header. No additional
+  //     data is present.
+  //
+  // Modules which testing depends on: none.
+  //
+  // Other modules whose testing depends on this module:
+  // 1) fcgi_si::EncodeNameValuePairs
+
+  // Case 1: File descriptor equal to zero, empty file.
+  bool case_single_iteration {true};
+  while(case_single_iteration)
+  {
+    // Enforce a single iteration.
+    case_single_iteration = false;
+    // Duplicate stdin so that it can be restored later.
+    int saved_stdin {dup(STDIN_FILENO)};
+    if(saved_stdin == -1)
+    {
+      ADD_FAILURE() << "A call to dup failed.";
+      break;
+    }
+    if(close(STDIN_FILENO) == -1)
+    {
+      ADD_FAILURE() << "A call to close failed.";
+      int restore {dup2(saved_stdin, STDIN_FILENO)};
+      close(saved_stdin);
+      if(restore == -1)
+        FAIL() << "A call to dup2 failed. stdin could not be restored.";
+      break;
+    }
+    // Create a temporary file with no data.
+    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+    if(temp_fd == -1)
+    {
+      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      int restore {dup2(saved_stdin, STDIN_FILENO)};
+      close(saved_stdin);
+      if(restore == -1)
+        FAIL() << "A call to dup2 failed. stdin could not be restored.";
+      break;
+    }
+
+    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1)};
+    close(temp_fd);
+    int restore {dup2(saved_stdin, STDIN_FILENO)};
+    close(saved_stdin);
+    if(restore == -1)
+      FAIL() << "A call to dup2 failed. stdin could not be restored.";
+
+    if(std::get<0>(extract_content_result))
+    {
+      EXPECT_TRUE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_EQ(std::vector<uint8_t> {}, std::get<3>(extract_content_result)) <<
+        "Content byte sequence.";
+    }
+    else
+    {
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+        "encountered a read error.";
+      break;
+    }
+  }
+
+  // Case 2: Small file descriptor value, a single header with zero content
+  // length and no padding.
+  case_single_iteration = true;
+  while(case_2_single_iteration)
+  {
+    case_2_single_iteration = false;
+
+    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+    if(temp_fd == -1)
+    {
+      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      break;
+    }
+    uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
+    fcgi_si::PopulateHeader(local_header, fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST),
+      1, 0, 0);
+    int write_return {write(temp_fd, (void*)local_header,
+      fcgi_si::FCGI_HEADER_LEN)};
+    if(write_return == -1)
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to write failed.";
+      break;
+    }
+    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1)};
+    if(std::get<0>(extract_content_result))
+    {
+      
+    }
+    else
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+        "encountered a read error.";
+      break;
+    }
+
+
 }
 
 TEST(Utility, ProcessBinaryNameValuePairs)
@@ -426,48 +547,48 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   EXPECT_EQ(result, std::vector<NameValuePair> {});
 }
 
-TEST(Utility, EncodeNameValuePairs)
-{
-  // Testing explanation
-  // Examined properties:
-  //
-  // Test cases:
-  //
-  // Modules which testing depends on:
-  // 1) fcgi_si::ProcessBinaryNameValuePairs
-  //
-  // Other modules whose testing depends on this module: none.
-  //
-  // Steps most cases:
-  // 1) Create a sequence of std::pairs with containerized names and values.
-  // 2) Call EncodeNameValuePairs on the sequence.
-  // 3) Write the name-value pairs encoded in the FastCGI name-value pair
-  //    format as a sequence of FastCGI records by making a call to writev
-  //    using the information returned by the call to EncodeNameValuePairs.
-  // 4) Process the written FastCGI records.
-  //    a) Check that each header is correct.
-  //    b) Copy the content to generate a contiguous content byte sequence.
-  // 5) Call ProcessBinaryNameValuePairs on the contiguous sequence. Check
-  //    that the returned vector of pairs is equal to the source sequence.
+// TEST(Utility, EncodeNameValuePairs)
+// {
+//   // Testing explanation
+//   // Examined properties:
+//   //
+//   // Test cases:
+//   //
+//   // Modules which testing depends on:
+//   // 1) fcgi_si::ProcessBinaryNameValuePairs
+//   //
+//   // Other modules whose testing depends on this module: none.
+//   //
+//   // Steps most cases:
+//   // 1) Create a sequence of std::pairs with containerized names and values.
+//   // 2) Call EncodeNameValuePairs on the sequence.
+//   // 3) Write the name-value pairs encoded in the FastCGI name-value pair
+//   //    format as a sequence of FastCGI records by making a call to writev
+//   //    using the information returned by the call to EncodeNameValuePairs.
+//   // 4) Process the written FastCGI records.
+//   //    a) Check that each header is correct.
+//   //    b) Copy the content to generate a contiguous content byte sequence.
+//   // 5) Call ProcessBinaryNameValuePairs on the contiguous sequence. Check
+//   //    that the returned vector of pairs is equal to the source sequence.
+//
+//
+//   //
+//   // int fd {open(".", O_RDWR | O_TMPFILE | O_EXCL)};
+//   // if(fd == -1)
+//   //   ; // TODO Add code to nicely handle error using reporting from Googletest.
+//   //
+//   // // Call to EncodeNameValuePairs here after construction name-value pairs.
+//   //
+//   // if(rr == -1)
+//   //   ; // TODO As above.
+//
+//
+//
+// }
 
 
-  //
-  // int fd {open(".", O_RDWR | O_TMPFILE | O_EXCL)};
-  // if(fd == -1)
-  //   ; // TODO Add code to nicely handle error using reporting from Googletest.
-  //
-  // // Call to EncodeNameValuePairs here after construction name-value pairs.
-  //
-  // if(rr == -1)
-  //   ; // TODO As above.
 
-
-
-}
-
-
-
-TEST(Utility, uint32_tToUnsignedCharacterVector)
-{
-  //
-}
+// TEST(Utility, uint32_tToUnsignedCharacterVector)
+// {
+//   //
+// }

@@ -469,11 +469,11 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //       Access: std::get<0>; Type: bool; True if no unrecoverable errors
 //    were encountered when the file was read. False otherwise. The values of
 //    the other members of the tuple are unspecified when this member is false.
-//       Access: std::get<1>; Type: bool; True if neither a FastCGI type nor
-//    an identifier error was present and no incomplete record section was
+//       Access: std::get<1>; Type: bool; True if neither a FastCGI type error
+//    nor an identifier error was present and no incomplete record section was
 //    present. False otherwise.
-//       Access: std::get<2>; Type: bool; True if no reading errors or
-//    header errors occurred while reading the sequence and the sequence
+//       Access: std::get<2>; Type: bool; True if no header errors or incomplete
+//    section occurred while reading the sequence and the sequence
 //    was terminated by a record with a zero content length. False otherwise.
 //       Access: std::get<3>; Type: std::vector<uint8_t>; The extracted
 //    content of the records processed up to:

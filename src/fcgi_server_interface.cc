@@ -25,7 +25,6 @@
 
 #include "include/fcgi_request.h"
 #include "include/fcgi_server_interface.h"
-#include "include/pair_processing.h"
 #include "include/protocol_constants.h"
 #include "include/record_status.h"
 #include "include/request_data.h"
@@ -611,7 +610,7 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   }
 
   // Set header.
-  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_END_REQUEST,
+  fcgi_si::PopulateHeader(result.data(), fcgi_si::FCGIType::kFCGI_END_REQUEST,
     request_id.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
   // Set body.
   for(char i {0}; i < 4; i++)
@@ -632,7 +631,7 @@ SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
 
   // Set header.
-  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE,
+  fcgi_si::PopulateHeader(result.data(), fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE,
     fcgi_si::FCGI_NULL_REQUEST_ID, fcgi_si::FCGI_HEADER_LEN, 0);
   // Set body. (Only the first byte in the body is used.)
   result[1 + fcgi_si::kHeaderReservedByteIndex]   =
@@ -723,7 +722,7 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
     (remainder) ? fcgi_si::FCGI_HEADER_LEN - remainder
                 : 0};
   result.insert(result.end(), pad_length, 0);
-  fcgi_si::PopulateHeader(result.begin(), fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT,
+  fcgi_si::PopulateHeader(result.data(), fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT,
     fcgi_si::FCGI_NULL_REQUEST_ID, content_length, pad_length);
 
   return SendRecord(connection, result);
