@@ -439,18 +439,17 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
 }
 
-// A utility function used in testing code. ExtractContent reads a file which
+// A utility function used for testing. ExtractContent reads a file which
 // contains a sequence of FastCGI records. These records are assumed to be
-// from a single, complete record sequence. Multiple records may be present in
-// the sequence when it is associated with a stream type from the FastCGI
-// protocol. Two operations are performed as the sequence of records is read.
-// First, several error checks are performed. Each header is validated for type
-// and request identifer. Also, the actual number of bytes present for each
-// section of a record is compared to the expected number. Header errors
-// terminate sequence processing. Incomplete sections may only occur when the
-// end of the file is reached. Second, the content byte sequence formed from
-// the concatenation of the record content sections is constructed and
-// returned.
+// from a single, complete record sequence. (Multiple records may be present in
+// a sequence when it is associated with a stream record type from the FastCGI
+// protocol.) Two operations are performed. First, several error checks are
+// performed. Each header is validated for type and request identifer.
+// Also, the actual number of bytes present for each section of a record is
+// compared to the expected number. Header errors terminate sequence processing.
+// Logcially, incomplete sections may only occur when the end of the file is
+// reached. Second, the content byte sequence formed from the concatenation of
+// the record content sections is constructed and returned.
 //
 // Parameters:
 // fd: The file descriptor of the file to be read.
@@ -461,8 +460,9 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 // 1) The file offset of fd is assumed to be at the start of the record
 //    sequence.
 // 2) It is assumed that no other data is present in the file.
-// 3) Only EINTR is handled when fd is read. Other errors cause function
-//    return with the first value of the tuple set.
+// 3) Only EINTR is handled when fd is read. (Other errors cause function
+//    return with a false value for the first boolean variable of the returned
+//    tuple.)
 //
 // Effects:
 // 1) Meaning of returned tuple elements.
@@ -477,7 +477,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //    was terminated by a record with a zero content length. False otherwise.
 //       Access: std::get<3>; Type: std::vector<uint8_t>; The extracted
 //    content of the records processed up to:
-//    a) the point of error
+//    a) the point of error (such as the end of a partial record)
 //    b) a record with a zero content length
 //    c) the end of the file.
 std::tuple<bool, bool, bool, std::vector<uint8_t>>

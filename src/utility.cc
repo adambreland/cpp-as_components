@@ -134,11 +134,25 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
   // ends with a header section that "never began."
   bool section_error {false};
   if(!(read_error || header_error || sequence_terminated))
-    if(header_bytes_read != 0)
-      if(!((header_bytes_read == FCGI_HEADER_LEN) &&
-           (content_bytes_read == content_length) &&
-           (padding_bytes_read == padding_length)))
-        section_error = true;
+  {
+    switch(state) {
+      case 0 : {
+        if((0 < header_bytes_read) && (header_bytes_read < FCGI_HEADER_LEN))
+          section_error = true;
+        break;
+      }
+      case 1 : {
+        if(content_bytes_read != content_length)
+          section_error = true;
+        break;
+      }
+      case 2 : {
+        if(padding_bytes_read != padding_length)
+          section_error = true;
+        break;
+      }
+    }
+  }
 
   return std::make_tuple(!read_error, !(header_error || section_error),
     sequence_terminated, content_bytes);
