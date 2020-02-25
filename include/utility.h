@@ -99,9 +99,18 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 // pairs when they are encoded in the FastCGI name-value pair format.
 //
 // Parameters:
-// pair_iter: an iterator to a std::pair object.
-// end: an iterator to one-past-the-last element in the range of std::pair
-// objects whose name and value sequences are to be encoded.
+// pair_iter: An iterator to a std::pair object.
+// end:       An iterator to one-past-the-last element in the range of
+//            std::pair objects whose name and value sequences are to be
+//            encoded.
+// type:      The FastCGI record type of the records to be generated from the
+//            sequence of name-value pairs.
+// FCGI_id:   The FastCGI identifier of the records to be generated from the
+//            sequence of name-value pairs.
+// offset:    A value used to indicate how many bytes have previously been
+//            encoded of the first name-value pair pointed to by pair_iter.
+//            The first offset bytes of the byte sequence generated from this
+//            name value pair will be omitted from the total byte sequence.
 //
 // Requires:
 // 1) [pair_iter, end) is a valid range.
@@ -117,6 +126,9 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 // 3) Invalidation of references, pointers, or iterators to elements of the
 //    name and value sequences invalidate the returned vector of iovec
 //    instances.
+// 4) offset is zero unless a non-zero value for std::get<4> was returned from
+//    an immediately-preceding call to EncodeNameValuePairs. When a such a
+//    non-zero value was returned, offset is equal to that value.
 //
 // Effects:
 // 1) The sequence of name-value pairs given by [pair_iter, end) is processed
@@ -144,8 +156,8 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 //    When non-zero, the value indicates the number of bytes from the encoded
 //    FastCGI name-value byte sequence that will be written. This value is
 //    intended to be passed to EncodeNameValuePairs in a subsequent call so
-//    that the list of iovec structures produced does not contain duplicate
-//    information.
+//    that the list of iovec structures produced in that call does not contain
+//     duplicate information.
 //       Access: std::get<5>; Type: typename ByteSeqPairIter; An
 //    iterator pointing to an element of the range given by pair_iter
 //    and end. If the returned boolean value is false, the iterator points
@@ -168,6 +180,9 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 //       limit is 2^31 - 1.
 //    b) Processing halts if the implementation of the function detects
 //       that an internal overflow would occur.
+// 5) Processing is carried out so that a FastCGI header with an empty
+//    content_length is never generated. A partial header, meaning a terminal
+//    header that is less than FCGI_HEADER_LEN also does not occur.
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
@@ -208,9 +223,9 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   auto data_iter = [&](int i)->uint8_t*
   {
     if(i == 0)
-      return (uint8_t*)(pair_iter->first.data());
+      return static_cast<uint8_t*>(static_cast<void*>(pair_iter->first.data()));
     else
-      return (uint8_t*)(pair_iter->second.data());
+      return static_cast<uint8_t*>(static_cast<void*>(pair_iter->second.data()));
   };
   // A binary sequence of headers and length information encoded in the
   // FastCGI name-value pair format is created and returned to
@@ -219,7 +234,6 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   // is referred to by an iovec_list element. This pair allows pointer values
   // to be determined once the memory allocated for local_buffers
   // will no longer change.
-  // An initial header's worth is allocated in local_buffers.
   std::vector<std::uint8_t> local_buffers {};
   std::vector<std::pair<std::vector<iovec>::size_type,
     std::vector<uint8_t>::size_type>> index_pairs {};
@@ -245,6 +259,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
       break;
     // Variables for name and value information.
     std::size_t size_array[3] = {};
+    // sums starts at zero and holds partial sums of size_array.
+    // It is used to check for potential numeric overflow.
     std::size_t sums[3] = {};
     std::vector<uint8_t>::size_type name_value_buffer_offset
       {local_buffers.size()};
@@ -252,7 +268,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     // Reset for a new pair.
     nv_pair_bytes_placed = offset;
     // Collect information about the name and value byte sequences.
-    for(int i {1}; i < 3; i++)
+    for(int i {1}; i < 3; ++i)
     {
       size_array[i] = size_iter(i-1);
       if(size_array[i])
@@ -494,9 +510,9 @@ ExtractContent(int fd, FCGIType type, uint16_t id);
 // content_ptr: points to the first byte of the byte sequence.
 //
 // Requires:
-// 1) The value of content_length is exactly equal to the number of bytes
+// 1) The value of content_length is equal to the number of bytes
 //    which represent the collection of name-value pairs. This number does
-//    not include the length of a FastCGI record header.
+//    not include the length of FastCGI record headers.
 // 2) content_ptr may only be null if content_length == 0.
 //
 // Effects:

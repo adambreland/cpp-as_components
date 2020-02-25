@@ -1,8 +1,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <iterator>
 #include <string>
@@ -300,7 +302,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -348,7 +350,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -403,7 +405,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -456,7 +458,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -513,7 +515,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -583,7 +585,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -653,7 +655,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -739,7 +741,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -810,7 +812,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -858,7 +860,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -930,7 +932,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -1007,7 +1009,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -1080,7 +1082,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -1157,7 +1159,7 @@ TEST(Utility, ExtractContent)
     }
     else
     {
-      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent"
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
         "encountered a read error.";
       break;
     }
@@ -1366,44 +1368,202 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   EXPECT_EQ(result, std::vector<NameValuePair> {});
 }
 
-// TEST(Utility, EncodeNameValuePairs)
-// {
-//   // Testing explanation
-//   // Examined properties:
-//   //
-//   // Test cases:
-//   //
-//   // Modules which testing depends on:
-//   // 1) fcgi_si::ProcessBinaryNameValuePairs
-//   //
-//   // Other modules whose testing depends on this module: none.
-//   //
-//   // Steps most cases:
-//   // 1) Create a sequence of std::pairs with containerized names and values.
-//   // 2) Call EncodeNameValuePairs on the sequence.
-//   // 3) Write the name-value pairs encoded in the FastCGI name-value pair
-//   //    format as a sequence of FastCGI records by making a call to writev
-//   //    using the information returned by the call to EncodeNameValuePairs.
-//   // 4) Process the written FastCGI records.
-//   //    a) Check that each header is correct.
-//   //    b) Copy the content to generate a contiguous content byte sequence.
-//   // 5) Call ProcessBinaryNameValuePairs on the contiguous sequence. Check
-//   //    that the returned vector of pairs is equal to the source sequence.
-//
-//
-//   //
-//   // int fd {open(".", O_RDWR | O_TMPFILE | O_EXCL)};
-//   // if(fd == -1)
-//   //   ; // TODO Add code to nicely handle error using reporting from Googletest.
-//   //
-//   // // Call to EncodeNameValuePairs here after construction name-value pairs.
-//   //
-//   // if(rr == -1)
-//   //   ; // TODO As above.
-//
-//
-//
-// }
+TEST(Utility, EncodeNameValuePairs)
+{
+  // Testing explanation
+  //    Most test cases perform a sequence of calls which encodes, writes, and
+  // and then decodes a sequence of name-value pairs. The goal of such a case
+  // is to demonstrate that this process recovers the original name-value
+  // pairs. In other words, such cases demonstrate that these operations are
+  // equivalent to an identity operation.
+  //    In particular, most cases construct a list of name-value pairs, call
+  // EncodeNameValuePairs on the list from appropriate iterators, and then
+  // perform a gather write to a temporary file using writev. The written byte
+  // sequence is processed using a function developed for this purpose,
+  // ExtractContent. The content is extracted and then processed with
+  // ProcessBinaryNameValuePairs. Finally, the generated list of name-value
+  // pairs is compared with the original list.
+  //    Note that the testing of ExtractContent and ProcessBinaryNameValuePairs
+  // cannot depend on EncodeNameValuePairs.
+  //
+  // Examined properties:
+  // 1) Name-value pair sequence identity as described above.
+  // 2) Specific values for name and value.
+  //    a) The presence of empty names and values.
+  //    b) The presence of duplicate names. Duplicates should be present to
+  //       ensure that the implementation can handle accidental duplicate names.
+  //    c) Names and values which have a length large enough to require
+  //       four bytes to be encoded in the FastCGI name-value format.
+  // 3) The need for padding. Records should be present which will likely
+  //    require padding if the suggested 8-byte alignment condition is met.
+  // 4) Number of records. Sequences which require more than one full record
+  //    should be present.
+  // 5) Presence of a name or value whose length exceeds the maximum size
+  //    allowed by the FastCGI protocol.
+  // 6) Large and small FCGI_id values. In particular, values greater than 255.
+  // 7) A large number of sequence elements. In particular, larger than
+  //    the current limit for the number of struct iovec instances passed in
+  //    an array to a scatter-gather operation.
+  // Note that the use of ExtractContent and ProcessBinaryNameValuePairs
+  // introduces additional checks. For example, ExtractContent checks for
+  // header type and FastCGI request identifier errors.
+  //
+  // Test cases:
+  //  1) No name-value pairs, i.e. pair_iter == end.
+  //  2) A name-value pair that requires a single FastCGI record.
+  //     The content length of the record is a multiple of eight bytes and,
+  //     as such, no padding is needed.
+  //  3) A name-value pair that requires a single FastCGI record. This
+  //     record requires padding.
+  //  4) As in 3, but with a FCGI_id larger than 255.
+  //  5) A name-value pair with an empty name and an empty value.
+  //  6) A name-value pair with a non-empty name and an empty value.
+  //  7) Two name-value pairs where each is a duplicate of the other.
+  //  8) Multiple name-value pairs that only require a single FastCGI record.
+  //     The total length of the record does not require padding.
+  //  9) As in 6, but padding is required.
+  // 10) A single name-value pair whose name has a length which exceeds the
+  //     maximum size of a FastCGI record. Note that this also means that
+  //     four bytes are required to encode the length of this element.
+  // 11) As in 9, but for value instead of name.
+  // 12) Multiple name-pairs that require more than one FastCGI record.
+  // 13) Multiple name-value pairs where a single name is empty and several
+  //     values are empty.
+  // 14) Multiple name-value pairs with several cases where names are repeated.
+  // 15) Multiple name-value pairs where one of the middle pairs has a name
+  //     whose length exceeds the maximum size. (Invalid input.)
+  // 16) As in 14, but for value instead of name. (Invalid input.)
+  // 17) More than 1024 name-value pairs. Encoding should cause the returned
+  //     offset value to be zero.
+  // 18) More than 1024 name-value pairs. Encoding should cauuse the returned
+  //     offset value to be non-zero.
+  //
+  // Modules which testing depends on:
+  // 1) fcgi_si::ExtractContent
+  // 2) fcgi_si::ProcessBinaryNameValuePairs
+  //
+  // Other modules whose testing depends on this module: none.
+
+  using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+
+  // A lambda function for equality testing of vectors of struct iovec
+  // instances. (operator= is not defined in the instantiation
+  // std::vector<iovec>.)
+  auto IovecVectorEquality = [](const std::vector<iovec>& lhs,
+    const std::vector<iovec>& rhs)->bool
+  {
+    if(lhs.size() != rhs.size())
+      return false;
+    auto lhs_iter {lhs.begin()};
+    auto rhs_iter {rhs.begin()};
+    for(/*no-op*/; lhs_iter != lhs.end(); (++lhs_iter, ++rhs_iter))
+      if((lhs_iter->iov_base != rhs_iter->iov_base)
+        || (lhs_iter->iov_len != rhs_iter->iov_len))
+        return false;
+    return true;
+  };
+
+  // Case 1: No name-value pairs, i.e. pair_iter == end.
+  {
+    std::vector<NameValuePair> empty {};
+    auto result {fcgi_si::EncodeNameValuePairs(empty.begin(), empty.end(),
+      fcgi_si::FCGIType::kFCGI_PARAMS, 1, 0)};
+    EXPECT_TRUE(std::get<0>(result));
+    EXPECT_EQ(std::get<1>(result), 0);
+    EXPECT_TRUE(IovecVectorEquality(std::get<2>(result), std::vector<iovec> {}));
+    EXPECT_EQ(std::get<3>(result), std::vector<uint8_t> {});
+    EXPECT_EQ(std::get<4>(result), 0);
+    EXPECT_EQ(std::get<5>(result), empty.end());
+  }
+
+  // Case 2: A name-value pair that requires a single FastCGI record.
+  // The content length of the record is a multiple of eight bytes and,
+  // as such, no padding is needed.
+  bool case_single_iteration {true};
+  while(case_single_iteration)
+  {
+    case_single_iteration = false;
+
+    std::vector<NameValuePair> nv_pair_no_pad {{{'n','a','m','e'}, {'v','l'}}};
+    auto encoded_result = fcgi_si::EncodeNameValuePairs(nv_pair_no_pad.begin(),
+      nv_pair_no_pad.end(), fcgi_si::FCGIType::kFCGI_PARAMS, 1, 0);
+    if(!std::get<0>(encoded_result))
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs encountered an error reported by "
+        "std::get<0>.";
+      break;
+    }
+    size_t total_to_write {std::get<1>(encoded_result)};
+    if(total_to_write != 16)
+    {
+      ADD_FAILURE() << "fcgi_si::EncodeNameValuePairs indicated an incorrect "
+        "number of bytes to write as reported by std::get<1>. Value: "
+        << total_to_write;
+      break;
+    }
+    // std::get<2>(encoded_result) is used in a call to writev.
+    // std::get<3>(encoded_result) is implciitly used in a call to writev.
+    if(std::get<4>(encoded_result) != 0)
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
+        "reported by std::get<4>.";
+      break;
+    }
+    if(std::get<5>(encoded_result) != nv_pair_no_pad.end())
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs did not process all pairs as "
+        "reported by std::get<5>.";
+      break;
+    }
+    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+    if(temp_fd == -1)
+    {
+      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      break;
+    }
+    ssize_t write_return {0};
+    while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
+      std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+      continue;
+    if(write_return != total_to_write)
+    {
+      ADD_FAILURE() << "A call to writev did not write all bytes requested.";
+      break;
+    }
+    off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
+    if(lseek_return == -1)
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to lseek failed.";
+      break;
+    }
+    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+      fcgi_si::FCGIType::kFCGI_PARAMS, 1)};
+    if(!std::get<0>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
+        "unrecoverable read error.";
+      break;
+    }
+    if(!std::get<1>(extract_content_result)
+      || std::get<2>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent returned an "
+      "unexpected truth value as reported by std::get<1> and std::get<2>.";
+      break;
+    }
+    std::vector<NameValuePair> nv_pair_result {
+      fcgi_si::ProcessBinaryNameValuePairs(std::get<3>(
+      extract_content_result).size(), std::get<3>(
+      extract_content_result).data())};
+    EXPECT_EQ(nv_pair_no_pad, nv_pair_result);
+  }
+
+
+
+}
 
 
 
