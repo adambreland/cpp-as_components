@@ -198,49 +198,62 @@ TEST(Utility, ExtractContent)
 {
   // Testing explanation
   // Examined properties:
-  // 1) Content byte sequence value.
-  // 2) Value of the file descriptor.
-  // 3) Record type: discrete or stream.
-  // 4) For stream types, presence and absence of a terminal record with a
-  //    content length of zero.
-  // 5) Presence or absence of padding.
-  // 6) Presence or absence of an unrecoverable read error (such as a bad
-  //    file descriptor).
-  // 7) Presence or absence of a header error. Two errors categories: type
-  //    and FastCGI request identifier.
-  // 8) Presence or absence of an incomplete section. Three sections produce
+  //  1) Content byte sequence value.
+  //  2) Value of FastCGI request identifier (0, 1, small but larger than 1,
+  //      and the maximum value 2^16 - 1 == uint16_t(-1)).
+  //  3) Presence or absence of unaligned records.
+  //  4) Value of the file descriptor (zero and non-zero).
+  //  5) Record type: discrete or stream.
+  //  6) For stream types, presence and absence of a terminal record with a
+  //     content length of zero.
+  //  7) Presence or absence of padding.
+  //  8) Presence or absence of an unrecoverable read error (such as a bad
+  //     file descriptor).
+  //  9) Presence or absence of a header error. Two errors categories: type
+  //     and FastCGI request identifier.
+  // 10) Presence or absence of an incomplete section. Three sections produce
   //    three error categories.
   //
   // Test cases:
   //  1) File descriptor equal to zero, empty file.
   //  2) Small file descriptor value, single header with a zero content length
-  //     and no padding. (Equivalent to an empty record stream termination.)
+  //     and no padding. The FastCGI request identifier value is one.
+  //     (Equivalent to an empty record stream termination.)
   //  3) Small file descriptor value, single record with non-zero content
-  //     length, no padding, and no terminal empty record.
-  //  4) As in 3, but with padding. (Regular discrete record.)
-  //  5) Small file descriptor value, a record with non-zero content length,
-  //     padding, and a terminal empty record. (A single-record, terminated
-  //     stream.)
-  //  6) Small file descriptor value, multiple records with non-zero content
+  //     length, no padding, and no terminal empty record. The FastCGI
+  //     request identifier value is the largest possible value.
+  //     (Special discrete record - FCGI_BEGIN_REQUEST.)
+  //  4) As in 3, but with an unaligned record and a FastCGI request identifier
+  //     value of zero.
+  //  5) As in 3, but with padding and a FastCGI request identifier value of
+  //     10. (Regular discrete record.)
+  //  6) Small file descriptor value, a record with non-zero content length,
+  //     padding, and a terminal empty record. The FastCGI request identifier
+  //     value is ten. (A single-record, terminated stream.)
+  //  7) Small file descriptor value, multiple records with non-zero content
   //     lengths and padding as necessary to reach a multiple of eight. Not
-  //     terminated.
-  //  7) As in 6, but terminated. (A typical, multi-record stream sequence.)
-  //  8) A bad file descriptor as an unrecoverable read error.
-  //  9) As in 7, but with a header type error in the middle.
-  // 10) As in 7, but with a header FastCGI request identifier error in the
+  //     terminated. The FastCGI request identifier value is one.
+  //     (A non-terminated stream with multiple records.)
+  //  8) As in 6, but terminated and the FastCGI request identifier value is
+  //     one. (A typical, multi-record stream sequence.)
+  // Note: The FastCGI request identifier value is one for all remaining cases.
+  // Note: The remaining cases test function response to erroneous input.
+  //  9) A bad file descriptor as an unrecoverable read error.
+  // 10) As in 7, but with a header type error in the middle.
+  // 11) As in 7, but with a header FastCGI request identifier error in the
   //     middle.
-  // 11) A header with a non-zero content length and non-zero padding but
-  //     no more data. (An incomplete record.) A small file descriptor value.
-  // 12) A small file descriptor value and a sequence of records with non-zero
-  //     content lengths and with padding. The sequence ends with a header with
-  //     a non-zero content length and padding but no more additional data.
+  // 12) A header with a non-zero content length and non-zero padding but
+  //     no more data. A small file descriptor value. (An incomplete record.)
   // 13) A small file descriptor value and a sequence of records with non-zero
+  //     content lengths and with padding. The sequence ends with a header with
+  //     a non-zero content length and padding but no additional data.
+  // 14) A small file descriptor value and a sequence of records with non-zero
   //     content lengths and with padding. The sequence ends with a header that
   //     is not complete.
-  // 14) As in 12, but with a final record for which the content has a length
+  // 15) As in 12, but with a final record for which the content has a length
   //     that is less than the content length given in the final header. No
   //     additional data is present.
-  // 15) As in 12, but with a final record whose padding has a length that is
+  // 16) As in 12, but with a final record whose padding has a length that is
   //     less than the padding length given in the final header. No additional
   //     data is present.
   //
@@ -293,12 +306,14 @@ TEST(Utility, ExtractContent)
 
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result)) <<
+      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
         "Header and section errors.";
       EXPECT_FALSE(std::get<2>(extract_content_result)) <<
         "Sequence termination flag.";
-      EXPECT_EQ(std::vector<uint8_t> {}, std::get<3>(extract_content_result)) <<
-        "Content byte sequence.";
+      EXPECT_TRUE(std::get<3>(extract_content_result))  <<
+        "Record alignment flag.";
+      EXPECT_EQ(std::vector<uint8_t> {}, std::get<4>(extract_content_result))
+        << "Content byte sequence.";
     }
     else
     {
@@ -324,9 +339,11 @@ TEST(Utility, ExtractContent)
     uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(local_header, fcgi_si::FCGIType::kFCGI_DATA,
       1, 0, 0);
-    ssize_t write_return {write(temp_fd, (void*)local_header,
-      fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)local_header,
+      fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -344,9 +361,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_TRUE(std::get<2>(extract_content_result));
-      EXPECT_EQ((std::vector<uint8_t> {}), std::get<3>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_TRUE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
+      EXPECT_EQ((std::vector<uint8_t> {}), std::get<4>(extract_content_result))
+        << "Content byte sequence.";
     }
     else
     {
@@ -378,9 +400,10 @@ TEST(Utility, ExtractContent)
     // the low-order byte of the role.
     record[fcgi_si::FCGI_HEADER_LEN + fcgi_si::kBeginRequestRoleB0Index]
       = fcgi_si::FCGI_RESPONDER;
-    ssize_t write_return {write(temp_fd, (void*)record,
-      2*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 2*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      2*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+    if(write_return < 2*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -398,10 +421,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result))  <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {0,1,0,0,0,0,0,0}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -411,7 +438,68 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 4: As in 3, but with padding. (Regular discrete record.)
+  // Case 4: As in 3, but with an unaligned record.
+  case_single_iteration = true;
+  while(case_single_iteration)
+  {
+    case_single_iteration = false;
+
+    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+    if(temp_fd == -1)
+    {
+      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      break;
+    }
+    // Populate an FCGI_BEGIN_REQUEST record.
+    uint8_t record[fcgi_si::FCGI_HEADER_LEN + 4] = {};
+    fcgi_si::PopulateHeader(record,
+      fcgi_si::FCGIType::kFCGI_PARAMS, 0, 4,
+      0);
+    // The second set of eight bytes (FCGI_HEADER_LEN) is zero except for
+    // the low-order byte of the role.
+    record[fcgi_si::FCGI_HEADER_LEN]     = 1;
+    record[fcgi_si::FCGI_HEADER_LEN + 1] = 1;
+    record[fcgi_si::FCGI_HEADER_LEN + 2] = 'a';
+    record[fcgi_si::FCGI_HEADER_LEN + 3] = 'b';
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      fcgi_si::FCGI_HEADER_LEN + 4)) == -1 && errno == EINTR)
+    if(write_return < (fcgi_si::FCGI_HEADER_LEN + 4))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to write failed or returned a short-count.";
+      break;
+    }
+    off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
+    if(lseek_return == -1)
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to lseek failed.";
+      break;
+    }
+    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+      fcgi_si::FCGIType::kFCGI_PARAMS, 0)};
+    close(temp_fd);
+    if(std::get<0>(extract_content_result))
+    {
+      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result))  <<
+        "Record alignment flag.";
+      EXPECT_EQ((std::vector<uint8_t> {1,1,'a','b'}),
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
+    }
+    else
+    {
+      ADD_FAILURE() << "A call to ::fcgi_si::ExtractContent "
+        "encountered a read error.";
+      break;
+    }
+  }
+
+  // Case 5: As in 3, but with padding. (Regular discrete record.)
   case_single_iteration = true;
   while(case_single_iteration)
   {
@@ -431,9 +519,11 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 3] = 4;
     record[fcgi_si::FCGI_HEADER_LEN + 4] = 5;
     // Padding was uninitialized.
-    ssize_t write_return {write(temp_fd, (void*)record,
-      2*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 2*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      2*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 2*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -451,10 +541,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result))  <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1, 2, 3, 4, 5}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -464,7 +558,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 5: Small file descriptor value, a record with non-zero content
+  // Case 6: Small file descriptor value, a record with non-zero content
   // length, padding, and a terminal empty record. (A single-record, terminated
   // stream.)
   case_single_iteration = true;
@@ -488,9 +582,11 @@ TEST(Utility, ExtractContent)
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 10, 0, 0);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      3*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 3*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      3*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 3*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -508,10 +604,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_TRUE(std::get<2>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_TRUE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1, 2, 3, 4, 5}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -521,7 +621,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 6: Small file descriptor value, multiple records with non-zero
+  // Case 7: Small file descriptor value, multiple records with non-zero
   // content lengths and padding as necessary to reach a multiple of eight. Not
   // terminated.
   case_single_iteration = true;
@@ -558,9 +658,11 @@ TEST(Utility, ExtractContent)
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
-    ssize_t write_return {write(temp_fd, (void*)record,
-      6*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 6*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      6*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 6*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -578,10 +680,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result))  <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -591,7 +697,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 7: As in 6, but terminated. (A typical, multi-record stream sequence.)
+  // Case 8: As in 6, but terminated. (A typical, multi-record stream sequence.)
   case_single_iteration = true;
   while(case_single_iteration)
   {
@@ -628,9 +734,11 @@ TEST(Utility, ExtractContent)
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 7*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -648,10 +756,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_TRUE(std::get<1>(extract_content_result));
-      EXPECT_TRUE(std::get<2>(extract_content_result));
+      EXPECT_TRUE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_TRUE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_TRUE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -661,7 +773,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 8: A bad file descriptor as an unrecoverable read error.
+  // Case 9: A bad file descriptor as an unrecoverable read error.
   case_single_iteration = true;
   while(case_single_iteration)
   {
@@ -677,7 +789,7 @@ TEST(Utility, ExtractContent)
     EXPECT_FALSE(std::get<0>(result));
   }
 
-  // Case 9: As in 7, but with a header type error in the middle.
+  // Case 10: As in 7, but with a header type error in the middle.
   case_single_iteration = true;
   while(case_single_iteration)
   {
@@ -714,9 +826,11 @@ TEST(Utility, ExtractContent)
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 7*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -734,10 +848,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -747,7 +865,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 10: As in 7, but with a header FastCGI request identifier error in the
+  // Case 11: As in 7, but with a header FastCGI request identifier error in the
   // middle.
   case_single_iteration = true;
   while(case_single_iteration)
@@ -785,9 +903,11 @@ TEST(Utility, ExtractContent)
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 7*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -805,10 +925,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -818,7 +942,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 11: A header with a non-zero content length and non-zero padding, but
+  // Case 12: A header with a non-zero content length and non-zero padding, but
   // no more data. (An incomplete record.) A small file descriptor value.
   case_single_iteration = true;
   while(case_single_iteration)
@@ -833,9 +957,11 @@ TEST(Utility, ExtractContent)
     }
     uint8_t record[fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_PARAMS, 1, 50, 6);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -853,10 +979,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -866,7 +996,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 12: A small file descriptor value and a sequence of records with
+  // Case 13: A small file descriptor value and a sequence of records with
   // non-zero content lengths and with padding. The sequence ends with a header
   // with a non-zero content length and padding but no more data.
   case_single_iteration = true;
@@ -905,9 +1035,11 @@ TEST(Utility, ExtractContent)
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 1, 38, 2);
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN)};
-    if(write_return == -1 || write_return < 7*fcgi_si::FCGI_HEADER_LEN)
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -925,10 +1057,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -938,7 +1074,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 13: A small file descriptor value and a sequence of records with
+  // Case 14: A small file descriptor value and a sequence of records with
   // non-zero content lengths and with padding. The sequence ends with a header
   // that is not complete.
   case_single_iteration = true;
@@ -984,7 +1120,7 @@ TEST(Utility, ExtractContent)
       0;
     ssize_t write_return {write(temp_fd, (void*)record,
       6*fcgi_si::FCGI_HEADER_LEN + 3)};
-    if(write_return == -1 || write_return < (6*fcgi_si::FCGI_HEADER_LEN + 3))
+    if(write_return < (6*fcgi_si::FCGI_HEADER_LEN + 3))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -1002,10 +1138,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -1015,7 +1155,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 14:  As in 12, but with a final record for which the content has a
+  // Case 15:  As in 12, but with a final record for which the content has a
   // length that is less than the content length given in the final header. No
   // additional data is present.
   case_single_iteration = true;
@@ -1055,9 +1195,11 @@ TEST(Utility, ExtractContent)
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGIType::kFCGI_DATA, 1, 50, 6);
     record[7*fcgi_si::FCGI_HEADER_LEN]     = 16;
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN + 1)};
-    if(write_return == -1 || write_return < (7*fcgi_si::FCGI_HEADER_LEN + 1))
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN + 1)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < (7*fcgi_si::FCGI_HEADER_LEN + 1))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -1075,10 +1217,14 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15, 16}),
-        std::get<3>(extract_content_result));
+        std::get<4>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -1088,7 +1234,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 15: As in 12, but with a final record whose padding has a length that
+  // Case 16: As in 12, but with a final record whose padding has a length that
   // is less than the padding length given in the final header. No additional
   // data is present.
   case_single_iteration = true;
@@ -1132,9 +1278,11 @@ TEST(Utility, ExtractContent)
     record[7*fcgi_si::FCGI_HEADER_LEN + 2] = 18;
     record[7*fcgi_si::FCGI_HEADER_LEN + 3] = 19;
     record[7*fcgi_si::FCGI_HEADER_LEN + 4] = 20;
-    ssize_t write_return {write(temp_fd, (void*)record,
-      7*fcgi_si::FCGI_HEADER_LEN + 5)};
-    if(write_return == -1 || write_return < (7*fcgi_si::FCGI_HEADER_LEN + 5))
+    ssize_t write_return {0};
+    while((write_return = write(temp_fd, (void*)record,
+      7*fcgi_si::FCGI_HEADER_LEN + 5)) == -1 && errno == EINTR)
+      continue;
+    if(write_return < (7*fcgi_si::FCGI_HEADER_LEN + 5))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
@@ -1152,10 +1300,15 @@ TEST(Utility, ExtractContent)
     close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
-      EXPECT_FALSE(std::get<1>(extract_content_result));
-      EXPECT_FALSE(std::get<2>(extract_content_result));
+      EXPECT_FALSE(std::get<1>(extract_content_result)) <<
+        "Header and section errors.";
+      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+        "Sequence termination flag.";
+      EXPECT_FALSE(std::get<3>(extract_content_result)) <<
+        "Record alignment flag.";
       EXPECT_EQ((std::vector<uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,
-        17,18,19,20}), std::get<3>(extract_content_result));
+        17,18,19,20}), std::get<4>(extract_content_result))
+        << "Content byte sequence.";
     }
     else
     {
@@ -1170,11 +1323,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
 {
   // Testing explanation
   // Examined properties:
-  // 1) Number of name-value pairs. In particular, one pair or more than one.
+  // 1) Number of name-value pairs. (One pair or more than one.)
   // 2) Number of bytes required to encode the name or value. From the
   //    encoding format, one byte or four bytes.
   // 3) Presence or absence of data. I.e. an empty name or value.
-  // 4) Improperly encoded data.
+  // 4) Improperly encoded data (see cases below).
   //
   // Test cases:
   //  1) Nothing to process (content_length == 0), for both
@@ -1388,20 +1541,22 @@ TEST(Utility, EncodeNameValuePairs)
   //
   // Examined properties:
   // 1) Name-value pair sequence identity as described above.
-  // 2) Specific values for name and value.
+  // 2) Record alignment: all records should have a total length which
+  //    is a multiple of eight bytes.
+  // 3) Specific values for name and value.
   //    a) The presence of empty names and values.
   //    b) The presence of duplicate names. Duplicates should be present to
   //       ensure that the implementation can handle accidental duplicate names.
   //    c) Names and values which have a length large enough to require
   //       four bytes to be encoded in the FastCGI name-value format.
-  // 3) The need for padding. Records should be present which will likely
+  // 4) The need for padding. Records should be present which will likely
   //    require padding if the suggested 8-byte alignment condition is met.
-  // 4) Number of records. Sequences which require more than one full record
+  // 5) Number of records. Sequences which require more than one full record
   //    should be present.
-  // 5) Presence of a name or value whose length exceeds the maximum size
-  //    allowed by the FastCGI protocol.
-  // 6) Large and small FCGI_id values. In particular, values greater than 255.
-  // 7) A large number of sequence elements. In particular, larger than
+  // 6) Presence of a name or value whose length exceeds the maximum size
+  //    allowed by the FastCGI protocol. (Test case for erroneous input.)
+  // 7) Large and small FCGI_id values. In particular, values greater than 255.
+  // 8) A large number of sequence elements. In particular, larger than
   //    the current limit for the number of struct iovec instances passed in
   //    an array to a scatter-gather operation.
   // Note that the use of ExtractContent and ProcessBinaryNameValuePairs
@@ -1421,7 +1576,7 @@ TEST(Utility, EncodeNameValuePairs)
   //  7) Two name-value pairs where each is a duplicate of the other.
   //  8) Multiple name-value pairs that only require a single FastCGI record.
   //     The total length of the record does not require padding.
-  //  9) As in 6, but padding is required.
+  //  9) As in 8, but padding is required.
   // 10) A single name-value pair whose name has a length which exceeds the
   //     maximum size of a FastCGI record. Note that this also means that
   //     four bytes are required to encode the length of this element.
@@ -1432,11 +1587,8 @@ TEST(Utility, EncodeNameValuePairs)
   // 14) Multiple name-value pairs with several cases where names are repeated.
   // 15) Multiple name-value pairs where one of the middle pairs has a name
   //     whose length exceeds the maximum size. (Invalid input.)
-  // 16) As in 14, but for value instead of name. (Invalid input.)
-  // 17) More than 1024 name-value pairs. Encoding should cause the returned
-  //     offset value to be zero.
-  // 18) More than 1024 name-value pairs. Encoding should cauuse the returned
-  //     offset value to be non-zero.
+  // 16) As in 15, but for value instead of name. (Invalid input.)
+  // 17) More than the current iovec limit of name-value pairs.
   //
   // Modules which testing depends on:
   // 1) fcgi_si::ExtractContent
@@ -1463,6 +1615,112 @@ TEST(Utility, EncodeNameValuePairs)
     return true;
   };
 
+  // A lambda function which takes parameters which define a test case and
+  // goes through the testing procedure described in the testing explanation.
+  auto EncodeNameValuePairTester = [](
+    const std::vector<NameValuePair>& pair_sequence,
+    fcgi_si::FCGIType type,
+    uint16_t FCGI_id,
+    std::size_t offset_argument,
+    bool expect_processing_error,
+    int returned_offset_test_value,
+    std::vector<NameValuePair>::const_iterator expected_pair_it
+  )->void
+  {
+    auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_sequence.begin(),
+      pair_sequence.end(), type, FCGI_id, offset_argument);
+    if(expect_processing_error && std::get<0>(encoded_result))
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs did not detect an expected error "
+        "as reported by std::get<0>.";
+      return;
+    }
+    else if(!expect_processing_error && !std::get<0>(encoded_result))
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs encountered an unexpected error "
+        "as reported by std::get<0>.";
+      return;
+    }
+    size_t total_to_write {std::get<1>(encoded_result)};
+    // std::get<2>(encoded_result) is used in a call to writev.
+    // std::get<3>(encoded_result) is implciitly used in a call to writev.
+    if(returned_offset_test_value == 0 && std::get<4>(encoded_result) != 0)
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
+        "reported by std::get<4> when a zero offset was expected.";
+      // Don't return as we can still test name-value pairs.
+    }
+    else if(returned_offset_test_value > 0 && std::get<4>(encoded_result) == 0)
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs returned a zero offset as "
+        "reported by std::get<4> when a non-zero offset was expected.";
+      // Don't return as we can still test name-value pairs.
+    }
+    if(std::get<5>(encoded_result) != expected_pair_it)
+    {
+      ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
+        "std::get<5> which did not point to the expected name-value pair.";
+      // Don't return as we can still test name-value pairs.
+    }
+    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+    if(temp_fd == -1)
+    {
+      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      return;
+    }
+    ssize_t write_return {0};
+    while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
+      std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+      continue;
+    if(write_return != total_to_write)
+    {
+      ADD_FAILURE() << "A call to writev did not write all bytes requested.";
+      return;
+    }
+    off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
+    if(lseek_return == -1)
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to lseek failed.";
+      return;
+    }
+    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+      fcgi_si::FCGIType::kFCGI_PARAMS, FCGI_id)};
+    if(!std::get<0>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
+        "unrecoverable read error.";
+      return;
+    }
+    if(!std::get<1>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+        "std::get<1> that a header error or a partial section was encountered.";
+      return;
+    }
+    if(std::get<2>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+        "std::get<2> that the record sequence was terminated.";
+      // Don't return as we can still test name-value pairs.
+    }
+    if(!std::get<3>(extract_content_result))
+    {
+      close(temp_fd);
+      ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+        "std::get<3> that an unaligned record was present.";
+      // Don't return as we can still test name-value pairs.
+    }
+    std::vector<NameValuePair> pair_result_sequence {
+      fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
+      extract_content_result).size(), std::get<4>(
+      extract_content_result).data())};
+    EXPECT_EQ(pair_sequence, pair_result_sequence);
+  };
+
   // Case 1: No name-value pairs, i.e. pair_iter == end.
   {
     std::vector<NameValuePair> empty {};
@@ -1479,86 +1737,342 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 2: A name-value pair that requires a single FastCGI record.
   // The content length of the record is a multiple of eight bytes and,
   // as such, no padding is needed.
-  bool case_single_iteration {true};
-  while(case_single_iteration)
   {
-    case_single_iteration = false;
+    std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'}, {'v','l'}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
 
-    std::vector<NameValuePair> nv_pair_no_pad {{{'n','a','m','e'}, {'v','l'}}};
-    auto encoded_result = fcgi_si::EncodeNameValuePairs(nv_pair_no_pad.begin(),
-      nv_pair_no_pad.end(), fcgi_si::FCGIType::kFCGI_PARAMS, 1, 0);
-    if(!std::get<0>(encoded_result))
+  // Case 3: A name-value pair that requires a single FastCGI record. This
+  // record requires padding.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
+      {'v','a','l','u','e'}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 4: As in 3, but with a FCGI_id larger than 255.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
+      {'v','a','l','u','e'}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1000,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 5: A name-value pair with an empty name and an empty value.
+  {
+    std::vector<NameValuePair> pair_sequence {{{}, {}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 6: A name-value pair with a non-empty name and an empty value.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 7: Two name-value pairs where each is a duplicate of the other.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {'t','w','o'}},
+      {{'o','n','e'}, {'t','w','o'}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 8: Multiple name-value pairs that only require a single FastCGI
+  // record. The total length of the record does not require padding.
+  {
+    std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
+      {{3}, {8}}, {{4}, {16}}, {{5}, {32}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 9: As in 8, but padding is required.
+  {
+    std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
+      {{3}, {8}}, {{4}, {16}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.cend()
+    );
+  }
+
+  // Case 10: A single name-value pair whose name has a length which exceeds
+  // the maximum size of a FastCGI record. Note that this also means that
+  // four bytes are required to encode the length of this element.
+  {
+    std::vector<uint8_t> large_name(100000, 'a');
+    std::vector<NameValuePair> pair_sequence {{std::move(large_name), {1}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.end()
+    );
+  }
+
+  // Case 11: As in 9, but for value instead of name.
+  {
+    std::vector<uint8_t> large_value(100000, 10);
+    std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
+      std::move(large_value)}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.end()
+    );
+  }
+
+  // Case 12: Multiple name-pairs that require more than one FastCGI record.
+  {
+    std::vector<uint8_t> large_name(100, 'Z');
+    std::vector<uint8_t> large_value(100000, 10);
+    std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
+      std::move(large_value)}, {{'a'}, {1}}, {{'b'}, {2}},
+      {std::move(large_name), {3}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.end()
+    );
+  }
+
+  // Case 13: Multiple name-value pairs where a single name is empty and
+  // several values are empty.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'a'}, {}}, {{'b'}, {1}},
+      {{'c'}, {2}}, {{}, {3}}, {{'e'}, {4}}, {{'f'}, {}}, {{'g'}, {}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.end()
+    );
+  }
+
+  // Case 14: Multiple name-value pairs with several cases where names are
+  // repeated.
+  {
+    std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'a'}, {1}},
+      {{'b'}, {2}}, {{'c'}, {3}}, {{'d'}, {4}}, {{'d'}, {5}}, {{'b'}, {6}}};
+    EncodeNameValuePairTester(
+      pair_sequence,
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      1,
+      0,
+      false,
+      0,
+      pair_sequence.end()
+    );
+  }
+
+  // Currently fails with a Bazel test setup error.
+  // // Case 15: Multiple name-value pairs where one of the middle pairs has a
+  // // name whose length exceeds the maximum size. (Invalid input.)
+  // {
+  //   std::vector<uint8_t> illegal_name((1UL << 31) + 10, 'd');
+  //   std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'b'}, {1}},
+  //     {{'c'}, {2}}, {std::move(illegal_name), {3}}, {{'e'}, {4}},
+  //     {{'f'}, {5}}, {{'g'}, {6}}};
+  //
+  //   // Parameters for the below code (in the style of the lambda).
+  //   fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_PARAMS};
+  //   uint16_t FCGI_id {1};
+  //   std::size_t offset_argument {0};
+  //   bool expect_processing_error {true};
+  //   int returned_offset_test_value {0};
+  //   std::vector<NameValuePair>::const_iterator expected_pair_it
+  //     {pair_sequence.cbegin() + 3};
+  //   while(true)
+  //   {
+  //     auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_sequence.begin(),
+  //       pair_sequence.end(), type, FCGI_id, offset_argument);
+  //     if(expect_processing_error && std::get<0>(encoded_result))
+  //     {
+  //       ADD_FAILURE() << "EncodeNameValuePairs did not detect an expected error "
+  //         "as reported by std::get<0>.";
+  //       break;
+  //     }
+  //     size_t total_to_write {std::get<1>(encoded_result)};
+  //     // std::get<2>(encoded_result) is used in a call to writev.
+  //     // std::get<3>(encoded_result) is implciitly used in a call to writev.
+  //     if(returned_offset_test_value == 0 && std::get<4>(encoded_result) != 0)
+  //     {
+  //       ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
+  //         "reported by std::get<4> when a zero offset was expected.";
+  //       // Don't return as we can still test name-value pairs.
+  //     }
+  //     if(std::get<5>(encoded_result) != expected_pair_it)
+  //     {
+  //       ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
+  //         "std::get<5> which did not point to the expected name-value pair.";
+  //       // Don't return as we can still test name-value pairs.
+  //     }
+  //     int temp_fd {open(".", O_RDWR | O_TMPFILE)};
+  //     if(temp_fd == -1)
+  //     {
+  //       ADD_FAILURE() << "A call to open failed to make a temporary file.";
+  //       break;
+  //     }
+  //     ssize_t write_return {0};
+  //     while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
+  //       std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+  //       continue;
+  //     if(write_return != total_to_write)
+  //     {
+  //       ADD_FAILURE() << "A call to writev did not write all bytes requested.";
+  //       break;
+  //     }
+  //     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
+  //     if(lseek_return == -1)
+  //     {
+  //       close(temp_fd);
+  //       ADD_FAILURE() << "A call to lseek failed.";
+  //       break;
+  //     }
+  //     auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+  //       fcgi_si::FCGIType::kFCGI_PARAMS, FCGI_id)};
+  //     if(!std::get<0>(extract_content_result))
+  //     {
+  //       close(temp_fd);
+  //       ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
+  //         "unrecoverable read error.";
+  //       break;
+  //     }
+  //     if(!std::get<1>(extract_content_result))
+  //     {
+  //       close(temp_fd);
+  //       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+  //         "std::get<1> that a header error or a partial section was encountered.";
+  //       break;
+  //     }
+  //     if(std::get<2>(extract_content_result))
+  //     {
+  //       close(temp_fd);
+  //       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+  //         "std::get<2> that the record sequence was terminated.";
+  //       // Don't return as we can still test name-value pairs.
+  //     }
+  //     if(!std::get<3>(extract_content_result))
+  //     {
+  //       close(temp_fd);
+  //       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
+  //         "std::get<3> that an unaligned record was present.";
+  //       // Don't return as we can still test name-value pairs.
+  //     }
+  //     std::vector<NameValuePair> pair_result_sequence {
+  //       fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
+  //       extract_content_result).size(), std::get<4>(
+  //       extract_content_result).data())};
+  //     std::vector<NameValuePair> expected_result_pairs(pair_sequence.cbegin(),
+  //       expected_pair_it);
+  //     EXPECT_EQ(expected_result_pairs, pair_result_sequence);
+  //     break;
+  //   }
+  // }
+
+  // Case 16: As in 15, but for value instead of name. (Invalid input.)
+  // (Deferred until Bazel error for case 15 is resolved.)
+
+  // Case 17: More than the current iovec limit of name-value pairs.
+  {
+    bool case_single_iteration {true};
+    while(case_single_iteration)
     {
-      ADD_FAILURE() << "EncodeNameValuePairs encountered an error reported by "
-        "std::get<0>.";
-      break;
+      case_single_iteration = false;
+
+      long iovec_max {sysconf(_SC_IOV_MAX)};
+      if(iovec_max == -1)
+        iovec_max = 1024;
+      iovec_max = std::min<long>(iovec_max, std::numeric_limits<int>::max());
+      NameValuePair copied_pair {{'a'}, {1}}
+      std::vector<NameValuePair> many_pairs(iovec_max + 10, copied_pair);
+      std::size_t offset {0};
+      for(auto pair_iter {many_pairs.begin()}; pair_iter != many_pairs.end();
+        /*no-op*/)
+      {
+        auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_iter,
+          many_pairs.end(), fcgi_si::FCGIType::kFCGI_PARAMS, 1, offset);
+
+
+
+
+      }
+
     }
-    size_t total_to_write {std::get<1>(encoded_result)};
-    if(total_to_write != 16)
-    {
-      ADD_FAILURE() << "fcgi_si::EncodeNameValuePairs indicated an incorrect "
-        "number of bytes to write as reported by std::get<1>. Value: "
-        << total_to_write;
-      break;
-    }
-    // std::get<2>(encoded_result) is used in a call to writev.
-    // std::get<3>(encoded_result) is implciitly used in a call to writev.
-    if(std::get<4>(encoded_result) != 0)
-    {
-      ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
-        "reported by std::get<4>.";
-      break;
-    }
-    if(std::get<5>(encoded_result) != nv_pair_no_pad.end())
-    {
-      ADD_FAILURE() << "EncodeNameValuePairs did not process all pairs as "
-        "reported by std::get<5>.";
-      break;
-    }
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
-      break;
-    }
-    ssize_t write_return {0};
-    while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
-      std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
-      continue;
-    if(write_return != total_to_write)
-    {
-      ADD_FAILURE() << "A call to writev did not write all bytes requested.";
-      break;
-    }
-    off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
-    if(lseek_return == -1)
-    {
-      close(temp_fd);
-      ADD_FAILURE() << "A call to lseek failed.";
-      break;
-    }
-    auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_PARAMS, 1)};
-    if(!std::get<0>(extract_content_result))
-    {
-      close(temp_fd);
-      ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
-        "unrecoverable read error.";
-      break;
-    }
-    if(!std::get<1>(extract_content_result)
-      || std::get<2>(extract_content_result))
-    {
-      close(temp_fd);
-      ADD_FAILURE() << "A call to fcgi_si::ExtractContent returned an "
-      "unexpected truth value as reported by std::get<1> and std::get<2>.";
-      break;
-    }
-    std::vector<NameValuePair> nv_pair_result {
-      fcgi_si::ProcessBinaryNameValuePairs(std::get<3>(
-      extract_content_result).size(), std::get<3>(
-      extract_content_result).data())};
-    EXPECT_EQ(nv_pair_no_pad, nv_pair_result);
+
   }
 
 

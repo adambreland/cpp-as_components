@@ -182,7 +182,8 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 //       that an internal overflow would occur.
 // 5) Processing is carried out so that a FastCGI header with an empty
 //    content_length is never generated. A partial header, meaning a terminal
-//    header that is less than FCGI_HEADER_LEN also does not occur.
+//    header whose length is less than FCGI_HEADER_LEN, also does not occur.
+// 6) All records have a total length which is a multiple of eight bytes.
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
@@ -220,12 +221,14 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
       return pair_iter->second.size();
   };
 
-  auto data_iter = [&](int i)->uint8_t*
+  auto data_iter = [&](int i)->const uint8_t*
   {
     if(i == 0)
-      return static_cast<uint8_t*>(static_cast<void*>(pair_iter->first.data()));
+      return static_cast<const uint8_t*>(static_cast<const void*>(
+        pair_iter->first.data()));
     else
-      return static_cast<uint8_t*>(static_cast<void*>(pair_iter->second.data()));
+      return static_cast<const uint8_t*>(static_cast<const void*>(
+        pair_iter->second.data()));
   };
   // A binary sequence of headers and length information encoded in the
   // FastCGI name-value pair format is created and returned to
@@ -264,7 +267,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     std::size_t sums[3] = {};
     std::vector<uint8_t>::size_type name_value_buffer_offset
       {local_buffers.size()};
-    std::uint8_t* data_array[2];
+    const std::uint8_t* data_array[2];
     // Reset for a new pair.
     nv_pair_bytes_placed = offset;
     // Collect information about the name and value byte sequences.
@@ -388,8 +391,12 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
             // that specifies an empty name or value.
             if(local_number_to_place)
             {
-              iovec_list.push_back({data_array[index-1] + (size_array[index]
-                - local_remaining), local_number_to_place});
+              struct iovec new_iovec {
+                const_cast<uint8_t*>(data_array[index-1])
+                  + (size_array[index] - local_remaining),
+                local_number_to_place
+              };
+              iovec_list.push_back(new_iovec);
               remaining_iovec_count--;
             }
           }
@@ -448,23 +455,34 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   // iov_base pointers from local_buffers.data().
   for(auto pair : index_pairs)
     iovec_list[pair.first].iov_base =
-      (void*)(local_buffers.data() + pair.second);
+      static_cast<void*>(local_buffers.data() + pair.second);
   // Check for rejection based on a limit or name or value that was too big.
-  return std::make_tuple(!name_or_value_too_big && !overflow_detected,
-    number_to_write, std::move(iovec_list), std::move(local_buffers),
-    ((incomplete_nv_write) ? nv_pair_bytes_placed : 0), pair_iter);
+  return std::make_tuple(
+    !name_or_value_too_big && !overflow_detected,
+    number_to_write,
+    std::move(iovec_list),
+    std::move(local_buffers),
+    ((incomplete_nv_write) ? nv_pair_bytes_placed : 0),
+    pair_iter
+  );
 }
 
-// A utility function used for testing. ExtractContent reads a file which
+//    A utility function used for testing. ExtractContent reads a file which
 // contains a sequence of FastCGI records. These records are assumed to be
 // from a single, complete record sequence. (Multiple records may be present in
 // a sequence when it is associated with a stream record type from the FastCGI
-// protocol.) Two operations are performed. First, several error checks are
-// performed. Each header is validated for type and request identifer.
-// Also, the actual number of bytes present for each section of a record is
-// compared to the expected number. Header errors terminate sequence processing.
-// Logcially, incomplete sections may only occur when the end of the file is
-// reached. Second, the content byte sequence formed from the concatenation of
+// protocol.) Two operations are performed.
+//
+//    First, several error checks are performed.
+// 1) Each header is validated for type and request identifer. Header
+//    errors terminate sequence processing.
+// 2) The actual number of bytes present for each section of a record is
+//    compared to the expected number. Logcially, incomplete sections may only
+//    occur when the end of the file is reached.
+// 3) The total length of each record is verified to be a multiple of eight
+//    bytes.
+//
+//    Second, the content byte sequence formed from the concatenation of
 // the record content sections is constructed and returned.
 //
 // Parameters:
@@ -488,15 +506,22 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //       Access: std::get<1>; Type: bool; True if neither a FastCGI type error
 //    nor an identifier error was present and no incomplete record section was
 //    present. False otherwise.
-//       Access: std::get<2>; Type: bool; True if no header errors or incomplete
-//    section occurred while reading the sequence and the sequence
-//    was terminated by a record with a zero content length. False otherwise.
-//       Access: std::get<3>; Type: std::vector<uint8_t>; The extracted
+//       Access: std::get<2>; Type: bool; If no header errors or incomplete
+//    section occurred while reading the sequence, this flag indicates if the
+//    sequence was terminated by a record with zero content length (true) or
+//    not. If header errors or incomplete section occurred, the flag is false.
+//       Access: std::get<3>; Type: bool; If no read errors were present
+//    and no header or incomplete section errors were present, this flag is
+//    true if no records were present or if all processed records had a total
+//    record length which was a multiple of eight. The flag is false if header
+//    or incomplete section errors were present or if a record was present
+//    whose total length was not a multiple of eight bytes.
+//       Access: std::get<4>; Type: std::vector<uint8_t>; The extracted
 //    content of the records processed up to:
 //    a) the point of error (such as the end of a partial record)
 //    b) a record with a zero content length
 //    c) the end of the file.
-std::tuple<bool, bool, bool, std::vector<uint8_t>>
+std::tuple<bool, bool, bool, bool, std::vector<uint8_t>>
 ExtractContent(int fd, FCGIType type, uint16_t id);
 
 // Extracts a collection of name-value pairs when they are encoded as a

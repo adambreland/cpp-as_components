@@ -6,7 +6,7 @@
 #include "include/protocol_constants.h"
 #include "include/utility.h"
 
-std::tuple<bool, bool, bool, std::vector<uint8_t>>
+std::tuple<bool, bool, bool, bool, std::vector<uint8_t>>
 fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
 {
   constexpr uint16_t buffer_size {1 << 10};
@@ -25,6 +25,7 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
   bool read_error {false};
   bool header_error {false};
   bool sequence_terminated {false};
+  bool aligned {true};
   int state {0};
 
   while((number_bytes_read = read(fd, byte_buffer, buffer_size)))
@@ -67,6 +68,8 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
           (content_length = local_header[kHeaderContentLengthB1Index]) <<= 8;
           content_length += local_header[kHeaderContentLengthB0Index];
           padding_length = local_header[kHeaderPaddingLengthIndex];
+          if((content_length + padding_length) % 8 != 0)
+            aligned = false;
           // Verify header information.
           if(static_cast<FCGIType>(local_header[kHeaderTypeIndex]) != type
              || FCGI_id != id)
@@ -154,8 +157,13 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
     }
   }
 
-  return std::make_tuple(!read_error, !(header_error || section_error),
-    sequence_terminated, content_bytes);
+  return std::make_tuple(
+    !read_error,
+    !(header_error || section_error),
+    sequence_terminated,
+    (header_error || section_error) ? false : aligned,
+    content_bytes
+  );
 }
 
 void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,

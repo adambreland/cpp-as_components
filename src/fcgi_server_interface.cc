@@ -34,10 +34,10 @@
 fcgi_si::FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   uint16_t role, int32_t app_status_on_abort)
-: maximum_connection_count_ {max_connections},
+: app_status_on_abort_ {app_status_on_abort},
+  maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
-  role_ {role},
-  app_status_on_abort_ {app_status_on_abort}
+  role_ {role}
 {
   // Check that the arguments are within the domain.
   std::string error_message {};
@@ -738,10 +738,12 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   size_t number_written = socket_functions::NonblockingPollingSocketWrite(connection,
     result.data(), result.size());
   if(number_written < result.size())
+  {
     if(errno == EPIPE)
       return false;
     else throw std::runtime_error
       {ERRNO_ERROR_STRING("write from a call to NonblockingPollingSocketWrite")};
+  }
   return true;
 } // RELEASE the write mutex for the connection.
 
