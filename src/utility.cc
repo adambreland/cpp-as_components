@@ -180,7 +180,7 @@ void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   header_array[6] = padding_length;
   header_array[7] = 0;
 
-  std::memcpy((void*)byte_ptr, (void*)header_array,
+  std::memcpy(static_cast<void*>(byte_ptr), static_cast<void*>(header_array),
     fcgi_si::FCGI_HEADER_LEN);
 }
 

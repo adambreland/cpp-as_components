@@ -89,6 +89,30 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
   return length;
 }
 
+// Generates a FastCGI header and writes it to the indicated buffer. The values
+// of the arguments are encoded per the FastCGI record header binary format.
+//
+// Parameters:
+// byte_ptr:       A pointer to the first byte of the buffer which will hold
+//                 the header.
+// type:           The FastCGI type of the record described by the header.
+// FCGI_id:        The FastCGI request identifier of the record described by
+//                 the header.
+// content_length: The content length of the record described by the header.
+// padding_length: The padding length of the record described by the header.
+//
+// Requires:
+// 1) byte_ptr is not null.
+// 2) The buffer pointed to by byte_ptr must be able to hold at least
+//    FCGI_HEADER_LEN bytes.
+//
+// Effects:
+// 1) FCGI_HEADER_LEN bytes, starting at the byte pointed to by byte_ptr,
+//    are written. The written byte sequence is a FastCGI header which
+//    encodes the values passed to PopulateHeader. Two byte fields are given
+//    the same value for every header:
+//    a) The first byte is given the value FCGI_VERSION_1 which equals 1.
+//    b) The last byte, which is reserved by the FastCGI protocol, is zero.
 void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   std::uint16_t FCGI_id, std::uint16_t content_length,
   std::uint8_t padding_length);
@@ -509,7 +533,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //       Access: std::get<2>; Type: bool; If no header errors or incomplete
 //    section occurred while reading the sequence, this flag indicates if the
 //    sequence was terminated by a record with zero content length (true) or
-//    not. If header errors or incomplete section occurred, the flag is false.
+//    not (false). If header errors or incomplete section occurred, the flag is
+//    false.
 //       Access: std::get<3>; Type: bool; If no read errors were present
 //    and no header or incomplete section errors were present, this flag is
 //    true if no records were present or if all processed records had a total
@@ -549,6 +574,18 @@ ExtractContent(int fd, FCGIType type, uint16_t id);
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr);
 
+// Returns a vector of bytes which represents the 32-bit unsigned integer
+// argument in decimal as a sequence of encoded characters. For example, the
+// value 89 is converted to the sequence (0x38, 0x39) = ('8', '9').
+//
+// Parameters:
+// c: The value to be converted.
+//
+// Requires: No preconditions.
+//
+// Effects:
+// 1) A vector containing a sequence of bytes which represents the decimal
+//    character encoding of the argument is returned.
 std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si

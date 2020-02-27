@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <sys/sendfile.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -6,6 +7,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <string>
 #include <utility>
@@ -194,6 +196,218 @@ TEST(Utility, ExtractFourByteLength)
   EXPECT_EQ((1UL << 31) - 1, length);
 }
 
+TEST(Utility, PopulateHeader)
+{
+  // Testing explanation
+  // Examined properties:
+  // 1) type value (each of the 11 types).
+  // 2) FCGI_id value (0, 1, larger than 1 but less than the maximum,
+  //    the maximum value).
+  // 3) content_length value (0, 1, larger than 1 but less than the maximum,
+  //    the maximum value).
+  // 4) padding_length value (0, 1, larger than 1 but less than the maximum,
+  //    the maximum value).
+  //
+  // Test cases:
+  //  1) type:           fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST
+  //     FCGI_id:        0
+  //     content_length: 0
+  //     padding_length: 0
+  //  2) type:           fcgi_si::FCGIType::kFCGI_ABORT_REQUEST
+  //     FCGI_id:        1
+  //     content_length: 1
+  //     padding_length: 1
+  //  3) type:           fcgi_si::FCGIType::kFCGI_END_REQUEST
+  //     FCGI_id:        10
+  //     content_length: 10
+  //     padding_length: 10
+  //  4) type:           fcgi_si::FCGIType::kFCGI_PARAMS
+  //     FCGI_id:        2^16 - 1 (which is equal to uint16_t(-1))
+  //     content_length: 2^16 - 1
+  //     padding_length: 255 (which is equal to uint8_t(-1))
+  //  5) type:           fcgi_si::FCGIType::kFCGI_STDIN
+  //     FCGI_id:        1
+  //     content_length: 1000
+  //     padding_length: 0
+  //  6) type:           fcgi_si::FCGIType::kFCGI_STDOUT
+  //     FCGI_id:        1
+  //     content_length: 250
+  //     padding_length: 2
+  //  7) type:           fcgi_si::FCGIType::kFCGI_STDERR
+  //     FCGI_id:        1
+  //     content_length: 2
+  //     padding_length: 6
+  //  8) type:           fcgi_si::FCGIType::kFCGI_DATA
+  //     FCGI_id:        2^16 - 1
+  //     content_length: 2^16 - 1
+  //     padding_length: 7
+  //  9) type:           fcgi_si::FCGIType::kFCGI_GET_VALUES
+  //     FCGI_id:        0
+  //     content_length: 100
+  //     padding_length: 4
+  // 10) type:           fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT
+  //     FCGI_id:        0
+  //     content_length: 100
+  //     padding_length: 0
+  // 11) type:           fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE
+  //     FCGI_id:        1
+  //     content_length: 8
+  //     padding_length: 8
+  //
+  // Modules which testing depends on:
+  //
+  // Other modules whose testing depends on this module:
+  // 1) fcgi_si::ExtractContent
+
+  std::vector<uint8_t> local_header(fcgi_si::FCGI_HEADER_LEN);
+  std::vector<uint8_t> expected_result(fcgi_si::FCGI_HEADER_LEN);
+
+  auto PopulateHeaderTester = [&](
+    std::string message,
+    fcgi_si::FCGIType type,
+    uint16_t FCGI_id,
+    uint16_t content_length,
+    uint8_t padding_length
+  )->void
+  {
+    fcgi_si::PopulateHeader(local_header.data(), type, FCGI_id, content_length,
+      padding_length);
+
+    expected_result[0] = fcgi_si::FCGI_VERSION_1;
+    expected_result[1] = static_cast<uint8_t>(type);
+    expected_result[2] = (FCGI_id >> 8);
+    expected_result[3] = FCGI_id;        // implicit truncation.
+    expected_result[4] = (content_length >> 8);
+    expected_result[5] = content_length; // implicit truncation.
+    expected_result[6] = padding_length;
+    expected_result[7] = 0;
+
+    EXPECT_EQ(local_header, expected_result) << message;
+  };
+
+  // Case 1
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST};
+    uint16_t FCGI_id {0};
+    uint16_t content_length {0};
+    uint8_t padding_length {0};
+
+    std::string message {"Case 1, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 2
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_ABORT_REQUEST};
+    uint16_t FCGI_id {1};
+    uint16_t content_length {1};
+    uint8_t padding_length {1};
+
+    std::string message {"Case 2, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 3
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_END_REQUEST};
+    uint16_t FCGI_id {10};
+    uint16_t content_length {10};
+    uint8_t padding_length {10};
+
+    std::string message {"Case 3, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 4
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_PARAMS};
+    uint16_t FCGI_id(-1);
+    uint16_t content_length(-1);
+    uint8_t padding_length(-1);
+
+    std::string message {"Case 4, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 5
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_STDIN};
+    uint16_t FCGI_id {1};
+    uint16_t content_length {1000};
+    uint8_t padding_length {0};
+
+    std::string message {"Case 5, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 6
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_STDOUT};
+    uint16_t FCGI_id {1};
+    uint16_t content_length {250};
+    uint8_t padding_length {2};
+
+    std::string message {"Case 6, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 7
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_STDERR};
+    uint16_t FCGI_id {1};
+    uint16_t content_length {2};
+    uint8_t padding_length {6};
+
+    std::string message {"Case 7, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 8
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_DATA};
+    uint16_t FCGI_id(-1);
+    uint16_t content_length(-1);
+    uint8_t padding_length {7};
+
+    std::string message {"Case 8, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 9
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_GET_VALUES};
+    uint16_t FCGI_id {0};
+    uint16_t content_length {100};
+    uint8_t padding_length {4};
+
+    std::string message {"Case 9, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 10
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT};
+    uint16_t FCGI_id {0};
+    uint16_t content_length {100};
+    uint8_t padding_length {0};
+
+    std::string message {"Case 10, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+  // Case 11
+  {
+    fcgi_si::FCGIType type {fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE};
+    uint16_t FCGI_id {1};
+    uint16_t content_length {8};
+    uint8_t padding_length {8};
+
+    std::string message {"Case 11, Line: "};
+    message += std::to_string(__LINE__);
+    PopulateHeaderTester(message, type, FCGI_id, content_length, padding_length);
+  }
+}
+
 TEST(Utility, ExtractContent)
 {
   // Testing explanation
@@ -257,7 +471,8 @@ TEST(Utility, ExtractContent)
   //     less than the padding length given in the final header. No additional
   //     data is present.
   //
-  // Modules which testing depends on: none.
+  // Modules which testing depends on:
+  // 1) fcgi_si::PopulateHeader
   //
   // Other modules whose testing depends on this module:
   // 1) fcgi_si::EncodeNameValuePairs
@@ -1588,7 +1803,9 @@ TEST(Utility, EncodeNameValuePairs)
   // 15) Multiple name-value pairs where one of the middle pairs has a name
   //     whose length exceeds the maximum size. (Invalid input.)
   // 16) As in 15, but for value instead of name. (Invalid input.)
-  // 17) More than the current iovec limit of name-value pairs.
+  // 17) More than the current iovec limit of name-value pairs. This case tests
+  //     the functionality of EncodeNameValuePairs which allows very long
+  //     sequences to be encoded by iteratively calling the function.
   //
   // Modules which testing depends on:
   // 1) fcgi_si::ExtractContent
@@ -1618,6 +1835,7 @@ TEST(Utility, EncodeNameValuePairs)
   // A lambda function which takes parameters which define a test case and
   // goes through the testing procedure described in the testing explanation.
   auto EncodeNameValuePairTester = [](
+    std::string message,
     const std::vector<NameValuePair>& pair_sequence,
     fcgi_si::FCGIType type,
     uint16_t FCGI_id,
@@ -1632,13 +1850,15 @@ TEST(Utility, EncodeNameValuePairs)
     if(expect_processing_error && std::get<0>(encoded_result))
     {
       ADD_FAILURE() << "EncodeNameValuePairs did not detect an expected error "
-        "as reported by std::get<0>.";
+        "as reported by std::get<0>."
+        << '\n' << message;
       return;
     }
     else if(!expect_processing_error && !std::get<0>(encoded_result))
     {
       ADD_FAILURE() << "EncodeNameValuePairs encountered an unexpected error "
-        "as reported by std::get<0>.";
+        "as reported by std::get<0>."
+        << '\n' << message;
       return;
     }
     size_t total_to_write {std::get<1>(encoded_result)};
@@ -1647,25 +1867,29 @@ TEST(Utility, EncodeNameValuePairs)
     if(returned_offset_test_value == 0 && std::get<4>(encoded_result) != 0)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
-        "reported by std::get<4> when a zero offset was expected.";
+        "reported by std::get<4> when a zero offset was expected."
+        << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
     else if(returned_offset_test_value > 0 && std::get<4>(encoded_result) == 0)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned a zero offset as "
-        "reported by std::get<4> when a non-zero offset was expected.";
+        "reported by std::get<4> when a non-zero offset was expected."
+        << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
     if(std::get<5>(encoded_result) != expected_pair_it)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
-        "std::get<5> which did not point to the expected name-value pair.";
+        "std::get<5> which did not point to the expected name-value pair."
+        << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
     int temp_fd {open(".", O_RDWR | O_TMPFILE)};
     if(temp_fd == -1)
     {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+      ADD_FAILURE() << "A call to open failed to make a temporary file."
+      << '\n' << message;
       return;
     }
     ssize_t write_return {0};
@@ -1674,14 +1898,15 @@ TEST(Utility, EncodeNameValuePairs)
       continue;
     if(write_return != total_to_write)
     {
-      ADD_FAILURE() << "A call to writev did not write all bytes requested.";
+      ADD_FAILURE() << "A call to writev did not write all bytes requested."
+      << '\n' << message;
       return;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
       close(temp_fd);
-      ADD_FAILURE() << "A call to lseek failed.";
+      ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
       return;
     }
     auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
@@ -1690,28 +1915,31 @@ TEST(Utility, EncodeNameValuePairs)
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
-        "unrecoverable read error.";
+        "unrecoverable read error." << '\n' << message;
       return;
     }
     if(!std::get<1>(extract_content_result))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
-        "std::get<1> that a header error or a partial section was encountered.";
+        "std::get<1> that a header error or a partial section was encountered."
+        << '\n' << message;
       return;
     }
     if(std::get<2>(extract_content_result))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
-        "std::get<2> that the record sequence was terminated.";
+        "std::get<2> that the record sequence was terminated."
+        << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
     if(!std::get<3>(extract_content_result))
     {
       close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si::ExtractContent reported from "
-        "std::get<3> that an unaligned record was present.";
+        "std::get<3> that an unaligned record was present."
+        << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
     std::vector<NameValuePair> pair_result_sequence {
@@ -1738,8 +1966,11 @@ TEST(Utility, EncodeNameValuePairs)
   // The content length of the record is a multiple of eight bytes and,
   // as such, no padding is needed.
   {
+    std::string message {"Case 2"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'}, {'v','l'}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1753,9 +1984,12 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 3: A name-value pair that requires a single FastCGI record. This
   // record requires padding.
   {
+    std::string message {"Case 3"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       {'v','a','l','u','e'}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1768,9 +2002,12 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 4: As in 3, but with a FCGI_id larger than 255.
   {
+    std::string message {"Case 3"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       {'v','a','l','u','e'}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1000,
@@ -1783,8 +2020,11 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 5: A name-value pair with an empty name and an empty value.
   {
+    std::string message {"Case 5"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{}, {}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1797,8 +2037,11 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 6: A name-value pair with a non-empty name and an empty value.
   {
+    std::string message {"Case 6"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1811,9 +2054,12 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 7: Two name-value pairs where each is a duplicate of the other.
   {
+    std::string message {"Case 7"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {'t','w','o'}},
       {{'o','n','e'}, {'t','w','o'}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1827,9 +2073,12 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 8: Multiple name-value pairs that only require a single FastCGI
   // record. The total length of the record does not require padding.
   {
+    std::string message {"Case 8"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
       {{3}, {8}}, {{4}, {16}}, {{5}, {32}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1842,9 +2091,12 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 9: As in 8, but padding is required.
   {
+    std::string message {"Case 9"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
       {{3}, {8}}, {{4}, {16}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1859,9 +2111,12 @@ TEST(Utility, EncodeNameValuePairs)
   // the maximum size of a FastCGI record. Note that this also means that
   // four bytes are required to encode the length of this element.
   {
+    std::string message {"Case 10"};
+    message += std::to_string(__LINE__);
     std::vector<uint8_t> large_name(100000, 'a');
     std::vector<NameValuePair> pair_sequence {{std::move(large_name), {1}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1874,10 +2129,13 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 11: As in 9, but for value instead of name.
   {
+    std::string message {"Case 11"};
+    message += std::to_string(__LINE__);
     std::vector<uint8_t> large_value(100000, 10);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       std::move(large_value)}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1890,12 +2148,15 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 12: Multiple name-pairs that require more than one FastCGI record.
   {
+    std::string message {"Case 12"};
+    message += std::to_string(__LINE__);
     std::vector<uint8_t> large_name(100, 'Z');
     std::vector<uint8_t> large_value(100000, 10);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       std::move(large_value)}, {{'a'}, {1}}, {{'b'}, {2}},
       {std::move(large_name), {3}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1909,9 +2170,12 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 13: Multiple name-value pairs where a single name is empty and
   // several values are empty.
   {
+    std::string message {"Case 13"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'a'}, {}}, {{'b'}, {1}},
       {{'c'}, {2}}, {{}, {3}}, {{'e'}, {4}}, {{'f'}, {}}, {{'g'}, {}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1925,9 +2189,12 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 14: Multiple name-value pairs with several cases where names are
   // repeated.
   {
+    std::string message {"Case 14"};
+    message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'a'}, {1}},
       {{'b'}, {2}}, {{'c'}, {3}}, {{'d'}, {4}}, {{'d'}, {5}}, {{'b'}, {6}}};
     EncodeNameValuePairTester(
+      message,
       pair_sequence,
       fcgi_si::FCGIType::kFCGI_PARAMS,
       1,
@@ -1938,7 +2205,7 @@ TEST(Utility, EncodeNameValuePairs)
     );
   }
 
-  // Currently fails with a Bazel test setup error.
+  // Currently fails with a Bazel test setup error. Preliminary code below.
   // // Case 15: Multiple name-value pairs where one of the middle pairs has a
   // // name whose length exceeds the maximum size. (Invalid input.)
   // {
@@ -2057,31 +2324,165 @@ TEST(Utility, EncodeNameValuePairs)
       if(iovec_max == -1)
         iovec_max = 1024;
       iovec_max = std::min<long>(iovec_max, std::numeric_limits<int>::max());
-      NameValuePair copied_pair {{'a'}, {1}}
+      NameValuePair copied_pair {{'a'}, {1}};
       std::vector<NameValuePair> many_pairs(iovec_max + 10, copied_pair);
       std::size_t offset {0};
+      int temp_fd {open(".", O_RDWR | O_TMPFILE, S_IRWXU)};
+      if(temp_fd == -1)
+      {
+        ADD_FAILURE() << "A call to open failed to make a temporary file.";
+        break;
+      }
+      bool terminal_error {false};
+      ssize_t write_return {0};
       for(auto pair_iter {many_pairs.begin()}; pair_iter != many_pairs.end();
         /*no-op*/)
       {
         auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_iter,
           many_pairs.end(), fcgi_si::FCGIType::kFCGI_PARAMS, 1, offset);
-
-
-
-
+        if(!std::get<0>(encoded_result))
+        {
+          ADD_FAILURE() << "A call to fcgi_si::EncodeNameValuePairs halted "
+            "due to an error as reported by std::get<0>.";
+          terminal_error = true;
+          break;
+        }
+        while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
+          std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+          continue;
+        if(write_return != std::get<1>(encoded_result))
+        {
+          ADD_FAILURE() << "A call to writev did not write all bytes requested.";
+          terminal_error = true;
+          break;
+        }
+        offset = std::get<4>(encoded_result);
+        pair_iter = std::get<5>(encoded_result);
+      }
+      if(terminal_error)
+      {
+        close(temp_fd);
+        break;
       }
 
+      // Code for inspecting the sequence of records written to temp_fd.
+      // // Copy temporary file contents for inspection.
+      // const char* new_file_path
+      //   {"/home/adam/Desktop/EncodeNameValuePairs_output.bin"};
+      // int new_fd {open(new_file_path, O_RDWR | O_CREAT | O_TRUNC,
+      //   S_IRWXU)};
+      // if(new_fd == -1)
+      // {
+      //   ADD_FAILURE() << "A call to open encountered an error. "
+      //     << std::strerror(errno);
+      //   close(temp_fd);
+      //   break;
+      // }
+      // ssize_t file_copy_return {0};
+      // off_t copy_start {0};
+      //
+      // ssize_t number_to_write {lseek(temp_fd, 0, SEEK_END)};
+      // if(number_to_write == -1)
+      // {
+      //   ADD_FAILURE() << "A call to lseek encountered an error.";
+      //   close(temp_fd);
+      //   break;
+      // }
+      // while(number_to_write > 0)
+      // {
+      //   while((file_copy_return = sendfile(new_fd, temp_fd, &copy_start,
+      //     number_to_write)) == -1 && errno == EINTR)
+      //     continue;
+      //   if(file_copy_return == -1)
+      //   {
+      //     ADD_FAILURE() << "A call to sendfile encountered an unrecoverable "
+      //       "error. " << std::strerror(errno);
+      //     close(temp_fd);
+      //     close(new_fd);
+      //     break;
+      //   }
+      //   number_to_write -= file_copy_return;
+      // }
+      // if(number_to_write > 0)
+      // {
+      //   ADD_FAILURE() << "Calls to sendfile could not write all data.";
+      //   break;
+      // }
+      // close(new_fd);
+
+      // Prepare to extract content.
+      off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
+      if(lseek_return == -1)
+      {
+        ADD_FAILURE() << "A call to lseek encountered an error.";
+        close(temp_fd);
+        break;
+      }
+      auto extract_content_result {fcgi_si::ExtractContent(temp_fd,
+        fcgi_si::FCGIType::kFCGI_PARAMS, 1)};
+      if(!std::get<0>(extract_content_result))
+      {
+        ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered an "
+          "unrecoverable read error as reported by std::get<0>.";
+        close(temp_fd);
+        break;
+      }
+      if(!std::get<1>(extract_content_result))
+      {
+        ADD_FAILURE() << "A call to fcgi_si::ExtractContent encountered a "
+          "header error or an incomplete section as reported by std::get<1>.";
+        close(temp_fd);
+        break;
+      }
+      if(std::get<2>(extract_content_result))
+      {
+        ADD_FAILURE() << "A call to fcgi_si::ExtractContent unexpectedly "
+          "reported by std::get<2> that the record sequence was terminated.";
+      }
+      if(!std::get<3>(extract_content_result))
+      {
+        ADD_FAILURE() << "A call to fcgi_si::ExtractContent detected an "
+          "unaligned record as reported by std::get<3>.";
+        close(temp_fd);
+        break;
+      }
+      std::vector<NameValuePair> pair_result_sequence {
+        fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
+        extract_content_result).size(), std::get<4>(
+        extract_content_result).data())};
+      EXPECT_EQ(many_pairs, pair_result_sequence);
+      close(temp_fd);
     }
-
   }
-
-
-
 }
 
+TEST(Utility, uint32_tToUnsignedCharacterVector)
+{
+  // Testing explanation
+  // Examined properties:
+  // 1) value of c (0, 1, a value greater than 1 but less than the maximum
+  //    value, the maximum value).
+  //
+  // Test cases:
+  // 1) c == 0
+  // 2) c == 1
+  // 3) c == 100
+  // 4) c == uint32_t(-1) (which is equal to 4294967295)
+  //
+  // Modules which testing depends on: none.
+  //
+  // Other modules whose testing depends on this module: none.
 
-
-// TEST(Utility, uint32_tToUnsignedCharacterVector)
-// {
-//   //
-// }
+  // Case 1
+  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(0),
+    (std::vector<uint8_t> {'0'}));
+  // Case 2
+  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(1),
+    (std::vector<uint8_t> {'1'}));
+  // Case 3
+  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(100),
+    (std::vector<uint8_t> {'1','0','0'}));
+  // Case 4
+  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(uint32_t(-1)),
+    (std::vector<uint8_t> {'4','2','9','4','9','6','7','2','9','5'}));
+}
