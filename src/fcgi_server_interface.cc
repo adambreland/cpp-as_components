@@ -11,12 +11,12 @@
 #include <cerrno>
 #include <cstdint>          // For std::uint8_t and others.
 #include <cstdlib>          // For std::getenv(), std::size_t, and EXIT_FAILURE.
-
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 #include "external/error_handling/include/error_handling.h"
@@ -176,8 +176,8 @@ AcceptConnection()
   socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
   int accept_return {};
   while((accept_return = accept(fcgi_si::FCGI_LISTENSOCK_FILENO,
-    (struct sockaddr*)&new_connection_address, &new_connection_address_length)) == -1
-    && errno == EINTR)
+    (struct sockaddr*)&new_connection_address, &new_connection_address_length))
+    == -1 && errno == EINTR)
   {
     new_connection_address_length = sizeof(struct sockaddr_storage);
   }
@@ -188,7 +188,10 @@ AcceptConnection()
     else if(errno == ECONNABORTED)
       return 0;
     else
-      throw std::runtime_error(ERRNO_ERROR_STRING("accept"));
+    {
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error(ec, "accept");
+    }
   }
   // The call to accept() returned a file descriptor for a new connected socket.
   int new_socket_descriptor {accept_return};
@@ -201,17 +204,25 @@ AcceptConnection()
 
   while((getsockopt_return = getsockopt(new_socket_descriptor,
     SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 && errno == EINTR){}
+    == -1 && errno == EINTR)
+    continue;
   if(getsockopt_return == -1)
-    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
+  {
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error(ec, "getsockopt with SO_DOMAIN");
+  }
   int new_socket_domain {getsockopt_int_buffer};
 
   getsockopt_int_buffer_size = sizeof(int);
   while((getsockopt_return = getsockopt(new_socket_descriptor,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 && errno == EINTR){}
+    == -1 && errno == EINTR)
+    continue;
   if(getsockopt_return == -1)
-    throw std::runtime_error {ERRNO_ERROR_STRING("getsockopt with SO_DOMAIN")};
+  {
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error(ec, "getsockopt with SO_TYPE");
+  }
   int new_socket_type {getsockopt_int_buffer};
 
   // Perform address validation against the list of authorized addresses
@@ -224,7 +235,10 @@ AcceptConnection()
       (void*)&(((struct sockaddr_in*)&new_connection_address)->sin_addr)
       : (void*)&(((struct sockaddr_in6*)&new_connection_address)->sin6_addr)};
     if(!inet_ntop(new_socket_domain, addr_ptr, address_array, INET6_ADDRSTRLEN))
-      throw std::runtime_error {ERRNO_ERROR_STRING("inet_ntop")};
+    {
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error(ec, "inet_ntop");
+    }
     new_address = address_array;
   }
 
@@ -258,10 +272,13 @@ AcceptConnection()
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
   // Update interface state to reflect the new connection.
+  // TODO
+  // ***** Strong exception guarantee block *****
   record_status_map_[new_socket_descriptor] = RecordStatus {this};
   std::unique_ptr<std::mutex> new_mutex_manager {new std::mutex};
   write_mutex_map_[new_socket_descriptor] = std::move(new_mutex_manager);
   request_count_map_[new_socket_descriptor] = 0;
+  // ***** Strong exception guarantee block *****
 
   return new_socket_descriptor;
 }
