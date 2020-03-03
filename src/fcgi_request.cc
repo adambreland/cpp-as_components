@@ -141,11 +141,14 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   constexpr char seq_num {4}; // Three headers and an 8-byte body. 3+1=4
   uint8_t header_and_end_content[seq_num][fcgi_si::FCGI_HEADER_LEN];
 
-  fcgi_si::PopulateHeader(&header_and_end_content[0][0], fcgi_si::FCGIType::kFCGI_STDOUT,
+  fcgi_si::PopulateHeader(&header_and_end_content[0][0],
+    fcgi_si::FCGIType::kFCGI_STDOUT,
     request_identifier_.FCGI_id(), 0, 0);
-  fcgi_si::PopulateHeader(&header_and_end_content[1][0], fcgi_si::FCGIType::kFCGI_STDERR,
+  fcgi_si::PopulateHeader(&header_and_end_content[1][0],
+    fcgi_si::FCGIType::kFCGI_STDERR,
     request_identifier_.FCGI_id(), 0, 0);
-  fcgi_si::PopulateHeader(&header_and_end_content[2][0], fcgi_si::FCGIType::kFCGI_END_REQUEST,
+  fcgi_si::PopulateHeader(&header_and_end_content[2][0],
+    fcgi_si::FCGIType::kFCGI_END_REQUEST,
     request_identifier_.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
 
   // Fill end request content.

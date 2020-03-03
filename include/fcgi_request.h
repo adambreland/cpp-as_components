@@ -21,9 +21,30 @@ namespace fcgi_si {
 class FCGIServerInterface;
 
 class FCGIRequest {
-public:
+ public:
+
+  // Returns true if the request was aborted. Returns false otherwise.
   bool AbortStatus();
 
+  // Completes the response provided for an FCGIRequest object.
+  //
+  // Parameters:
+  // app_status: The applicaton status that would be returned at the exit of an
+  //             equivalent CGI program which served the request. This value is
+  //             encoded in the FCGI_END_REQUEST record sent by the interface
+  //             to the client.
+  //
+  // Requires: none.
+  //
+  // Effects:
+  // 1) If the request has already been completed, a call to Complete has
+  //    no effects.
+  // 2) If the request has not been completed, terminal empty records for the
+  //    FCGI_STDOUT and FCGI_STDERR streams are sent. These records close these
+  //    streams according to the FastCGI protocol. In addition, the client is
+  //    informed that the request has been serviced by sending a final
+  //    FCGI_END_REQUEST record. The application status of this record is given
+  //    by the value of app_status.
   void Complete(int32_t app_status);
 
   inline bool get_completion_status() const
@@ -31,11 +52,16 @@ public:
     return completed_;
   }
 
+  // Returns a constant reference to the FCGI_DATA byte sequence sent by the
+  // client for the request.
   inline const std::vector<uint8_t>& get_DATA() const
   {
     return request_data_content_;
   }
 
+  // Returns a constant reference to a std::map object which holds the
+  // environment variables associated with the request. Keys of the map are
+  // environment variable names.
   inline const std::map<std::vector<uint8_t>, std::vector<uint8_t>>&
   get_environment_map() const
   {
@@ -47,11 +73,31 @@ public:
     return role_;
   }
 
+  // Returns a constant reference to the FCGI_STDIN byte sequence sent by the
+  // client for the request.
   inline const std::vector<uint8_t>& get_STDIN() const
   {
     return request_stdin_content_;
   }
 
+  // Sends a byte sequence to the client on the FCGI_STDOUT stream.
+  //
+  // Parameters:
+  // ref:        A constant reference to a container which holds the byte
+  //             sequence to be sent.
+  // begin_iter: An iterator that points to the first byte of the sequence to
+  //             be sent.
+  // end_iter:   An iterator that points to one-past-the-last byte of the
+  //             sequence to be sent.
+  //
+  // Requires:
+  // 1)
+  //
+  // Effects:
+  // 1)
+  //
+  // Exceptions:
+  // 1)
   inline bool Write(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,
     std::vector<uint8_t>::const_iterator end_iter)

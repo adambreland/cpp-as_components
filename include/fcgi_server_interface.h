@@ -3,7 +3,6 @@
 
 #include <cstdint>       // For uint8_t, ... .
 #include <cstdlib>       // For EXIT_FAILURE.
-
 #include <map>
 #include <memory>
 #include <mutex>
@@ -59,7 +58,9 @@ private:
   // Requires:
   // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
   //    a listening socket.
-  // 2) May implicitly acquire interface_state_mutex_. This must be allowed.
+  //
+  // Synchronization:
+  // 1) May implicitly acquire and release interface_state_mutex_.
   //
   // Parameters: none.
   //

@@ -262,7 +262,7 @@ TEST(Utility, PopulateHeader)
   std::vector<uint8_t> local_header(fcgi_si::FCGI_HEADER_LEN);
   std::vector<uint8_t> expected_result(fcgi_si::FCGI_HEADER_LEN);
 
-  auto PopulateHeaderTester = [&](
+  auto PopulateHeaderTester = [&local_header, &expected_result](
     std::string message,
     fcgi_si::FCGIType type,
     uint16_t FCGI_id,
