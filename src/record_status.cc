@@ -13,21 +13,33 @@
 #include "include/request_identifier.h"
 
 fcgi_si::RecordStatus::
-RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr)
+RecordStatus(FCGIServerInterface* interface_ptr)
 : header_ {}, bytes_received_ {0}, content_bytes_expected_ {0},
   padding_bytes_expected_ {0}, type_ {static_cast<fcgi_si::FCGIType>(0)},
   request_id_ {}, invalid_record_ {false}, i_ptr_ {interface_ptr}
 {}
+
+fcgi_si::RecordStatus::
+RecordStatus(RecordStatus&& record_status)
+: bytes_received_ {record_status.bytes_received_},
+  content_bytes_expected_ {record_status.content_bytes_expected_},
+  padding_bytes_expected_ {record_status.padding_bytes_expected_},
+  type_ {record_status.type_},
+  request_id_ {record_status.request_id_},
+  invalid_record_ {record_status.invalid_record_},
+  local_record_content_buffer_ {std::move(
+    record_status.local_record_content_buffer_)},
+  i_ptr_ {record_status.i_ptr_}
+{
+  std::memcpy(header_, record_status.header_, FCGI_HEADER_LEN);
+}
 
 fcgi_si::RecordStatus& fcgi_si::RecordStatus::
 operator=(RecordStatus&& record_status)
 {
   if(this != &record_status)
   {
-    for(char i {0}; i < fcgi_si::FCGI_HEADER_LEN; i++)
-    {
-      header_[i] = record_status.header_[i];
-    }
+    std::memcpy(header_, record_status.header_, FCGI_HEADER_LEN);
 
     bytes_received_ = record_status.bytes_received_;
     content_bytes_expected_ = record_status.content_bytes_expected_;
@@ -35,7 +47,8 @@ operator=(RecordStatus&& record_status)
     type_ = record_status.type_;
     request_id_ = record_status.request_id_;
     invalid_record_ = record_status.invalid_record_;
-    local_record_content_buffer_ = std::move(record_status.local_record_content_buffer_);
+    local_record_content_buffer_ = std::move(
+      record_status.local_record_content_buffer_);
     i_ptr_ = record_status.i_ptr_;
   }
   return *this;

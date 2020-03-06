@@ -311,7 +311,8 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
   std::size_t number_to_write, bool interface_mutex_held)
 {
   bool connection_open_at_peer {true};
-  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock_t {}};
+  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_,
+    std::defer_lock_t {}};
   bool acquired_mutex {false};
   int select_descriptor_range {fd + 1};
   fd_set write_set {};

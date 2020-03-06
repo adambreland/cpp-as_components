@@ -43,7 +43,7 @@ public:
   RecordStatus() = default;
   RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr);
   RecordStatus(const RecordStatus&) = delete;
-  RecordStatus(RecordStatus&&) = delete;
+  RecordStatus(RecordStatus&&);
 
   RecordStatus& operator=(const RecordStatus&) = delete;
   RecordStatus& operator=(RecordStatus&&);

@@ -17,6 +17,9 @@
 
 namespace fcgi_si {
 
+//
+//
+//
 class FCGIServerInterface {
 public:
   std::vector<FCGIRequest> AcceptRequests();
@@ -53,16 +56,28 @@ private:
   friend class fcgi_si::RecordStatus;
 
   // AcceptConnection wraps the accept system call. It performs socket error
-  // checking and FastCGI IP address validation.
+  // checking and FastCGI IP address validation. When a connection is accepted,
+  // interface state is updated so that requests can be received over the
+  // connection.
+  //
+  // It is intended that AcceptConnection is called in a loop in the
+  // implementation of AcceptRequests. When -1 is returned, a blocking
+  // error must have occurred and the loop should terminate.
   //
   // Requires:
   // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
   //    a listening socket.
   //
+  // Parameters: none.
+  //
   // Synchronization:
   // 1) May implicitly acquire and release interface_state_mutex_.
   //
-  // Parameters: none.
+  // Exceptions:
+  // 1) Strong exception guarantee for FCGIServerInterface instance state.
+  // 2) May directly throw:
+  //    a) std::system_error
+  //    b) std::logic_error
   //
   // Effects:
   // 1) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the
@@ -79,7 +94,9 @@ private:
   //    std::runtime_error object is thrown with information on the value of
   //    errno set by the call to accept.
   // 5) If another system call returned an error which could not be handled, a
-  //    std::runtime_error object will be thrown with information on errno.
+  //    std::runtime_error object is thrown with information on errno.
+  // 6) If a violation of the invariant on maps which contain socket
+  //    descriptors as keys is found, a std::logic_error object is thrown.
   int AcceptConnection();
 
   inline void AddRequest(fcgi_si::RequestIdentifier request_id, uint16_t role,
@@ -117,20 +134,20 @@ private:
   // connection: A connected socket descriptor.
   //
   // Requires:
-  // 1) The record represented by the RecordStatus object associated with
-  //    connection must be complete.
+  // 1) The record represented by the RecordStatus object associated
+  //    with connection must be complete.
   //
   // Caller Responsibilities:
-  // 1) If a non-null RequestIdentifier object is returned, an object with
-  //   the value of the returned object should be present in the list of
-  //   RequestIdentifier objects returned by Read().
+  // 1) If a non-null RequestIdentifier object is returned, the list of
+  //    RequestIdentifier objects returned by Read() must contain a
+  //    RequestIdentifier object equivalent to this object.
   //
   // Effects:
   // 1) Either the null RecordIdentifier object is returned or a non-null
   //    RequestIdentifier object is returned.
-  // 1  a) A non-null RequestIdentifier indicates that the request associate
+  //    a) A non-null RequestIdentifier indicates that the request
   //       is complete. See Caller Responsibilities above.
-  // 1  b) If the returned RequestIdentifier object is null, no action is
+  //    b) If the returned RequestIdentifier object is null, no action is
   //       required by the caller. Interface state may have been changed.
   //
   // Effects for record types:
@@ -138,36 +155,35 @@ private:
   //    A null RequestIdentifier object is returned. In addition:
   //    An appropriate response is sent to the peer.
   //    The write mutex associated with connection is obtained before writing
-  //    and released after writing. A null RequestIdentifier object is returned.
-  // 1  a) If the type of the management record is FCGI_GET_VALUES, an
-  //       FCGI_GET_VALUES_RESULT record is sent.
-  // 1  b) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
+  //    and released after writing. Also:
+  //    a) For FCGI_GET_VALUES, an FCGI_GET_VALUES_RESULT record is sent.
+  //    b) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
   // 2) Begin request record:
   //    A null RequestIdentifier object is returned. In addition:
-  // 2  a) A begin request record for a request which already exists is ignored.
-  // 2  b) Otherwise, the FCGI_request_ID is made active.
+  //    a) A begin request record for a request which already exists is ignored.
+  //    b) Otherwise, the FCGI_request_ID is made active.
   // 3) Abort record:
   //    A null RequestIdentifier object is returned. In addition:
-  // 3  a) Aborts to inactive requests and requests which have already been
+  //    a) Aborts to inactive requests and requests which have already been
   //       aborted are ignored.
-  // 3  b) If the request of the record has not been assigned, the request is
+  //    b) If the request of the record has not been assigned, the request is
   //       deleted, an FCGI_END_REQUEST record is sent to the peer, and the
   //       FCGI_request_ID is made inactive. The protocolStatus field of the
   //       record is set to FCGI_REQUEST_COMPLETE (0). The appStatus field of
   //       the record is equal to -1 (in two's complement).
-  // 3  c) If the request of the record has been assigned, the abort variable
+  //    c) If the request of the record has been assigned, the abort variable
   //       of the associated RequestData object is set.
-  // 4) params, stdin, and data stream records
+  // 4) Params, stdin, and data stream records:
   //    A null or non-null request identifier may be returned.
-  // 4  a) Stream records of these types which do not apply to an active
+  //    a) Stream records of these types which do not apply to an active
   //       request or which apply to a request whose corresponding stream has
   //       already been completed are ignored. A null RequestIdentifier
   //       object is returned.
-  // 4  b) Otherwise, if the size of the content section of the record is
+  //    b) Otherwise, if the size of the content section of the record is
   //       nonzero, the content is appended to the corresponding stream content
   //       buffer in the RequestData object associated with the identifier.
   //       A null RequestIdentifier object is returned.
-  // 4  c) If the size of the content section of the record is zero, the
+  //    c) If the size of the content section of the record is zero, the
   //       corresponding stream is completed. The RequestData object is
   //       checked for completion. If complete, the identifier is returned.
   //       If not complete, a null RequestIdentifier object is returned.
@@ -228,14 +244,17 @@ private:
   // by the interface.
   std::mutex interface_state_mutex_;
 
-  // A map to retrieve a connection's write mutex. These mutextes are used by
+  // A map to retrieve a connection's write mutex. These mutexes are used by
   // the interface and by FCGIRequest objects.
   //
   // This map is only accessed by the interface. It is not accessed through
   // application calls on an FCGIRequest object.
+  //
+  // (A unique_ptr was used as using std::mutex directly results in
+  // compiler errors.)
   std::map<int, std::unique_ptr<std::mutex>> write_mutex_map_;
 
-  //////////////////////// SHARED DATA STRUCTURE START ////////////////////////
+  ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 
   // This set holds the status of socket closure requests from FCGIRequest
   // objects. This is necessary as a web server can indicate in the
@@ -253,7 +272,7 @@ private:
   // connection socket descriptor value and the FCGI request number.
   std::map<RequestIdentifier, RequestData> request_map_;
 
-  //////////////////////// SHARED DATA STRUCTURE END //////////////////////////
+  ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////
 };
 
 } // namespace fcgi_si.
