@@ -110,6 +110,7 @@ private:
   bool abort_;
   bool close_connection_;
   fcgi_si::RequestStatus request_status_;
+  bool connection_closed_by_interface_;
 };
 
 } // namespace fcgi_si

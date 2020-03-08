@@ -36,7 +36,7 @@
 fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   fcgi_si::FCGIServerInterface* interface_ptr,
   fcgi_si::RequestData* request_data_ptr,
-  std::mutex* write_mutex_ptr, std::mutex* interface_state_mutex_ptr)
+  std::mutex* write_mutex_ptr)
 : interface_ptr_             {interface_ptr},
   request_identifier_        {request_id},
   environment_map_           {std::move(request_data_ptr->environment_map_)},
@@ -46,12 +46,12 @@ fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
   close_connection_          {request_data_ptr->close_connection_},
   was_aborted_               {false},
   completed_                 {false},
-  write_mutex_ptr_           {write_mutex_ptr},
-  interface_state_mutex_ptr_ {interface_state_mutex_ptr}
+  write_mutex_ptr_           {write_mutex_ptr}
 {
   if(interface_ptr == nullptr || request_data_ptr == nullptr
-     || write_mutex_ptr == nullptr || interface_state_mutex_ptr == nullptr)
-    throw std::invalid_argument {ERROR_STRING("A pointer with a nullptr value was used to construct an FCGIRequest object.")};
+     || write_mutex_ptr == nullptr)
+    throw std::invalid_argument {ERROR_STRING("A pointer with a nullptr "
+      "value was used to construct an FCGIRequest object.")};
 
   // Update the status of the RequestData object to reflect its use in the
   // construction of an FCGIRequest which will be exposed to the application.
@@ -73,7 +73,6 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
   was_aborted_               {request.was_aborted_},
   completed_                 {request.completed_},
   write_mutex_ptr_           {request.write_mutex_ptr_},
-  interface_state_mutex_ptr_ {request.interface_state_mutex_ptr_}
 {
   request.interface_ptr_ = nullptr;
   request.request_identifier_ = fcgi_si::RequestIdentifier {};
@@ -83,7 +82,6 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
   request.close_connection_ = false;
   request.completed_ = true;
   request.write_mutex_ptr_ = nullptr;
-  request.interface_state_mutex_ptr_ = nullptr;
 }
 
 fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
@@ -100,7 +98,6 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
     was_aborted_ = request.was_aborted_;
     completed_ = request.completed_;
     write_mutex_ptr_ = request.write_mutex_ptr_;
-    interface_state_mutex_ptr_ = request.interface_state_mutex_ptr_;
 
     request.interface_ptr_ = nullptr;
     request.request_identifier_ = fcgi_si::RequestIdentifier {};
@@ -112,7 +109,6 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
     request.was_aborted_ = false;
     request.completed_ = true;
     request.write_mutex_ptr_ = nullptr;
-    request.interface_state_mutex_ptr_ = nullptr;
   }
   return *this;
 }
@@ -123,7 +119,7 @@ bool fcgi_si::FCGIRequest::AbortStatus()
     return was_aborted_;
 
   // ACQUIRE interface_state_mutex_ to determine current abort state.
-  std::lock_guard<std::mutex> interface_state_lock {*interface_state_mutex_ptr_};
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
   auto request_map_iter = interface_ptr_->request_map_.find(request_identifier_);
   // Include check for absence of request to prevent undefined method call.
   // This check should always pass.
@@ -170,10 +166,10 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   // Update FCGIRequest state.
   completed_ = true;
 
-  // ACQUIRE *interface_state_mutex_ptr_ to allow interface request_map_
+  // ACQUIRE interface_state_mutex_ to allow interface request_map_
   // update and to prevent race conditions between the client server and
   // the interface.
-  std::lock_guard<std::mutex> interface_state_lock {*interface_state_mutex_ptr_};
+  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
   WriteHelper(request_identifier_.descriptor(), iovec_array, seq_num,
@@ -184,7 +180,7 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   if(close_connection_)
     interface_ptr_->application_closure_request_set_.insert(
       request_identifier_.descriptor());
-} // RELEASE *interface_state_mutex_ptr_.
+} // RELEASE interface_state_mutex_.
 
 void fcgi_si::FCGIRequest::CompleteAfterDiscoveredClosedConnection()
 {
@@ -370,7 +366,7 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
         {
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
-            {*interface_state_mutex_ptr_};
+            {interface_state_mutex_};
           CompleteAfterDiscoveredClosedConnection();
         } // RELEASE interface_state_mutex_.
         else

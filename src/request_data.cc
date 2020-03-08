@@ -13,7 +13,8 @@ RequestData(uint16_t role, bool close_connection)
 : FCGI_PARAMS_complete_ {false}, FCGI_STDIN_complete_ {false},
   FCGI_DATA_complete_ {false}, role_ {role}, abort_ {false},
   close_connection_ {close_connection},
-  request_status_ {fcgi_si::RequestStatus::kRequestPending}
+  request_status_ {fcgi_si::RequestStatus::kRequestPending},
+  connection_closed_by_interface_ {false}
 {}
 
 void fcgi_si::RequestData::

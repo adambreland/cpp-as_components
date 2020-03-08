@@ -49,7 +49,7 @@ public:
   FCGIServerInterface& operator=(const FCGIServerInterface&) = delete;
   FCGIServerInterface& operator=(FCGIServerInterface&&) = delete;
 
-  ~FCGIServerInterface() = default;
+  ~FCGIServerInterface();
 
 private:
   friend class fcgi_si::FCGIRequest;
@@ -242,7 +242,9 @@ private:
   // A mutex for shared state. This state is implicitly accessed by calls to
   // FCGIRequest objects associated with the interface. They are also accessed
   // by the interface.
-  std::mutex interface_state_mutex_;
+  static std::mutex interface_state_mutex_;
+  static unsigned long interface_identifier_;
+  static unsigned long previous_interface_identifier_;
 
   // A map to retrieve a connection's write mutex. These mutexes are used by
   // the interface and by FCGIRequest objects.

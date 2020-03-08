@@ -31,6 +31,11 @@
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
+// Initialize static class data members.
+std::mutex fcgi_si::FCGIServerInterface::interface_state_mutex_ {};
+unsigned long fcgi_si::FCGIServerInterface::interface_identifier_ {0};
+unsigned long fcgi_si::FCGIServerInterface::previous_interface_identifier_ {0};
+
 fcgi_si::FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   uint16_t role, int32_t app_status_on_abort)
@@ -173,7 +178,29 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
       }
     } // End non-empty environment variable value check.
   } // End internet domain check.
-}
+
+  // Ensure singleton status and update identifier to a valid value.
+  // ACQUIRE interface_state_mutex_.
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
+  if(interface_identifier_)
+    throw std::logic_error {"Construction of an FCGIServerInterface object "
+      "occurred when another object was present."};
+  previous_interface_identifier_ += 1;
+  interface_identifier_ = previous_interface_identifier_;
+} // RELEASE interface_state_mutex_.
+
+fcgi_si::FCGIServerInterface::~FCGIServerInterface()
+{
+  // ACQUIRE interface_state_mutex_.
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
+  // TODO Release file descriptors (and any other resources that are not under
+  // RAII management).
+
+  // Kill interface.
+  interface_identifier_ = 0;
+} // RELEASE interface_state_mutex_.
 
 int fcgi_si::FCGIServerInterface::
 AcceptConnection()
@@ -289,7 +316,8 @@ AcceptConnection()
   std::pair<std::map<int, int>::iterator, bool>
     request_count_map_emplace_return {{}, {false}};
   // ACQUIRE interface_state_mutex_.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
   try
   {
     record_status_map_emplace_return = record_status_map_.emplace(
@@ -341,7 +369,8 @@ AcceptRequests()
   std::vector<int> connection_skip_set {};
   {
     // ACQUIRE interface_state_mutex_.
-    std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+    std::lock_guard<std::mutex> interface_state_lock
+      {FCGIServerInterface::interface_state_mutex_};
     for(auto closed_conn_iter {connections_found_closed_set_.begin()};
         closed_conn_iter != connections_found_closed_set_.end();
         /*no-op*/)
@@ -430,7 +459,6 @@ AcceptRequests()
   // Check connected sockets (as held in record_status_map_) before the
   // listening socket.
   int connections_read {0};
-  std::mutex* interface_state_mutex_ptr {&interface_state_mutex_};
   for(auto it = record_status_map_.begin();
       (it != record_status_map_.end()) && (connections_read < select_return);
       ++it)
@@ -447,7 +475,7 @@ AcceptRequests()
         std::mutex* write_mutex_ptr {write_mutex_map_.find(fd)->second.get()};
         // ACQUIRE interface_state_mutex_.
         std::lock_guard<std::mutex> interface_state_lock
-          {interface_state_mutex_};
+          {FCGIServerInterface::interface_state_mutex_};
         // For each request_id, find the associated RequestData object, extract
         // a pointer to it, and create an FCGIRequest object from it.
         for(RequestIdentifier request_id : request_identifiers)
@@ -455,7 +483,7 @@ AcceptRequests()
           fcgi_si::RequestData* request_data_ptr {nullptr};
           request_data_ptr = &(request_map_.find(request_id)->second);
           fcgi_si::FCGIRequest request {request_id, this, request_data_ptr,
-            write_mutex_ptr, interface_state_mutex_ptr};
+            write_mutex_ptr};
           requests.push_back(std::move(request));
         }
       } // RELEASE interface_state_mutex_.
@@ -479,7 +507,8 @@ ClosedConnectionFoundDuringAcceptRequests(int connection)
   // Iterate over requests: delete unassigned requests and check for
   // assigned requests.
   // ACQUIRE interface_state_mutex_ to access and modify shared state.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
   bool active_requests_present {UnassignedRequestCleanup(connection)};
   // Check if the connection can be closed or assigned requests require
   // closure to be delayed.
@@ -532,7 +561,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
           { // Start lock handling block.
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock
-              {interface_state_mutex_};
+              {FCGIServerInterface::interface_state_mutex_};
             auto request_count_it = request_count_map_.find(connection);
             at_maximum_request_limit = (request_count_it->second
               == maximum_request_count_per_connection_);
@@ -555,7 +584,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
                 && fcgi_si::FCGI_KEEP_CONN);
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock
-              {interface_state_mutex_};
+              {FCGIServerInterface::interface_state_mutex_};
             AddRequest(request_id, role, close_connection);
           } // RELEASE interface_state_mutex_.
         }
@@ -567,7 +596,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         { // Start lock handling block.
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
-            {interface_state_mutex_};
+            {FCGIServerInterface::interface_state_mutex_};
           auto request_data_it {request_map_.find(request_id)};
 
           if(request_data_it->second.get_status()
@@ -601,7 +630,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         {
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
-            {interface_state_mutex_};
+            {FCGIServerInterface::interface_state_mutex_};
           auto request_data_it {request_map_.find(request_id)};
 
           (record_status.get_type() == fcgi_si::FCGIType::kFCGI_PARAMS) ?

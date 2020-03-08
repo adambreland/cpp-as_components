@@ -169,7 +169,6 @@ private:
 
   // Synchronization
   std::mutex* write_mutex_ptr_;
-  std::mutex* interface_state_mutex_ptr_;
 };
 
 } // namespace fcgi_si
