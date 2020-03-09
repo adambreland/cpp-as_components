@@ -201,7 +201,8 @@ private:
   }
 
   inline void
-  RemoveRequest(std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
+  RemoveRequest(std::map<RequestIdentifier,
+    RequestData>::iterator request_map_iter)
   {
     request_count_map_[request_map_iter->first.descriptor()]--;
     request_map_.erase(request_map_iter);
@@ -219,11 +220,15 @@ private:
   bool UnassignedRequestCleanup(int connection);
 
   // Configuration parameters:
+    // The default application exit status that will be sent when requests
+    // are rejected by the interface without involvement of the application.
   int32_t app_status_on_abort_;
   uint32_t maximum_connection_count_;
   uint32_t maximum_request_count_per_connection_;
   uint16_t role_;
   int socket_domain_;
+    // A list of IP addresses from which the interface will accept connections.
+    // The IP version is given by socket_domain_ (AF_INET or AF_INET6).
   std::set<std::string> valid_ip_address_set_;
 
   // The state of the application-set overload flag.
@@ -239,9 +244,11 @@ private:
   // still present.
   std::set<int> connections_found_closed_set_;
 
-  // A mutex for shared state. This state is implicitly accessed by calls to
-  // FCGIRequest objects associated with the interface. They are also accessed
-  // by the interface.
+  // Static state used by FCGIRequest objects to check if the interface with
+  // which they are associated is alive. The mutex is also used for general
+  // synchronization among request objects and between request objects and
+  // the interface. interface_identifier_ == 0 if no interface object currently
+  // is in a valid state.
   static std::mutex interface_state_mutex_;
   static unsigned long interface_identifier_;
   static unsigned long previous_interface_identifier_;

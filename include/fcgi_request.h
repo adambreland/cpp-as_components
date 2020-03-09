@@ -133,7 +133,7 @@ private:
   FCGIRequest(fcgi_si::RequestIdentifier request_id,
     fcgi_si::FCGIServerInterface* interface_ptr,
     fcgi_si::RequestData* request_data_ptr,
-    std::mutex* write_mutex_ptr, std::mutex* interface_state_mutex_ptr);
+    std::mutex* write_mutex_ptr);
 
   bool PartitionByteSequence(const std::vector<uint8_t>& ref,
     std::vector<uint8_t>::const_iterator begin_iter,

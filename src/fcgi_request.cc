@@ -72,7 +72,7 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
   close_connection_          {request.close_connection_},
   was_aborted_               {request.was_aborted_},
   completed_                 {request.completed_},
-  write_mutex_ptr_           {request.write_mutex_ptr_},
+  write_mutex_ptr_           {request.write_mutex_ptr_}
 {
   request.interface_ptr_ = nullptr;
   request.request_identifier_ = fcgi_si::RequestIdentifier {};
@@ -119,7 +119,8 @@ bool fcgi_si::FCGIRequest::AbortStatus()
     return was_aborted_;
 
   // ACQUIRE interface_state_mutex_ to determine current abort state.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
   auto request_map_iter = interface_ptr_->request_map_.find(request_identifier_);
   // Include check for absence of request to prevent undefined method call.
   // This check should always pass.
@@ -169,7 +170,8 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   // ACQUIRE interface_state_mutex_ to allow interface request_map_
   // update and to prevent race conditions between the client server and
   // the interface.
-  std::lock_guard<std::mutex> interface_state_lock {interface_state_mutex_};
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
   WriteHelper(request_identifier_.descriptor(), iovec_array, seq_num,
@@ -366,7 +368,7 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
         {
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
-            {interface_state_mutex_};
+            {FCGIServerInterface::interface_state_mutex_};
           CompleteAfterDiscoveredClosedConnection();
         } // RELEASE interface_state_mutex_.
         else

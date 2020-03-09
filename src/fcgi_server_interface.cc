@@ -161,7 +161,9 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
       std::sregex_token_iterator end {};
 
       // Iterate over tokens and add the normalized textual representation of
-      // every well-formed address to the set of authorized addresses.
+      // every well-formed address to the set of authorized addresses. The
+      // call sequence inet_pton, inet_ntop normalizes the textual
+      // representation of the address.
       for(; token_it != end; ++token_it)
       {
         int inet_pton_return {};
@@ -176,31 +178,63 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
         else if(inet_pton_return == -1)
           throw std::runtime_error {ERRNO_ERROR_STRING("inet_pton")};
       }
-    } // End non-empty environment variable value check.
-  } // End internet domain check.
 
-  // Ensure singleton status and update identifier to a valid value.
+      if(!valid_ip_address_set_.size())
+        throw std::logic_error {ERROR_STRING("No authorized IP addresses "
+          "were found during construction of an FCGIServerInterface object.")};
+    }
+  }
+
+  // Ensure singleton status and update interface_identifier_ to a valid value.
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
   if(interface_identifier_)
     throw std::logic_error {"Construction of an FCGIServerInterface object "
       "occurred when another object was present."};
-  previous_interface_identifier_ += 1;
+  // Prevent interface_identifier_ == 0 when a valid interface is present in
+  // the unlikely event of integer overflow.
+  if(previous_interface_identifier_ < std::numeric_limits<unsigned long>::max())
+    previous_interface_identifier_ += 1;
+  else
+    previous_interface_identifier_ = 1;
   interface_identifier_ = previous_interface_identifier_;
 } // RELEASE interface_state_mutex_.
 
 fcgi_si::FCGIServerInterface::~FCGIServerInterface()
 {
-  // ACQUIRE interface_state_mutex_.
-  std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
-  // TODO Release file descriptors (and any other resources that are not under
-  // RAII management).
+  // Any exception results in program termination.
+  try
+  {
+    // ACQUIRE interface_state_mutex_.
+    std::lock_guard<std::mutex> interface_state_lock
+      {FCGIServerInterface::interface_state_mutex_};
 
-  // Kill interface.
-  interface_identifier_ = 0;
-} // RELEASE interface_state_mutex_.
+    // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
+    // FCGIRequest objects for write mutexes ensures that no write mutex will
+    // be held when the loop completes.
+    for(auto write_mutex_iter {write_mutex_map_.begin()};
+        write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
+    {
+      write_mutex_iter->second->lock();
+      write_mutex_iter->second->unlock();
+    }
+
+    // Close all file descriptors for active sockets.
+    for(auto write_mutex_iter {write_mutex_map_.begin()};
+        write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
+    {
+      close(write_mutex_iter->first);
+    }
+
+    // Kill interface.
+    FCGIServerInterface::interface_identifier_ = 0;
+  } // RELEASE interface_state_mutex_.
+  catch(...)
+  {
+    std::terminate();
+  }
+}
 
 int fcgi_si::FCGIServerInterface::
 AcceptConnection()
@@ -678,17 +712,8 @@ RemoveConnectionFromSharedState(int connection)
   application_closure_request_set_.erase(connection);
   request_count_map_.erase(connection);
 
-  try
-  {
-    linux_scw::CloseWithErrorCheck(connection);
-  }
-  catch(std::runtime_error& e)
-  {
-    std::string message {e.what()};
-    message += "A call to RemoveConnectionFromSharedState encountered an "
-      "error which\n could not be handled from a call to CloseWithErrorCheck.";
-    throw std::runtime_error {ERROR_STRING(message)};
-  }
+  close(connection);
+
 }
 
 bool fcgi_si::FCGIServerInterface::
