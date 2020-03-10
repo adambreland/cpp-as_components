@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -33,38 +34,49 @@
 
 // Question: Are size_t and std::size_t the same?
 
-fcgi_si::FCGIRequest::FCGIRequest(fcgi_si::RequestIdentifier request_id,
-  fcgi_si::FCGIServerInterface* interface_ptr,
-  fcgi_si::RequestData* request_data_ptr,
+
+fcgi_si::FCGIRequest::FCGIRequest(RequestIdentifier request_id,
+  unsigned long interface_id,
+  FCGIServerInterface* interface_ptr,
+  RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr)
-: interface_ptr_             {interface_ptr},
+: associated_interface_id_   {interface_id},
+  interface_ptr_             {interface_ptr},
   request_identifier_        {request_id},
-  environment_map_           {std::move(request_data_ptr->environment_map_)},
-  request_stdin_content_     {std::move(request_data_ptr->FCGI_STDIN_)},
-  request_data_content_      {std::move(request_data_ptr->FCGI_DATA_)},
+  request_data_ptr_          {request_data_ptr},
+  environment_map_           {},
+  request_stdin_content_     {},
+  request_data_content_      {},
   role_                      {request_data_ptr->role_},
   close_connection_          {request_data_ptr->close_connection_},
   was_aborted_               {false},
   completed_                 {false},
   write_mutex_ptr_           {write_mutex_ptr}
 {
-  if(interface_ptr == nullptr || request_data_ptr == nullptr
+  if((interface_ptr == nullptr || request_data_ptr == nullptr
      || write_mutex_ptr == nullptr)
-    throw std::invalid_argument {ERROR_STRING("A pointer with a nullptr "
-      "value was used to construct an FCGIRequest object.")};
+     || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
+    throw std::logic_error {ERROR_STRING("An FCGIRequest could not be "
+      "constructed.")};
+
+  environment_map_       = std::move(request_data_ptr->environment_map_);
+  request_stdin_content_ = std::move(request_data_ptr->FCGI_STDIN_);
+  request_data_content_  = std::move(request_data_ptr->FCGI_DATA_);
 
   // Update the status of the RequestData object to reflect its use in the
   // construction of an FCGIRequest which will be exposed to the application.
-
+  //
   // NOTE that this constructor should only be called by an
   // FCGIServerInterface object. It is assumed that synchronization is
   // implicit and that acquiring the shared state mutex is not necessary.
-  request_data_ptr->request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
+  request_data_ptr_->request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
 }
 
 fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
-: interface_ptr_             {request.interface_ptr_},
+: associated_interface_id_   {request.associated_interface_id_},
+  interface_ptr_             {request.interface_ptr_},
   request_identifier_        {request.request_identifier_},
+  request_data_ptr_          {request.request_data_ptr_},
   environment_map_           {std::move(request.environment_map_)},
   request_stdin_content_     {std::move(request.request_stdin_content_)},
   request_data_content_      {std::move(request.request_data_content_)},
@@ -74,8 +86,10 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request)
   completed_                 {request.completed_},
   write_mutex_ptr_           {request.write_mutex_ptr_}
 {
+  request.associated_interface_id_ = 0;
   request.interface_ptr_ = nullptr;
   request.request_identifier_ = fcgi_si::RequestIdentifier {};
+  request.request_data_ptr_ = nullptr;
   request.environment_map_.clear();
   request.request_stdin_content_.clear();
   request.request_data_content_.clear();
@@ -88,8 +102,10 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
 {
   if(this != &request)
   {
+    associated_interface_id_ = request.associated_interface_id_;
     interface_ptr_ = request.interface_ptr_;
     request_identifier_ = request.request_identifier_;
+    request_data_ptr_ = request.request_data_ptr_;
     environment_map_ = std::move(request.environment_map_);
     request_stdin_content_ = std::move(request.request_stdin_content_);
     request_data_content_ = std::move(request.request_data_content_);
@@ -99,8 +115,10 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
     completed_ = request.completed_;
     write_mutex_ptr_ = request.write_mutex_ptr_;
 
+    request.associated_interface_id_ = 0;
     request.interface_ptr_ = nullptr;
     request.request_identifier_ = fcgi_si::RequestIdentifier {};
+    request.request_data_ptr_ = nullptr;
     request.environment_map_.clear();
     request.request_stdin_content_.clear();
     request.request_data_content_.clear();
@@ -113,6 +131,11 @@ fcgi_si::FCGIRequest& fcgi_si::FCGIRequest::operator=(FCGIRequest&& request)
   return *this;
 }
 
+// The current implementation meets the strong exception guarantee for
+// FCGIRequest state.
+//
+// Synchronization:
+// 1) Acquires interface_state_mutex_.
 bool fcgi_si::FCGIRequest::AbortStatus()
 {
   if(completed_ || was_aborted_)
@@ -121,16 +144,23 @@ bool fcgi_si::FCGIRequest::AbortStatus()
   // ACQUIRE interface_state_mutex_ to determine current abort state.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
-  auto request_map_iter = interface_ptr_->request_map_.find(request_identifier_);
-  // Include check for absence of request to prevent undefined method call.
-  // This check should always pass.
-  if(request_map_iter != interface_ptr_->request_map_.end())
-    if(request_map_iter->second.get_abort())
-      return was_aborted_ = true;
-  // TODO Remove check for request_data_ptr invalidation when there is
-  // confidence that invalidation cannot occur.
+  // Check if the interface has been destroyed.
+  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
+      "with an FCGIRequest object was destroyed before the request.")};
+  // Check if the connection has been closed by the interface.
+  if(request_data_ptr_->connection_closed_by_interface_)
+  {
+    interface_ptr_->RemoveRequest(request_identifier_);
+    completed_   = true;
+    was_aborted_ = true;
+    return was_aborted_;
+  }
 
-  return was_aborted_; // i.e. return false.
+  if(request_data_ptr_->abort_)
+    was_aborted_ = true;
+
+  return was_aborted_;
 } // RELEASE interface_state_mutex_
 
 void fcgi_si::FCGIRequest::Complete(int32_t app_status)
@@ -172,6 +202,10 @@ void fcgi_si::FCGIRequest::Complete(int32_t app_status)
   // the interface.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
+  // Check if the interface has been destroyed.
+  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
+      "with an FCGIRequest object was destroyed before the request.")};
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
   WriteHelper(request_identifier_.descriptor(), iovec_array, seq_num,
@@ -304,31 +338,71 @@ PartitionByteSequence(const std::vector<uint8_t>& ref,
     iovec_count, total_write_length, false);
 }
 
+//
+//
 bool fcgi_si::FCGIRequest::
 WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
-  std::size_t number_to_write, bool interface_mutex_held)
+  const std::size_t number_to_write, bool interface_mutex_held)
 {
-  bool connection_open_at_peer {true};
+  std::unique_lock<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_, std::defer_lock_t {}};
+
+  // Conditional ACQUIRE interface_state_mutex_.
+  if(!interface_mutex_held)
+    interface_state_lock.lock();
+  // Check if the interface has been destroyed.
+  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
+      "with an FCGIRequest object was destroyed before the request.")};
+  // Check if the interface has closed the connection.
+  if(request_data_ptr_->connection_closed_by_interface_)
+  {
+    interface_ptr_->RemoveRequest(request_identifier_);
+    completed_   = true;
+    was_aborted_ = true;
+    return false;
+  }
+
+  bool connection_open {true};
+  std::size_t working_number_to_write {number_to_write};
+  // write_lock has the following property in the loop below:
+  // The mutex is always held when writing and, once some data has been written,
+  // the mutex is never released. This allows the write mutex to be released
+  // while the thread sleeps in select in the case that writing blocks and
+  // nothing was written.
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_,
     std::defer_lock_t {}};
-  bool acquired_mutex {false};
   int select_descriptor_range {fd + 1};
   fd_set write_set {};
-
-  while(number_to_write > 0) // Start write loop.
+  bool first_iteration {true};
+  while(working_number_to_write > 0) // Start write loop.
   {
+    // Conditionally ACQUIRE interface_state_mutex_.
+    if(!interface_mutex_held && !first_iteration && !write_lock.owns_lock())
+    {
+      interface_state_lock.lock();
+      if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+        throw std::runtime_error {ERROR_STRING("The FCGIServerInterface "
+          "associated with an FCGIRequest object was destroyed before the "
+          "request.")};
+    }
+    first_iteration = false;
+
     // Conditionally ACQUIRE *write_mutex_ptr_.
     if(!write_lock.owns_lock())
-    {
       write_lock.lock();
-      acquired_mutex = true;
-    }
     // *write_mutex_ptr_ is held.
+
+    // Conditionally RELEASE interface_state_mutex_ to free the interface
+    // before the write.
+    if(interface_state_lock.owns_lock())
+      interface_state_lock.unlock();
+
     std::tuple<struct iovec*, int, std::size_t> write_return
       {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
-        number_to_write)};
+        working_number_to_write)};
     if(std::get<2>(write_return) == 0)
-      number_to_write = 0;
+      working_number_to_write = 0;
     else // The number written is less than number_to_write. We must check errno.
     {
       // EINTR is handled by ScatterGatherSocketWrite.
@@ -336,13 +410,12 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
       if(errno == EAGAIN || errno == EWOULDBLOCK)
       {
         // Check if nothing was written and nothing was written prior.
-        if(std::get<2>(write_return) == number_to_write && acquired_mutex)
+        if(std::get<2>(write_return) == number_to_write)
           // RELEASE *write_mutex_ptr_. (As no record content has been written.)
           write_lock.unlock();
         else // Some but not all was written.
-          std::tie(iovec_ptr, iovec_count, number_to_write) = write_return;
-        // Reset flag for mutex acquisition as the loop will iterate.
-        acquired_mutex = false;
+          std::tie(iovec_ptr, iovec_count, working_number_to_write) =
+            write_return;
         // Call select with error handling to wait until a write won't block.
         while(true) // Start select loop.
         {
@@ -353,7 +426,10 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
             nullptr) == -1)
           {
             if(errno != EINTR)
-              throw std::runtime_error {ERRNO_ERROR_STRING("select")};
+            {
+              std::error_code ec {errno, std::system_category()};
+              throw std::system_error {ec, ERRNO_ERROR_STRING("select")};
+            }
             // else: loop (EINTR is handled)
           }
           else
@@ -365,21 +441,19 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
       {
         // Conditionally ACQUIRE interface_state_mutex_
         if(!interface_mutex_held)
-        {
-          // ACQUIRE interface_state_mutex_.
-          std::lock_guard<std::mutex> interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
-          CompleteAfterDiscoveredClosedConnection();
-        } // RELEASE interface_state_mutex_.
-        else
-          CompleteAfterDiscoveredClosedConnection();
-        connection_open_at_peer = false;
+          interface_state_lock.lock();
+
+        CompleteAfterDiscoveredClosedConnection();
+        connection_open = false;
         break; // Exit write loop.
+      } // Conditionally RELEASE interface_state_mutex_.
+      else
+      {
+        std::error_code ec {errno, std::system_category()};
+        throw std::system_error {ec, ERRNO_ERROR_STRING("write from a call to "
+          "socket_functions::SocketWrite")};
       }
-      else // Cannot handle the error.
-        throw std::runtime_error {ERRNO_ERROR_STRING("write from a call to socket_functions::SocketWrite")};
     } // End handling incomplete writes. Loop.
   } // Exit write loop.
-  write_lock.unlock(); // RELEASE *write_mutex_ptr_.
-  return connection_open_at_peer;
+  return connection_open;
 }

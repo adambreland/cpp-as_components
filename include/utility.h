@@ -106,6 +106,8 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 // 2) The buffer pointed to by byte_ptr must be able to hold at least
 //    FCGI_HEADER_LEN bytes.
 //
+// Exceptions: noexcept
+//
 // Effects:
 // 1) FCGI_HEADER_LEN bytes, starting at the byte pointed to by byte_ptr,
 //    are written. The written byte sequence is a FastCGI header which
@@ -115,7 +117,7 @@ uint32_t ExtractFourByteLength(ByteIter byte_iter)
 //    b) The last byte, which is reserved by the FastCGI protocol, is zero.
 void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   std::uint16_t FCGI_id, std::uint16_t content_length,
-  std::uint8_t padding_length);
+  std::uint8_t padding_length) noexcept;
 
 // Processes name-value pairs and returns a tuple containing information which
 // allows a byte sequence to be written via a scatter-gather I/O system call.

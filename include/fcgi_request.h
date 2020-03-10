@@ -24,9 +24,24 @@ class FCGIRequest {
  public:
 
   // Returns true if the request was aborted. Returns false otherwise.
+  //
+  // Parameters: none.
+  //
+  // Preconditions: none.
+  //
+  // Exceptions:
+  // 1) A call may throw an object derived from std::exception. In particular:
+  //    a) A throw occurs if the FCGIServerInterface which created the request
+  //       has been destroyed.
+  //    b) A throw occurs if the call cannot be completed due to an
+  //       underlying system error or the detection of invalid interface
+  //       state.
+  //
+  //    All throws should be treated as an indication that the request cannot
+  //    be serviced and that the request may be destroyed.
   bool AbortStatus();
 
-  // Completes the response provided for an FCGIRequest object.
+  // Completes the response of an FCGIRequest object.
   //
   // Parameters:
   // app_status: The applicaton status that would be returned at the exit of an
@@ -35,6 +50,9 @@ class FCGIRequest {
   //             to the client.
   //
   // Requires: none.
+  //
+  // Exceptions:
+  // 1)
   //
   // Effects:
   // 1) If the request has already been completed, a call to Complete has
@@ -128,11 +146,34 @@ class FCGIRequest {
 private:
   friend class fcgi_si::FCGIServerInterface;
 
-  // Constructor made private as only an FCGIServerInterface object
+  // The constructor is private as only an FCGIServerInterface object
   // should create FCGIRequest objects through calls to AcceptRequests().
-  FCGIRequest(fcgi_si::RequestIdentifier request_id,
-    fcgi_si::FCGIServerInterface* interface_ptr,
-    fcgi_si::RequestData* request_data_ptr,
+  //
+  // Parameters:
+  //
+  // Requires:
+  // 1) request_id_ is a key of request_map_.
+  // 2) All pointers are associated with the FCGIServerInterface object
+  //    of request_map_. The correct RequestData object and write mutex
+  //    were used to initialize request_data_ptr and write_mutex_ptr.
+  // 3) interface_id is the identifier of the FCGIServerInterface object
+  //    associated with request_map_.
+  //
+  // Synchronization:
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) Throws std::logic_error if:
+  //    a) Any of interface_ptr, request_data_ptr, and write_mutex_ptr are null.
+  //    b) An FCGIRequest has already been generated from *request_data_ptr.
+  //    If a throw occurs, no change is made to interface state
+  //    (strong exception guarantee).
+  //
+  // Effects:
+  // 1) After construction, request_status_ == RequestStatus::kRequestAssigned
+  //    for the RequestData object associated with request_id in request_map_.
+  FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
+    FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr);
 
   bool PartitionByteSequence(const std::vector<uint8_t>& ref,
@@ -141,11 +182,38 @@ private:
 
   void CompleteAfterDiscoveredClosedConnection();
 
+  // Attempts to a perform scatter-gather write on the active socket given
+  // by fd.
+  //
+  // Parameters:
+  // fd:                   The file descriptor of the connected socket to which
+  //                       data will be written.
+  // iovec_ptr:            A pointer to an array of struct iovec instances.
+  // iovec_count:          The number of struct iovec instances to read data
+  //                       from.
+  // number_to_write:      The total number of bytes which would be written if
+  //                       all the data referenced in the range
+  //                       [*iovec_ptr, *(iovec_ptr + iovec_count)) was written.
+  // interface_mutex_held: A flag which prevents deadlock by allowing mutex
+  //                       ownership to be maintained across a call to
+  //                       WriteHelper. When true, it is assumed that
+  //                       interface_state_mutex_ is held and that interface
+  //                       state may be accessed.
+  //
+  // Requires:
+  //
+  // Exceptions:
+  //
+  //
+  // Effects:
+  //
   bool WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
-  fcgi_si::FCGIServerInterface* interface_ptr_;
-  fcgi_si::RequestIdentifier request_identifier_;
+  unsigned long associated_interface_id_;
+  FCGIServerInterface* interface_ptr_;
+  RequestIdentifier request_identifier_;
+  RequestData* request_data_ptr_;
 
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;
   std::vector<uint8_t> request_stdin_content_;

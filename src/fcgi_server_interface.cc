@@ -514,9 +514,10 @@ AcceptRequests()
         // a pointer to it, and create an FCGIRequest object from it.
         for(RequestIdentifier request_id : request_identifiers)
         {
-          fcgi_si::RequestData* request_data_ptr {nullptr};
+          RequestData* request_data_ptr {nullptr};
           request_data_ptr = &(request_map_.find(request_id)->second);
-          fcgi_si::FCGIRequest request {request_id, this, request_data_ptr,
+          FCGIRequest request {request_id,
+            FCGIServerInterface::interface_identifier_, this, request_data_ptr,
             write_mutex_ptr};
           requests.push_back(std::move(request));
         }

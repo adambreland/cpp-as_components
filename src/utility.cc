@@ -168,7 +168,7 @@ fcgi_si::ExtractContent(int fd, FCGIType type, uint16_t id)
 
 void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   std::uint16_t FCGI_id, std::uint16_t content_length,
-  std::uint8_t padding_length)
+  std::uint8_t padding_length) noexcept
 {
   std::uint8_t header_array[fcgi_si::FCGI_HEADER_LEN];
   header_array[0] = fcgi_si::FCGI_VERSION_1;
