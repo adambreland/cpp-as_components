@@ -64,7 +64,7 @@ private:
   // implementation of AcceptRequests. When -1 is returned, a blocking
   // error must have occurred and the loop should terminate.
   //
-  // Requires:
+  // Preconditions:
   // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
   //    a listening socket.
   //
@@ -112,12 +112,13 @@ private:
   // Parameters:
   // connection: the socket that was found to have been closed by the peer.
   //
+  //
   // Effects:
-  // 0) Acquires and releases interface_state_mutex_.
-  // 1  a) Removes the connection from all maps with a domain equal to
+  // 1) Acquires and releases interface_state_mutex_.
+  // 2) a) Removes the connection from all maps with a domain equal to
   //       the set of connections: record_status_map_, write_mutex_map_,
   //       closure_request_map_, and request_count_map_.
-  // 1  b) Removes all of the associated requests from request_map_. Note that
+  //    b) Removes all of the associated requests from request_map_. Note that
   //       FCGIRequest object methods are implemented to check for missing
   //       RequestIdentifier values and missing connections. Absence indicates
   //       that the connection was found to be closed by the interface.
@@ -192,13 +193,28 @@ private:
 
   void RemoveConnectionFromSharedState(int connection);
 
-  inline void RemoveRequest(fcgi_si::RequestIdentifier request_id)
-  {
-    std::map<RequestIdentifier, RequestData>::size_type erase_return
-      {request_map_.erase(request_id)};
-    if(erase_return)
-      request_count_map_[request_id.descriptor()]--;
-  }
+  // Attemps to remove the request given by request_id from request_map_ while
+  // also updating request_count_map_.
+  //
+  // Requirements: none
+  //
+  // Exceptions:
+  // 1) Throws std::out_of_range if request_count_map_ does not have
+  //    request_id.descriptor() as a key. After a throw:
+  //    a) bad_interface_state_detected_ == true;
+  //
+  // Synchronization:
+  // 1) interface_state_mutex_ must be held prior to calling.
+  //
+  // Friends:
+  // 1) Depended on by FCGIRequest to safely remove an item from request_map_.
+  //
+  // Effects:
+  // 1) If request_id was a key to an item of request_map_, the item was
+  //    removed from request_map_ and
+  //    request_count_map_[request_id.descriptor()] was decremented.
+  //    Otherwise, interface state was not changed.
+  void RemoveRequest(RequestIdentifier request_id);
 
   inline void
   RemoveRequest(std::map<RequestIdentifier,
@@ -280,6 +296,8 @@ private:
   // assigned requests. The RequestIdentifier is the pair defined by the
   // connection socket descriptor value and the FCGI request number.
   std::map<RequestIdentifier, RequestData> request_map_;
+
+  bool bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////
 };

@@ -24,11 +24,11 @@ public:
 
   inline bool get_abort() const
   {
-    return abort_;
+    return client_set_abort_;
   }
   inline void set_abort()
   {
-    abort_ = true;
+    client_set_abort_ = true;
   }
 
   inline bool get_close_connection() const
@@ -77,7 +77,7 @@ public:
   }
   void AppendToDATA(const uint8_t* buffer_ptr, size count);
 
-  // No copy or move.
+  // Move only.
   RequestData() = default;
   RequestData(uint16_t role, bool close_connection);
   RequestData(const RequestData&) = delete;
@@ -107,7 +107,7 @@ private:
 
   // Request metadata
   uint16_t role_;
-  bool abort_;
+  bool client_set_abort_;
   bool close_connection_;
   fcgi_si::RequestStatus request_status_;
   bool connection_closed_by_interface_;

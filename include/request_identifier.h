@@ -9,26 +9,26 @@ namespace fcgi_si {
 
 class RequestIdentifier {
 public:
-  int descriptor() const;
-  uint16_t FCGI_id() const;
+  int descriptor() const noexcept;
+  uint16_t FCGI_id() const noexcept;
 
-  RequestIdentifier();
-  RequestIdentifier(int descriptor, uint16_t FCGI_id);
-  RequestIdentifier(const RequestIdentifier& request_id) = default;
-  RequestIdentifier(RequestIdentifier&& request_id) = default;
+  RequestIdentifier() noexcept;
+  RequestIdentifier(int descriptor, uint16_t FCGI_id) noexcept;
+  RequestIdentifier(const RequestIdentifier& request_id) noexcept;
+  RequestIdentifier(RequestIdentifier&& request_id) noexcept;
 
-  RequestIdentifier& operator=(const RequestIdentifier& request_id) = default;
-  RequestIdentifier& operator=(RequestIdentifier&& request_id) = default;
+  RequestIdentifier& operator=(const RequestIdentifier& request_id) noexcept;
+  RequestIdentifier& operator=(RequestIdentifier&& request_id) noexcept;
 
-  bool operator==(const RequestIdentifier& rhs) const;
-  bool operator!=(const RequestIdentifier& rhs) const;
+  bool operator== (const RequestIdentifier& rhs) const noexcept;
+  bool operator!= (const RequestIdentifier& rhs) const noexcept;
 
-  bool operator<(const RequestIdentifier& rhs) const;
-  bool operator<=(const RequestIdentifier& rhs) const;
-  bool operator>(const RequestIdentifier& rhs) const;
-  bool operator>=(const RequestIdentifier& rhs) const;
+  bool operator<  (const RequestIdentifier& rhs) const noexcept;
+  bool operator<= (const RequestIdentifier& rhs) const noexcept;
+  bool operator>  (const RequestIdentifier& rhs) const noexcept;
+  bool operator>= (const RequestIdentifier& rhs) const noexcept;
 
-  explicit operator bool() const;
+  explicit operator bool() const noexcept;
 
   ~RequestIdentifier() = default;
 

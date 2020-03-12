@@ -717,6 +717,28 @@ RemoveConnectionFromSharedState(int connection)
 
 }
 
+void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
+{
+  try
+  {
+    std::map<RequestIdentifier, RequestData>::size_type erase_return
+      {request_map_.erase(request_id)};
+    if(erase_return)
+    {
+      int* request_count_ptr {&request_count_map_.at(request_id.descriptor())};
+      if(*request_count_ptr == 0)
+        throw std::logic_error {"request_count_map_ would have required "
+          "negative counts."};
+      *request_count_ptr -= 1;
+    }
+  }
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
+}
+
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                    uint8_t protocol_status, int32_t app_status)
