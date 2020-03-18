@@ -107,6 +107,64 @@ class FCGIRequest {
     return request_stdin_content_;
   }
 
+  template<typename ByteIter>
+  std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t>
+  PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter,
+    FCGIType type)
+  {
+    // Verify that ByteIter iterates over units of data which are the size of
+    // a byte.
+    static_assert(sizeof(std::uint8_t) == sizeof(decltype(*begin_iter)),
+      "A call to PartitionByteSequence<> used an iterator type which did "
+      "not iterate over data in units of bytes.");
+
+    std::vector<std::uint8_t> header_byte_sequence {};
+    // Only two headers will be needed to describe all records.
+    header_byte_sequence.reserve(2*FCGI_HEADER_LEN);
+    std::vector<struct iovec> iovec_list {};
+    std::size_t number_to_write {0};
+
+    std::size_t total_content_length {std::distance(begin_iter, end_iter)};
+    const std::uint8_t* content_base_ptr {static_cast<const std::uint8_t*>(
+      static_cast<const void*>(&(*begin_iter)))};
+
+    // The content length of a record should be a multiple of 8 whenever possible.
+    // kMaxRecordContentByteLength = 2^16 - 1
+    // (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
+    constexpr uint16_t max_aligned_content_length
+      {kMaxRecordContentByteLength - 7};
+
+    // Determine how many full records are needed, if a partial record is
+    // needed, and related information.
+    std::size_t full_record_count
+      {total_content_length / max_aligned_content_length};
+    // Safe narrowing conversion.
+    std::uint16_t partial_record_length
+      {static_cast<std::uint16_t>(
+        total_content_length % max_aligned_content_length)};
+    bool partial_record_count {partial_record_length > 0};
+    // Safe narrowing conversion.
+    std::uint8_t padding_length
+      {(partial_record_length % fcgi_si::FCGI_HEADER_LEN) ?
+        static_cast<std::uint8_t>(fcgi_si::FCGI_HEADER_LEN -
+          (partial_record_length % fcgi_si::FCGI_HEADER_LEN)) :
+        static_cast<std::uint8_t>(0)};
+    constexpr std::uint8_t padding[FCGI_HEADER_LEN] = {};
+
+    if(partial_record_count)
+    {
+
+      if(padding_length)
+    }
+
+
+
+
+
+    return std::make_tuple(std::move(header_byte_sequence),
+      std::move(iovec_list), number_to_write);
+  }
+
   // Attempts to send a byte sequence to the client on the FCGI_STDOUT stream.
   //
   // Parameters:
@@ -126,39 +184,29 @@ class FCGIRequest {
   // Effects:
   // 1)
   //
-  inline bool Write(const std::vector<uint8_t>& ref,
-    std::vector<uint8_t>::const_iterator begin_iter,
-    std::vector<uint8_t>::const_iterator end_iter)
+  template<typename ByteIter>
+  bool Write(ByteIter begin_iter, ByteIter end_iter)
   {
-    return PartitionByteSequence(ref, begin_iter, end_iter,
-      fcgi_si::FCGIType::kFCGI_STDOUT);
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
+    std::size_t> partition_return
+      {PartitionByteSequence(begin_iter, end_iter, FCGIType::kFCGI_STDOUT)};
+
+    return WriteHelper(std::get<1>(partition_return).data(),
+      std::get<1>(partition_return).size(), std::get<2>(partition_return),
+        false);
   }
 
-  // Attempts to send a byte sequence to the client on the FCGI_STDERR stream.
-  //
-  // Parameters:
-  // ref:        A constant reference to a container which holds the byte
-  //             sequence to be sent.
-  // begin_iter: An iterator that points to the first byte of the sequence to
-  //             be sent.
-  // end_iter:   An iterator that points to one-past-the-last byte of the
-  //             sequence to be sent.
-  //
-  // Preconditions:
-  // 1)
-  //
-  // Exceptions:
-  // 1)
-  //
-  // Effects:
-  // 1)
-  //
-  inline bool WriteError(const std::vector<uint8_t>& ref,
-    std::vector<uint8_t>::const_iterator begin_iter,
-    std::vector<uint8_t>::const_iterator end_iter)
+  // As for Write, but the stream FCGI_STDERR is used instead of FCGI_STDOUT.
+  template<typename ByteIter>
+  bool WriteError(ByteIter begin_iter, ByteIter end_iter)
   {
-    return PartitionByteSequence(ref, begin_iter, end_iter,
-      fcgi_si::FCGIType::kFCGI_STDERR);
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
+    std::size_t> partition_return
+      {PartitionByteSequence(begin_iter, end_iter, FCGIType::kFCGI_STDERR)};
+
+    return WriteHelper(std::get<1>(partition_return).data(),
+      std::get<1>(partition_return).size(), std::get<2>(partition_return),
+        false);
   }
 
   // No copy or default construction.
@@ -209,18 +257,33 @@ private:
   // 1) Throws std::logic_error if:
   //    a) Any of interface_ptr, request_data_ptr, or write_mutex_ptr are null.
   //    b) An FCGIRequest has already been generated from *request_data_ptr.
-  //    If a throw occurs, bad_interface_state_detected_ is set.
+  //
+  //    If a throw occurs, bad_interface_state_detected_ is set (as this
+  //    means that the implementation of FCGIServerInterface has an error).
   //
   // Effects:
-  // 1) After construction, request_status_ == RequestStatus::kRequestAssigned
+  // 1) Constructs an FCGIRequest which:
+  //    a) Contains the environment variable (FCGI_PARAMS), FCGI_STDIN, and
+  //       FCGI_DATA information of the request.
+  //    b) Contains the role and connection-closure-upon-response-completion
+  //       information of the request.
+  //    c) Is associated with the interface object which created it.
+  // 2) After construction, request_status_ == RequestStatus::kRequestAssigned
   //    for the RequestData object given by *request_data_ptr.
   FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
     FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr);
 
-  bool PartitionByteSequence(const std::vector<uint8_t>& ref,
-    std::vector<uint8_t>::const_iterator begin_iter,
-    std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type);
+  // Determines a partition of the byte sequence defined by
+  // [begin_iter, end_iter) whose parts can be sent as the content of FastCGI
+  // records. Determines headers and scatter-gather write information
+  //
+  //
+  //
+  //
+  // bool PartitionByteSequence(const std::vector<uint8_t>& ref,
+  //   std::vector<uint8_t>::const_iterator begin_iter,
+  //   std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type);
 
   // Attempts to a perform a scatter-gather write on the active socket given
   // by fd.
@@ -265,9 +328,8 @@ private:
   //       was sent.
   //    b) A non-recoverable error must be assumed. The request should be
   //       destroyed.
-  // Note: The returned boolean value is propagated in some cases to the user
-  //       of the interface.
-  bool WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
+  // Note: The returned boolean value is propagated in some cases to the user.
+  bool WriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
   unsigned long associated_interface_id_;

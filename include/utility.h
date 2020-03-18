@@ -214,7 +214,7 @@ template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
-  fcgi_si::FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
+  FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
 {
   if(pair_iter == end)
     return {true, 0, {}, {}, 0, end};
@@ -236,8 +236,10 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   // Reduce by one to ensure that a struct for padding is always available.
     // (Safe conversion from signed to unsigned.)
   std::size_t remaining_iovec_count(iovec_max - 1);
-  // Reduce by FCGI_HEADER_LEN - 1 to ensure that padding can always be added.
-  std::size_t remaining_byte_count {ssize_t_MAX - (FCGI_HEADER_LEN - 1)};
+  // Reduce by FCGI_HEADER_LEN - 1 = 7 to ensure that padding can always be
+  // added.
+  std::size_t remaining_byte_count {ssize_t_MAX - 7};
+
   // Lambda functions to simplify the loops below.
   auto size_iter = [&](int i)->std::size_t
   {

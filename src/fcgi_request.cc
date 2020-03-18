@@ -27,15 +27,7 @@
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
-// Numerical assumptions:
-// 1) std::size_t >= uint16_t
-// 2) std::size_t >= decltype(std::distance(begin_iter, end_iter)) for
-//    std::vector<uint8_t> iterators.
-//
-// Question: Are size_t and std::size_t the same?
-
-
-// Implementation notes
+// Class implementation notes:
 // 1) Updating interface state:
 //    a) Requests are responsible for removing themselves from their interface.
 //       The interface will not remove an item from request_map_ if the
@@ -92,7 +84,7 @@
 //          state. Thus it is ensured that the destructor will not destroy a
 //          write mutex while a request holds that write mutex.
 //   c) Once a write mutex has been acquired by a request under the protection
-//      of interface_state_mutex_, the requets may release
+//      of interface_state_mutex_, the request may release
 //      interface_state_mutex_ to write. Alternatively, the request may
 //      defer releasing interface_state_mutex_ until after the write mutex
 //      is released.
@@ -100,6 +92,7 @@
 //      is held.
 
 
+// Implementation notes:
 // Note that this constructor should only be called by an
 // FCGIServerInterface object.
 //
@@ -339,8 +332,8 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
   }
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
-  bool write_return {WriteHelper(request_identifier_.descriptor(), iovec_array,
-    seq_num, seq_num*fcgi_si::FCGI_HEADER_LEN, true)};
+  bool write_return {WriteHelper(iovec_array, seq_num,
+    seq_num*fcgi_si::FCGI_HEADER_LEN, true)};
 
   // Update interface state and FCGIRequest state.
   if(write_return)
@@ -364,115 +357,122 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
   return write_return;
 } // RELEASE interface_state_mutex_.
 
+// Implementation questions:
+// Numerical assumptions (?):
+// 1) std::size_t >= uint16_t
+// 2) std::size_t >= decltype(std::distance(begin_iter, end_iter)) for
+//    std::vector<uint8_t> iterators.
+//
+// Question: Are size_t and std::size_t the same type?
+// bool fcgi_si::FCGIRequest::
+// PartitionByteSequence(const std::vector<uint8_t>& ref,
+//   std::vector<uint8_t>::const_iterator begin_iter,
+//   std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type)
+// {
+//   if(completed_)
+//     return false;
+//   if(begin_iter == end_iter)
+//     return true;
+//
+//   // message_length may be undefined for extremely large vectors as the
+//   // difference_type of std::vector may not be able to store the length
+//   // of the vector (or the length of an interval of it).
+//   auto message_length = std::distance(begin_iter, end_iter);
+//   auto message_offset = std::distance(ref.begin(), begin_iter);
+//   const uint8_t* message_ptr = ref.data() + message_offset;
+//
+//   // Determine the number of full records and the length of a partial record
+//   // if present. Determine the padding length for the partial record.
+//   decltype(message_length) full_record_count
+//     {message_length / fcgi_si::kMaxRecordContentByteLength};
+//   uint16_t partial_record_length
+//     {static_cast<uint16_t>(message_length % fcgi_si::kMaxRecordContentByteLength)};
+//   bool partial_record_count {partial_record_length > 0};
+//   uint8_t padding_count {(partial_record_length % fcgi_si::FCGI_HEADER_LEN) ?
+//     static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN -
+//       (partial_record_length % fcgi_si::FCGI_HEADER_LEN)) :
+//     static_cast<uint8_t>(0)};
+//
+//   uint8_t padding[fcgi_si::FCGI_HEADER_LEN] = {}; // Initialize to all zeroes.
+//
+//   // Populate header for the partial record.
+//   uint8_t header[fcgi_si::FCGI_HEADER_LEN];
+//   fcgi_si::PopulateHeader(header, type, request_identifier_.FCGI_id(),
+//     partial_record_length, padding_count);
+//
+//   // Initialize the iovec structures.
+//   // Ensure that an overflow does not occur when we initialize iovec_count.
+//   // Note that the limit placed on the number of buffers by writev is
+//   // (usually) much less than std::numeric_limits<int>::max(). Ensuring that
+//   // this limit is not surpassed is required for successful use of
+//   // FCGIRequest::Write. A throw will occur if writev returns an invalid size
+//   // error.
+//
+//   // Determine the number of buffers (which will be the number of iovec structs).
+//   // Double the number of records as each record has a header buffer.
+//   // Include the padding buffer.
+//   decltype(message_length) iovec_count_iter_distance_units
+//     {(2*(partial_record_count + full_record_count))+(padding_count > 0)};
+//   if(iovec_count_iter_distance_units > std::numeric_limits<int>::max())
+//     throw std::logic_error {ERROR_STRING("PartitionByteSequence received a byte sequence length which resulted\nin more records than the maximum value of int.")};
+//   int iovec_count {static_cast<int>(iovec_count_iter_distance_units)};
+//   std::unique_ptr<struct iovec[]> iovec_array_ptr {new struct iovec[iovec_count]};
+//   // Initialize iovec strcutre for the partial record if there is one.
+//   int i {0}; // struct iovect structure index in iovec_array on the heap.
+//   if(partial_record_count)
+//   {
+//     // Header
+//     (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
+//     (iovec_array_ptr.get()+i)->iov_len  = fcgi_si::FCGI_HEADER_LEN;
+//     i++;
+//     // Content
+//     (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
+//     (iovec_array_ptr.get()+i)->iov_len  = partial_record_length;
+//     i++;
+//     // Update the content pointer.
+//     message_ptr += partial_record_length;
+//     // Conditionally include padding.
+//     if(padding_count)
+//     {
+//       (iovec_array_ptr.get()+i)->iov_base = padding;
+//       (iovec_array_ptr.get()+i)->iov_len  = padding_count;
+//       i++;
+//     }
+//   }
+//   if(i < iovec_count)
+//   {
+//     // Initialize all other iovec structures for full records.
+//     // Update header.
+//     header[fcgi_si::kHeaderContentLengthB1Index] =
+//       0xff; // A full record has a content length value with a bit sequence of 16 ones.
+//     header[fcgi_si::kHeaderContentLengthB0Index] =
+//       0xff;
+//     header[fcgi_si::kHeaderPaddingLengthIndex]   =
+//       0;
+//     for(/*no-op*/; i < iovec_count; /*no-op*/)
+//     {
+//       // Header
+//       (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
+//       (iovec_array_ptr.get()+i)->iov_len = fcgi_si::FCGI_HEADER_LEN;
+//       i++;
+//       // Content
+//       (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
+//       (iovec_array_ptr.get()+i)->iov_len = fcgi_si::kMaxRecordContentByteLength;
+//       i++;
+//       // Update the content pointer.
+//       message_ptr += fcgi_si::kMaxRecordContentByteLength;
+//     }
+//   }
+//   decltype(message_length) total_write_length
+//     {message_length + padding_count
+//     + (fcgi_si::FCGI_HEADER_LEN * (full_record_count + partial_record_count))};
+//
+//   return WriteHelper(iovec_array_ptr.get(), iovec_count, total_write_length,
+//     false);
+// }
+
 bool fcgi_si::FCGIRequest::
-PartitionByteSequence(const std::vector<uint8_t>& ref,
-  std::vector<uint8_t>::const_iterator begin_iter,
-  std::vector<uint8_t>::const_iterator end_iter, fcgi_si::FCGIType type)
-{
-  if(completed_)
-    return false;
-  if(begin_iter == end_iter)
-    return true;
-
-  // message_length may be undefined for extremely large vectors as the
-  // difference_type of std::vector may not be able to store the length
-  // of the vector (or the length of an interval of it).
-  auto message_length = std::distance(begin_iter, end_iter);
-  auto message_offset = std::distance(ref.begin(), begin_iter);
-  const uint8_t* message_ptr = ref.data() + message_offset;
-
-  // Determine the number of full records and the length of a partial record
-  // if present. Determine the padding length for the partial record.
-  decltype(message_length) full_record_count
-    {message_length / fcgi_si::kMaxRecordContentByteLength};
-  uint16_t partial_record_length
-    {static_cast<uint16_t>(message_length % fcgi_si::kMaxRecordContentByteLength)};
-  bool partial_record_count {partial_record_length > 0};
-  uint8_t padding_count {(partial_record_length % fcgi_si::FCGI_HEADER_LEN) ?
-    static_cast<uint8_t>(fcgi_si::FCGI_HEADER_LEN -
-      (partial_record_length % fcgi_si::FCGI_HEADER_LEN)) :
-    static_cast<uint8_t>(0)};
-
-  uint8_t padding[fcgi_si::FCGI_HEADER_LEN] = {}; // Initialize to all zeroes.
-
-  // Populate header for the partial record.
-  uint8_t header[fcgi_si::FCGI_HEADER_LEN];
-  fcgi_si::PopulateHeader(header, type, request_identifier_.FCGI_id(),
-    partial_record_length, padding_count);
-
-  // Initialize the iovec structures.
-  // Ensure that an overflow does not occur when we initialize iovec_count.
-  // Note that the limit placed on the number of buffers by writev is
-  // (usually) much less than std::numeric_limits<int>::max(). Ensuring that
-  // this limit is not surpassed is required for successful use of
-  // FCGIRequest::Write. A throw will occur if writev returns an invalid size
-  // error.
-
-  // Determine the number of buffers (which will be the number of iovec structs).
-  // Double the number of records as each record has a header buffer.
-  // Include the padding buffer.
-  decltype(message_length) iovec_count_iter_distance_units
-    {(2*(partial_record_count + full_record_count))+(padding_count > 0)};
-  if(iovec_count_iter_distance_units > std::numeric_limits<int>::max())
-    throw std::logic_error {ERROR_STRING("PartitionByteSequence received a byte sequence length which resulted\nin more records than the maximum value of int.")};
-  int iovec_count {static_cast<int>(iovec_count_iter_distance_units)};
-  std::unique_ptr<struct iovec[]> iovec_array_ptr {new struct iovec[iovec_count]};
-  // Initialize iovec strcutre for the partial record if there is one.
-  int i {0}; // struct iovect structure index in iovec_array on the heap.
-  if(partial_record_count)
-  {
-    // Header
-    (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
-    (iovec_array_ptr.get()+i)->iov_len  = fcgi_si::FCGI_HEADER_LEN;
-    i++;
-    // Content
-    (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
-    (iovec_array_ptr.get()+i)->iov_len  = partial_record_length;
-    i++;
-    // Update the content pointer.
-    message_ptr += partial_record_length;
-    // Conditionally include padding.
-    if(padding_count)
-    {
-      (iovec_array_ptr.get()+i)->iov_base = padding;
-      (iovec_array_ptr.get()+i)->iov_len  = padding_count;
-      i++;
-    }
-  }
-  if(i < iovec_count)
-  {
-    // Initialize all other iovec structures for full records.
-    // Update header.
-    header[fcgi_si::kHeaderContentLengthB1Index] =
-      0xff; // A full record has a content length value with a bit sequence of 16 ones.
-    header[fcgi_si::kHeaderContentLengthB0Index] =
-      0xff;
-    header[fcgi_si::kHeaderPaddingLengthIndex]   =
-      0;
-    for(/*no-op*/; i < iovec_count; /*no-op*/)
-    {
-      // Header
-      (iovec_array_ptr.get()+i)->iov_base = static_cast<void*>(header);
-      (iovec_array_ptr.get()+i)->iov_len = fcgi_si::FCGI_HEADER_LEN;
-      i++;
-      // Content
-      (iovec_array_ptr.get()+i)->iov_base = (void*)message_ptr; // Need to remove const.
-      (iovec_array_ptr.get()+i)->iov_len = fcgi_si::kMaxRecordContentByteLength;
-      i++;
-      // Update the content pointer.
-      message_ptr += fcgi_si::kMaxRecordContentByteLength;
-    }
-  }
-  decltype(message_length) total_write_length
-    {message_length + padding_count
-    + (fcgi_si::FCGI_HEADER_LEN * (full_record_count + partial_record_count))};
-
-  return WriteHelper(request_identifier_.descriptor(), iovec_array_ptr.get(),
-    iovec_count, total_write_length, false);
-}
-
-bool fcgi_si::FCGIRequest::
-WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
+WriteHelper(struct iovec* iovec_ptr, int iovec_count,
   const std::size_t number_to_write, bool interface_mutex_held)
 {
   std::unique_lock<std::mutex> interface_state_lock
@@ -506,6 +506,7 @@ WriteHelper(int fd, struct iovec* iovec_ptr, int iovec_count,
   // nothing was written.
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_,
     std::defer_lock_t {}};
+  int fd {request_identifier_.descriptor()};
   int select_descriptor_range {fd + 1};
   fd_set write_set {};
   bool first_iteration {true};

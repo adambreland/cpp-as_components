@@ -728,9 +728,12 @@ void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
       int* request_count_ptr {&request_count_map_.at(request_id.descriptor())};
       if(*request_count_ptr == 0)
         throw std::logic_error {"request_count_map_ would have required "
-          "negative counts."};
+          "a negative count."};
       *request_count_ptr -= 1;
     }
+    else
+      throw std::logic_error {"A request to erase an item of request_map_ "
+        "was made on a missing key."};
   }
   catch(...)
   {
