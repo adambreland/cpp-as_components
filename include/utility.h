@@ -225,17 +225,17 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   // Reduce by 7 to ensure that the length of a "full" record is a
   // multiple of 8.
 
-  // Determine the maximum number of iovec structures that can
-  // be used for scatter-gather writing.
-  long iovec_max {sysconf(_SC_IOV_MAX)};
-  // Use the current Linux default if information cannot be obtained.
-  if(iovec_max == -1)
-    iovec_max = 1024;
-  iovec_max = std::min<long>(iovec_max, std::numeric_limits<int>::max());
   // Determine the initial values of the break variables.
+
+  long remaining_iovec_count {fcgi_si::iovec_MAX};
+  // Use the current Linux default if information cannot be obtained.
+  if(remaining_iovec_count == -1)
+    remaining_iovec_count = 1024;
+  remaining_iovec_count = std::min<long>(remaining_iovec_count, 
+    std::numeric_limits<int>::max());
   // Reduce by one to ensure that a struct for padding is always available.
-    // (Safe conversion from signed to unsigned.)
-  std::size_t remaining_iovec_count(iovec_max - 1);
+  remaining_iovec_count--;
+ 
   // Reduce by FCGI_HEADER_LEN - 1 = 7 to ensure that padding can always be
   // added.
   std::size_t remaining_byte_count {ssize_t_MAX - 7};

@@ -1,8 +1,9 @@
 #ifndef FCGI_SERVER_INTERFACE_INCLUDE_PROTOCOL_CONSTANTS_H_
 #define FCGI_SERVER_INTERFACE_INCLUDE_PROTOCOL_CONSTANTS_H_
 
-#include <cstdint>         // For uint8_t.
+#include <unistd.h>
 
+#include <cstdint>         // For uint8_t.
 #include <map>
 #include <mutex>
 #include <utility>
@@ -73,6 +74,8 @@ enum class FCGIType : uint8_t
   kFCGI_GET_VALUES_RESULT = 10,
   kFCGI_UNKNOWN_TYPE      = 11
 };
+
+const long iovec_MAX {sysconf(_SC_IOV_MAX)};
 
 } // namespace fcgi_si
 
