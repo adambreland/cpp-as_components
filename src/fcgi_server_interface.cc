@@ -725,9 +725,11 @@ void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
       {request_map_.erase(request_id)};
     if(erase_return)
     {
+      // Use a pointer instead of a non-constant reference to conditionally 
+      // modify the request count associated with request_id.descriptor().
       int* request_count_ptr {&request_count_map_.at(request_id.descriptor())};
       if(*request_count_ptr == 0)
-        throw std::logic_error {"request_count_map_ would have required "
+        throw std::logic_error {"request_count_map_ would have obtained "
           "a negative count."};
       *request_count_ptr -= 1;
     }

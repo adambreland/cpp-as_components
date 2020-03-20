@@ -41,13 +41,17 @@
 //          closed the request connection.
 //       4) The destructor of a request is called and the request has not
 //          yet removed itself from the interface.
-//     c) Removing a request should be performed by:
-//           interface_ptr_->RemoveRequest(request_identifier_);
-//        The call to RemoveRequest maintains invariants on interface state.
-//     d) When a request is completed and the connection of the request is
-//        still open, the request should conditionally add the descriptor of the
-//        connection to application_closure_request_set_ as per the value of
-//        close_connection_.
+//    c) The cases above may be viewed as occurring on the transition of 
+//       completed_ from false to true. This should only occur once for a 
+//       request and, once it has occurred, the request is no longer relevant
+//       its interface.
+//    d) Removing a request should be performed by:
+//          interface_ptr_->RemoveRequest(request_identifier_);
+//       The call to RemoveRequest maintains invariants on interface state.
+//    e) When a request is completed and the connection of the request is
+//       still open, the request should conditionally add the descriptor of the
+//       connection to application_closure_request_set_ as per the value of
+//       close_connection_.
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
 //       must check if its interface has been destroyed. This is done by
@@ -89,7 +93,7 @@
 //      defer releasing interface_state_mutex_ until after the write mutex
 //      is released.
 //   d) A request may never acquire interface_state_mutex_ while a write mutex
-//      is held.
+//      is held. Doing so may lead to deadlock.
 
 
 // Implementation notes:
@@ -222,8 +226,20 @@ fcgi_si::FCGIRequest::~FCGIRequest()
     if(FCGIServerInterface::interface_identifier_ == associated_interface_id_)
     {
       // Try to remove the request from the interface.
-      try {interface_ptr_->RemoveRequest(request_identifier_);}
-      catch(...) {}
+      try 
+      {
+        interface_ptr_->RemoveRequest(request_identifier_);
+        if(close_connection_)
+        {
+          interface_ptr_->application_closure_request_set_.insert(
+          request_identifier_.descriptor());
+        }
+      }
+      catch(...) 
+      {
+        if(close_connection_)
+          interface_ptr_->bad_interface_state_detected_ = true;
+      }
     }
   } // RELEASE interface_state_mutex_.
 }
@@ -240,8 +256,12 @@ bool fcgi_si::FCGIRequest::AbortStatus()
     {FCGIServerInterface::interface_state_mutex_};
   // Check if the interface has been destroyed.
   if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+  {
+    completed_ = true;
+    was_aborted_ = true;
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was destroyed before the request.")};
+  }
   // Check if the connection has been closed by the interface.
   if(request_data_ptr_->connection_closed_by_interface_)
   {
@@ -315,21 +335,8 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
   // the interface.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
-  // Check if the interface has been destroyed.
-  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
-  {
-    completed_ = true;
-    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
-      "with an FCGIRequest object was destroyed before the request.")};
-  }
-  // Check for closure of the connection by the interface.
-  if(request_data_ptr_->connection_closed_by_interface_)
-  {
-    completed_ = true;
-    was_aborted_ = true;
-    interface_ptr_->RemoveRequest(request_identifier_);
+  if(!InterfaceStateCheckForWritingUponMutexAcquisition())
     return false;
-  }
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
   bool write_return {ScatterGatherWriteHelper(iovec_array, seq_num,
@@ -358,19 +365,13 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
 } // RELEASE interface_state_mutex_.
 
 bool fcgi_si::FCGIRequest::
-ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
-  const std::size_t number_to_write, bool interface_mutex_held)
+InterfaceStateCheckForWritingUponMutexAcquisition()
 {
-  std::unique_lock<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_, std::defer_lock_t {}};
-
-  // Conditionally ACQUIRE interface_state_mutex_.
-  if(!interface_mutex_held)
-    interface_state_lock.lock();
   // Check if the interface has been destroyed.
   if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
   {
     completed_ = true;
+    was_aborted_ = true;
 
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was destroyed before the request.")};
@@ -383,7 +384,25 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     interface_ptr_->RemoveRequest(request_identifier_);
     return false;
   }
+  
+  return true;
+}
 
+bool fcgi_si::FCGIRequest::
+ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
+  const std::size_t number_to_write, bool interface_mutex_held)
+{
+  std::unique_lock<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_, std::defer_lock_t {}};
+
+  // Conditionally ACQUIRE interface_state_mutex_.
+  if(!interface_mutex_held)
+  {
+    interface_state_lock.lock();
+    if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+      return false;
+  }
+  
   std::size_t working_number_to_write {number_to_write};
   // write_lock has the following property in the loop below:
   // The mutex is always held when writing and, once some data has been written,
@@ -394,18 +413,20 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::defer_lock_t {}};
   int fd {request_identifier_.descriptor()};
   int select_descriptor_range {fd + 1};
+  // A set for file descriptors for a select call below.
   fd_set write_set {};
+  // interface_state_mutex_ is guaranteed to be held during the first iteration.
   bool first_iteration {true};
   while(working_number_to_write > 0) // Start write loop.
   {
     // Conditionally ACQUIRE interface_state_mutex_.
+    // If the mutex is acquired, is is possible that the interface was destroyed
+    // or that the connection was closed.
     if(!interface_mutex_held && !first_iteration && !write_lock.owns_lock())
     {
       interface_state_lock.lock();
-      if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
-        throw std::runtime_error {ERROR_STRING("The FCGIServerInterface "
-          "associated with an FCGIRequest object was destroyed before the "
-          "request.")};
+      if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+        return false;
     }
     first_iteration = false;
 
@@ -428,7 +449,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       write_lock.unlock();
       working_number_to_write = 0;
     }
-    else // The number written is less than number_to_write. We must check errno.
+    else // The number written is less than number_to_write. We must check 
+         // errno.
     {
       // EINTR is handled by ScatterGatherSocketWrite.
       // Handle blocking errors.
@@ -472,8 +494,11 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         write_lock.unlock();
         // Conditionally ACQUIRE interface_state_mutex_
         if(!interface_mutex_held)
-        interface_state_lock.lock();
-
+        {
+          interface_state_lock.lock();
+          if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+            return false;
+        }
         completed_   = true;
         was_aborted_ = true;
         interface_ptr_->RemoveRequest(request_identifier_);
@@ -491,8 +516,12 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
             throw;
           }
         }
+        // Conditionally RELEASE interface_state_mutex_.
+        if(interface_state_lock.owns_lock())
+          interface_state_lock.unlock();
+
         return false;
-      } // Conditionally RELEASE interface_state_mutex_.
+      } 
       // An unrecoverable error was encountered during the write.
       else
       {

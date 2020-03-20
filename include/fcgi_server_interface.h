@@ -199,9 +199,11 @@ private:
   // Requirements: none
   //
   // Exceptions:
-  // 1) Throws std::out_of_range if request_count_map_ does not have
-  //    request_id.descriptor() as a key. After a throw:
-  //    a) bad_interface_state_detected_ == true;
+  // 1) May throw an exception derived from std::exception if logic errors in
+  //    interface state are detected. After a throw:
+  //    a) bad_interface_state_detected_ == true.
+  //    b) It must be assumed that the interface is corrupt and should be
+  //       destroyed.
   //
   // Synchronization:
   // 1) interface_state_mutex_ must be held prior to calling.

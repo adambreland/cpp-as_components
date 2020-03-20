@@ -20,8 +20,8 @@
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
-fcgi_si::FCGIRequest::PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter,
-  FCGIType type)
+fcgi_si::FCGIRequest::PartitionByteSequence(ByteIter begin_iter, 
+  ByteIter end_iter, FCGIType type)
 {
   // Verify that ByteIter iterates over units of data which are the size of
   // a byte.
@@ -87,15 +87,16 @@ fcgi_si::FCGIRequest::PartitionByteSequence(ByteIter begin_iter, ByteIter end_it
     PopulateHeader(&(*header_iter), type, request_identifier_.FCGI_id(),
       current_record_content_length, padding_length);
     // Update iovec information.
-    iovec_list.push_back({static_cast<void*>(&(*header_iter)), FCGI_HEADER_LEN});
+    iovec_list.push_back({static_cast<void*>(&(*header_iter)),
+      FCGI_HEADER_LEN});
     iovec_list.push_back({static_cast<void*>(&(*begin_iter)), 
       current_record_content_length});
     if(padding_length)
       iovec_list.push_back({static_cast<void*>(
         &(*noncontent_record_information.begin())), padding_length});
     
-    ssize_t total_record_bytes {FCGI_HEADER_LEN + current_record_content_length + 
-      padding_length};
+    ssize_t total_record_bytes {FCGI_HEADER_LEN + current_record_content_length 
+      + padding_length};
     // Update tracking variables.
     remaining_ssize_t -= total_record_bytes;
     number_to_write += total_record_bytes;
@@ -122,9 +123,10 @@ bool fcgi_si::FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
     partition_return {PartitionByteSequence(begin_iter, end_iter, 
       type)};
 
-    write_success = ScatterGatherWriteHelper(std::get<1>(partition_return).data(),
-      std::get<1>(partition_return).size(), std::get<2>(partition_return),
-        false);
+    write_success = ScatterGatherWriteHelper(
+      std::get<1>(partition_return).data(),
+      std::get<1>(partition_return).size(), 
+      std::get<2>(partition_return), false);
     begin_iter = std::get<3>(partition_return);
   }
   return write_success;
