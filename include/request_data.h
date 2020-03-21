@@ -17,6 +17,11 @@ public:
 
   using size = std::allocator_traits<std::allocator<uint8_t>>::size_type;
 
+  inline void set_connection_closed_by_interface()
+  {
+    connection_closed_by_interface_ = true;
+  }
+
   inline fcgi_si::RequestStatus get_status() const
   {
     return request_status_;

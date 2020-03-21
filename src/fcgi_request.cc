@@ -44,14 +44,17 @@
 //    c) The cases above may be viewed as occurring on the transition of 
 //       completed_ from false to true. This should only occur once for a 
 //       request and, once it has occurred, the request is no longer relevant
-//       its interface.
+//       to its interface.
 //    d) Removing a request should be performed by:
 //          interface_ptr_->RemoveRequest(request_identifier_);
 //       The call to RemoveRequest maintains invariants on interface state.
 //    e) When a request is completed and the connection of the request is
 //       still open, the request should conditionally add the descriptor of the
 //       connection to application_closure_request_set_ as per the value of
-//       close_connection_.
+//       close_connection_. In other words, application_closure_request_set_
+//       is modified if: 
+//          close_connection_ && 
+//          !(request_data_ptr_->connection_closed_by_interface_)
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
 //       must check if its interface has been destroyed. This is done by
@@ -229,7 +232,8 @@ fcgi_si::FCGIRequest::~FCGIRequest()
       try 
       {
         interface_ptr_->RemoveRequest(request_identifier_);
-        if(close_connection_)
+        if(close_connection_ 
+           && !(request_data_ptr_->connection_closed_by_interface_))
         {
           interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());

@@ -21,7 +21,7 @@ namespace fcgi_si {
 //
 //
 class FCGIServerInterface {
-public:
+ public:
   std::vector<FCGIRequest> AcceptRequests();
 
   inline int connection_count() const
@@ -51,9 +51,11 @@ public:
 
   ~FCGIServerInterface();
 
-private:
+ private:
   friend class fcgi_si::FCGIRequest;
   friend class fcgi_si::RecordStatus;
+
+  // HELPER FUNCTIONS
 
   // AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation. When a connection is accepted,
@@ -237,6 +239,8 @@ private:
 
   bool UnassignedRequestCleanup(int connection);
 
+  // DATA MEMBERS
+
   // Configuration parameters:
     // The default application exit status that will be sent when requests
     // are rejected by the interface without involvement of the application.
@@ -252,21 +256,21 @@ private:
   // The state of the application-set overload flag.
   bool application_overload_ {false};
 
-  // This map takes the file descriptor of the connection and returns the
-  // RecordStatus object which summarizes the current state of data
-  // transmission over the socket.
+  // This map takes the file descriptor of the connection and accesses the
+  // RecordStatus object which summarizes the current state of record receipt
+  // from the client which initiated the connection. Per the FastCGI protocol,
+  // information from the client is a sequence of complete FastCGI records.
   std::map<int, RecordStatus> record_status_map_;
 
-  // A set for connections which were found to have been closed by the peer
-  // but which could not be closed immediately as assigned requests were
-  // still present.
+  // A set for connections which were found to have been closed by the peer.
+  // Connection closure occurs in a cleanup step.
   std::set<int> connections_found_closed_set_;
 
   // Static state used by FCGIRequest objects to check if the interface with
   // which they are associated is alive. The mutex is also used for general
   // synchronization among request objects and between request objects and
-  // the interface. interface_identifier_ == 0 if no interface object currently
-  // is in a valid state.
+  // the interface. interface_identifier_ == 0 if no interface object is
+  // currently in a valid state.
   static std::mutex interface_state_mutex_;
   static unsigned long interface_identifier_;
   static unsigned long previous_interface_identifier_;
@@ -299,6 +303,9 @@ private:
   // connection socket descriptor value and the FCGI request number.
   std::map<RequestIdentifier, RequestData> request_map_;
 
+  // A flag which indicates that the interface has become corrupt. Ideally,
+  // this flag would only be set due to underlying system errors and not
+  // because of bugs.
   bool bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////

@@ -394,6 +394,8 @@ fcgi_si::FCGIServerInterface::
 AcceptRequests()
 {
   std::vector<fcgi_si::FCGIRequest> requests {};
+  
+  // CLEANUP
 
   // Process connections which were found to have been closed by the peer
   // and connections which were requested to be closed through FCGIRequest
@@ -467,6 +469,8 @@ AcceptRequests()
     }
   } // RELEASE interface_state_mutex_.
 
+  // DESCRIPTOR MONITORING
+
   // Construct descriptor set to wait on for select.
   fd_set read_set;
   FD_ZERO(&read_set);
@@ -479,7 +483,8 @@ AcceptRequests()
   if(map_reverse_iter != record_status_map_.rend())
   {
     number_for_select = (map_reverse_iter->first) + 1; // Use (highest fd) + 1.
-    for(; map_reverse_iter != record_status_map_.rend(); ++map_reverse_iter)
+    for(/*no-op*/; map_reverse_iter != record_status_map_.rend();
+      ++map_reverse_iter)
       FD_SET(map_reverse_iter->first, &read_set);
   }
 
@@ -616,7 +621,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
             bool close_connection =
               !(record_status.get_local_content()[
                   fcgi_si::kBeginRequestFlagsIndex]
-                && fcgi_si::FCGI_KEEP_CONN);
+                & fcgi_si::FCGI_KEEP_CONN);
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock
               {FCGIServerInterface::interface_state_mutex_};
@@ -717,25 +722,14 @@ RemoveConnectionFromSharedState(int connection)
 
 }
 
-void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
+void fcgi_si::FCGIServerInterface::RemoveRequest(
+  std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
 {
   try
   {
     std::map<RequestIdentifier, RequestData>::size_type erase_return
-      {request_map_.erase(request_id)};
-    if(erase_return)
-    {
-      // Use a pointer instead of a non-constant reference to conditionally 
-      // modify the request count associated with request_id.descriptor().
-      int* request_count_ptr {&request_count_map_.at(request_id.descriptor())};
-      if(*request_count_ptr == 0)
-        throw std::logic_error {"request_count_map_ would have obtained "
-          "a negative count."};
-      *request_count_ptr -= 1;
-    }
-    else
-      throw std::logic_error {"A request to erase an item of request_map_ "
-        "was made on a missing key."};
+      {request_map_.erase(request_map_iter)};
+    RemoveRequestHelper(erase_return, request_map_iter->first.descriptor());
   }
   catch(...)
   {
@@ -743,6 +737,40 @@ void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
     throw;
   }
 }
+
+void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
+{
+  try
+  {
+    std::map<RequestIdentifier, RequestData>::size_type erase_return
+      {request_map_.erase(request_id)};
+    RemoveRequestHelper(erase_return, request_id.descriptor());
+  }
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
+}
+
+void fcgi_si::FCGIServerInterface::
+RemoveRequestHelper(bool erase_return, int descriptor)
+{
+  if(erase_return)
+  {
+    // Use a pointer instead of a non-constant reference to conditionally 
+    // modify the request count associated with request_id.descriptor().
+    int* request_count_ptr {&request_count_map_.at(descriptor)};
+    if(*request_count_ptr == 0)
+      throw std::logic_error {"request_count_map_ would have obtained "
+        "a negative count."};
+    *request_count_ptr -= 1;
+  }
+  else
+    throw std::logic_error {"A request to erase an item of request_map_ "
+      "was made on a missing key."};
+}
+    
 
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
@@ -910,7 +938,7 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
 bool fcgi_si::FCGIServerInterface::
 UnassignedRequestCleanup(int connection)
 {
-  bool active_requests_present {false};
+  bool assigned_requests_present {false};
   for(auto request_map_iter =
         request_map_.lower_bound(RequestIdentifier {connection, 0});
       !(request_map_iter == request_map_.end()
@@ -920,7 +948,7 @@ UnassignedRequestCleanup(int connection)
     if(request_map_iter->second.get_status() ==
        fcgi_si::RequestStatus::kRequestAssigned)
     {
-      active_requests_present = true;
+      assigned_requests_present = true;
       ++request_map_iter;
     }
     else
@@ -931,5 +959,5 @@ UnassignedRequestCleanup(int connection)
       RemoveRequest(request_map_erase_iter);
     }
   }
-  return active_requests_present;
+  return assigned_requests_present;
 }
