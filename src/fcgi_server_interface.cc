@@ -42,7 +42,8 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
 : app_status_on_abort_ {app_status_on_abort},
   maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
-  role_ {role}
+  role_ {role},
+  socket_domain_ {}
 {
   // Checks that the arguments are within the domain.
   std::string error_message {};
@@ -719,59 +720,35 @@ RemoveConnectionFromSharedState(int connection)
   request_count_map_.erase(connection);
 
   close(connection);
-
-}
-
-void fcgi_si::FCGIServerInterface::RemoveRequest(
-  std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
-{
-  try
-  {
-    std::map<RequestIdentifier, RequestData>::size_type erase_return
-      {request_map_.erase(request_map_iter)};
-    RemoveRequestHelper(erase_return, request_map_iter->first.descriptor());
-  }
-  catch(...)
-  {
-    bad_interface_state_detected_ = true;
-    throw;
-  }
-}
-
-void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier request_id)
-{
-  try
-  {
-    std::map<RequestIdentifier, RequestData>::size_type erase_return
-      {request_map_.erase(request_id)};
-    RemoveRequestHelper(erase_return, request_id.descriptor());
-  }
-  catch(...)
-  {
-    bad_interface_state_detected_ = true;
-    throw;
-  }
 }
 
 void fcgi_si::FCGIServerInterface::
-RemoveRequestHelper(bool erase_return, int descriptor)
+RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
 {
-  if(erase_return)
+  try
   {
+    if(iter == request_map_.end())
+      throw std::logic_error {"A request to erase an item of request_map_ "
+      "was made on a missing key."};
+
     // Use a pointer instead of a non-constant reference to conditionally 
     // modify the request count associated with request_id.descriptor().
-    int* request_count_ptr {&request_count_map_.at(descriptor)};
+    int* request_count_ptr {&request_count_map_.at(
+      iter->first.descriptor())};
     if(*request_count_ptr == 0)
       throw std::logic_error {"request_count_map_ would have obtained "
         "a negative count."};
     *request_count_ptr -= 1;
+
+    request_map_.erase(iter);
   }
-  else
-    throw std::logic_error {"A request to erase an item of request_map_ "
-      "was made on a missing key."};
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
 }
     
-
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                    uint8_t protocol_status, int32_t app_status)

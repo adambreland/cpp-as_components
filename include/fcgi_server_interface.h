@@ -193,22 +193,101 @@ class FCGIServerInterface {
   RequestIdentifier ProcessCompleteRecord(int connection,
     RecordStatus* record_status_ptr);
 
+  // Attempts to remove the descriptor given by connection from
+  // record_status_map_ and write_mutex_map_ while conditionally updating
+  // dummy_descriptor_set_.
+  //
+  // Parameters:
+  // connection: The connected socket descriptor to be removed.
+  //
+  // Preconditions:  
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) A call may cause program termination if an exception occurs which could
+  //    result in a file descriptor leak or spurious closure by the interface.
+  // 2) May throw exeptions derived from std::exception.
+  // 3) In the event of a throw:
+  //    a) One of the following is true:
+  //       1) connection was removed from both record_status_map_ and
+  //          write_mutex_map_ and close(connection) was called.
+  //       2) connection remains in both record_status_map_ and write_mutex_map_
+  //          and close(connection) was not called.
+  //    b) It must be assumed that the interface is corrupted and should be
+  //       destroyed.
+  //    c) bad_interface_state_detected_ == true
+  //
+  // Effects:
+  // 1) Requests in request_map_ which were associated with connection and
+  //    which were not assigned were removed from request_map_.
+  // 2) Requests in request_map_ which were associated with connection and
+  //    which were assigned had the connection_closed_by_interface_ flag of
+  //    their RequestData_ object set.
+  // 3) If no assigned requests were present, the connection was closed.
+  // 4) If assigned requests were present:
+  //    a) The descriptor was added to dummy_descriptor_set_.
+  //    b) The connected socket associated with the descriptor was closed.
+  //    c) The descriptor is associated with the file description of 
+  //       FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
+  //       will no be reused until properly processed as a member of 
+  //       dummy_desriptor_set_.
+  void RemoveConnection(int connection);
+
   void RemoveConnectionFromSharedState(int connection);
+
+  // Attemps to remove the request pointed to by request_map_iter from
+  // request_map_ while also updating request_count_map_.
+  //
+  // Parameters:
+  // request_map_iter: An iterator which points to the 
+  //                   std::pair<RequestIdentifier, RequestData> object of a
+  //                   request in request_map_ or to request_map_.end().
+  // 
+  // Preconditions:
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) Throws an exception derived from std::exception if:
+  //    a) request_map_iter == request_map_.end()
+  //    b) The request count for the descriptor of the request could not
+  //       be decremented.
+  // 2) After an exception throw:
+  //    a) bad_interface_state_detected_ == true.
+  //    b) request_map_ and request_count_map_ are unchanged.
+  //    b) It must be assumed that the interface is corrupt and should be
+  //       destroyed.
+  //
+  // Effects:
+  // 1) If request_id was a key to an item of request_map_, the item was
+  //    removed from request_map_ and
+  //    request_count_map_[request_id.descriptor()] was decremented.
+  inline void fcgi_si::FCGIServerInterface::RemoveRequest(
+    std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
+  {
+    RemoveRequestHelper(request_map_iter);
+  }
 
   // Attemps to remove the request given by request_id from request_map_ while
   // also updating request_count_map_.
   //
-  // Requirements: none
+  // Parameters:
+  // request_id: The key to request_map_ for the request. This key implicitly
+  //             holds the value of the connected socket descriptor of the
+  //             request.
+  //
+  // Preconditions:
+  // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Exceptions:
-  // 1) May throw an exception derived from std::exception if logic errors in
-  //    interface state are detected. After a throw:
+  // 1) Throws an exception derived from std::exception if:
+  //    a) No request was present in request_map_ for request_id.
+  //    b) The request count for the descriptor of the request could not
+  //       be decremented.
+  // 2) After an exception throw:
   //    a) bad_interface_state_detected_ == true.
+  //    b) request_map_ and request_count_map_ are unchanged.
   //    b) It must be assumed that the interface is corrupt and should be
   //       destroyed.
-  //
-  // Synchronization:
-  // 1) interface_state_mutex_ must be held prior to calling.
   //
   // Friends:
   // 1) Depended on by FCGIRequest to safely remove an item from request_map_.
@@ -217,16 +296,67 @@ class FCGIServerInterface {
   // 1) If request_id was a key to an item of request_map_, the item was
   //    removed from request_map_ and
   //    request_count_map_[request_id.descriptor()] was decremented.
-  //    Otherwise, interface state was not changed.
-  void RemoveRequest(RequestIdentifier request_id);
-
-  inline void
-  RemoveRequest(std::map<RequestIdentifier,
-    RequestData>::iterator request_map_iter)
+  inline void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier
+    request_id)
   {
-    request_count_map_[request_map_iter->first.descriptor()]--;
-    request_map_.erase(request_map_iter);
+    std::map<RequestIdentifier, RequestData>::iterator find_return 
+      {request_map_.find(request_id)};
+    RemoveRequestHelper(find_return);
   }
+
+  // A helper function for the overloads of RemoveRequest. It checks
+  // iter against request_map_.end() and attempts to decrement the request
+  // count on descriptor.
+  //
+  // Parameters:
+  // iter:       An iterator the request or to request_map_.end() is the
+  //             request is not in request_map_.
+  //
+  // Preconditions:
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) Throws an exception derived from std::exception if:
+  //    a) No request was present in request_map_ for request_id.
+  //    b) The request count for the descriptor of the request could not
+  //       be decremented.
+  // 2) After an exception throw:
+  //    a) bad_interface_state_detected_ == true.
+  //    b) request_map_ and request_count_map_ are unchanged.
+  //    b) It must be assumed that the interface is corrupt and should be
+  //       destroyed.
+  //
+  // Effects:
+  // 1) If request_id was a key to an item of request_map_, the item was
+  //    removed from request_map_ and
+  //    request_count_map_[request_id.descriptor()] was decremented.
+  void RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator 
+    iter);
+
+  // Parameters:
+  // connection: the value of the connected socket descriptor for which
+  //             requests will be removed.
+  //
+  // Preconditions:
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) In the event of a throw:
+  //    a) It must be assumed that the interface is corrupt and should
+  //       be destroyed.
+  //    b) It is indeterminate if requests were modified or deleted.
+  //    c) bad_interface_state_detected_ == true
+  // 
+  // Effects:
+  // 1) Requests associated with connection which were assigned
+  //    had the connection_closed_by_interface_ flag of their RequestData
+  //    object set.
+  // 2) Requests associated with connection which were not assigned were
+  //    removed from request_map_.
+  // 3) Returns true if requests associated with connection were present and
+  //    assigned. Returns false otherwise.
+  bool RequestCleanupDuringConnectionClosure(int connection);
 
   bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
     uint8_t protocol_status, int32_t app_status);
@@ -260,11 +390,13 @@ class FCGIServerInterface {
   // RecordStatus object which summarizes the current state of record receipt
   // from the client which initiated the connection. Per the FastCGI protocol,
   // information from the client is a sequence of complete FastCGI records.
-  std::map<int, RecordStatus> record_status_map_;
+  std::map<int, RecordStatus> record_status_map_ {};
 
   // A set for connections which were found to have been closed by the peer.
   // Connection closure occurs in a cleanup step.
-  std::set<int> connections_found_closed_set_;
+  std::set<int> connections_found_closed_set_ {};
+
+  std::set<int> dummy_descriptor_set_ {};
 
   // Static state used by FCGIRequest objects to check if the interface with
   // which they are associated is alive. The mutex is also used for general
@@ -283,7 +415,7 @@ class FCGIServerInterface {
   //
   // (A unique_ptr was used as using std::mutex directly results in
   // compiler errors.)
-  std::map<int, std::unique_ptr<std::mutex>> write_mutex_map_;
+  std::map<int, std::unique_ptr<std::mutex>> write_mutex_map_ {};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 
@@ -292,16 +424,16 @@ class FCGIServerInterface {
   // FCGI_BEGIN_REQUEST record of a request that the connection used for the
   // request be closed after request service. This status flag allows
   // for an orderly closure of the connection by the interface thread.
-  std::set<int> application_closure_request_set_;
+  std::set<int> application_closure_request_set_ {};
 
   // A map to retrieve the total number of requests associated with a
   // connection.
-  std::map<int, int> request_count_map_;
+  std::map<int, int> request_count_map_ {};
 
   // A repository for incomplete request data and a marker for
   // assigned requests. The RequestIdentifier is the pair defined by the
   // connection socket descriptor value and the FCGI request number.
-  std::map<RequestIdentifier, RequestData> request_map_;
+  std::map<RequestIdentifier, RequestData> request_map_ {};
 
   // A flag which indicates that the interface has become corrupt. Ideally,
   // this flag would only be set due to underlying system errors and not
