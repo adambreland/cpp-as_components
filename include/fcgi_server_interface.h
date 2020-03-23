@@ -439,7 +439,8 @@ class FCGIServerInterface {
   //
   // (A unique_ptr was used as using std::mutex directly results in
   // compiler errors.)
-  std::map<int, std::unique_ptr<std::mutex>> write_mutex_map_ {};
+  std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>> 
+    write_mutex_map_ {};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 

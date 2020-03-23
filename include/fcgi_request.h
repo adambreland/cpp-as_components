@@ -80,10 +80,15 @@ class FCGIRequest {
   // Preconditions: none.
   //
   // Exceptions:
-  // 1) A call may throw exceptions derived from std::exception. See Effects.
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) If an exception was thrown:
+  //    a) No conclusions may be drawn regarding the transmission of terminal
+  //       records or the state of the request object.
+  //    b) A non-recoverable error must be assumed. The request should be
+  //       destroyed.
   //
   // Effects:
-  // 1) True was returned.
+  // 1) If the call returned true.
   //    a) Terminal empty records for the FCGI_STDOUT and FCGI_STDERR streams
   //       were sent. The records close these streams according to the
   //       FastCGI protocol. In addition, the client was informed that the
@@ -92,19 +97,14 @@ class FCGIRequest {
   //       of app_status.
   //    b) The request was completed. Calls to Complete, Write, and WriteError
   //       will have no effect.
-  // 2) False was returned.
+  // 2) If the call returned false.
   //    a) If the request had not been completed at the time of the call:
   //       1) It was discovered that the connection to the client is closed.
   //          No further action is needed for this request.
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
   //    b) If the request had been completed at the time of the call, the call
-  //       has no effect.
-  // 3) An exception was thrown:
-  //    a) No conclusions may be drawn regarding the transmission of terminal
-  //       records or the state of the request object.
-  //    b) A non-recoverable error must be assumed. The request should be
-  //       destroyed.
+  //       had no effect.
   bool Complete(int32_t app_status);
 
   inline bool get_completion_status() const noexcept
@@ -241,7 +241,7 @@ class FCGIRequest {
   //    for the RequestData object given by *request_data_ptr.
   FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
     FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
-    std::mutex* write_mutex_ptr);
+    std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr);
 
   // Checks if the interface associated with the request is in a valid state for
   // writing. This member function is designed to be called immediately after
@@ -301,7 +301,13 @@ class FCGIRequest {
   //    is held by the caller. 
   //
   // Exceptions:
-  // 1) Exceptions derived from std::exception may be thrown. See Effects.
+  // 1) Exceptions derived from std::exception may be thrown.
+  // 2) If an exception was thrown:
+  //    a) No conclusions may be drawn about what part, if any, of the message
+  //       was sent.
+  //    b) A non-recoverable error must be assumed. The request should be
+  //       destroyed.
+  //    c) Request completion may or may not have occurred.
   //
   // Synchronization:
   // 1) interface_state_mutex_ may be acquired depending on the value of
@@ -317,11 +323,6 @@ class FCGIRequest {
   //       destroyed.
   //    b) completed_ == true
   //    c) The request was removed from the interface.
-  // 3) An exception was thrown:
-  //    a) No conclusions may be drawn about what part, if any, of the message
-  //       was sent.
-  //    b) A non-recoverable error must be assumed. The request should be
-  //       destroyed.
   bool ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
@@ -359,6 +360,7 @@ class FCGIRequest {
   bool completed_;
 
   std::mutex* write_mutex_ptr_;
+  bool* bad_connection_state_ptr_;
 };
 
 } // namespace fcgi_si

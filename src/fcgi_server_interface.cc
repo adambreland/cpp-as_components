@@ -217,8 +217,8 @@ fcgi_si::FCGIServerInterface::~FCGIServerInterface()
     for(auto write_mutex_iter {write_mutex_map_.begin()};
         write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
     {
-      write_mutex_iter->second->lock();
-      write_mutex_iter->second->unlock();
+      write_mutex_iter->second.first->lock();
+      write_mutex_iter->second.first->unlock();
     }
 
     // Close all file descriptors for active sockets.
@@ -346,8 +346,11 @@ AcceptConnection()
   // any changes if an exception is caught. (Strong exception guarantee.)
   std::pair<std::map<int, RecordStatus>::iterator, bool>
     record_status_map_emplace_return {{}, {false}};
-  std::pair<std::map<int, std::unique_ptr<std::mutex>>::iterator, bool>
-    write_mutex_map_emplace_return {{}, {false}};
+  std::pair<
+    std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator,
+    bool
+  >
+    write_mutex_map_insert_return {{}, {false}};
   std::pair<std::map<int, int>::iterator, bool>
     request_count_map_emplace_return {{}, {false}};
   // ACQUIRE interface_state_mutex_.
@@ -358,15 +361,16 @@ AcceptConnection()
     record_status_map_emplace_return = record_status_map_.emplace(
       new_socket_descriptor, RecordStatus {this});
 
-    std::unique_ptr<std::mutex> new_mutex_manager {new std::mutex};
-    write_mutex_map_emplace_return = write_mutex_map_.emplace(
-        new_socket_descriptor, std::move(new_mutex_manager));
+    std::unique_ptr<std::mutex> new_mutex_manager {new std::mutex {}};
+    write_mutex_map_insert_return = write_mutex_map_.insert(
+      {new_socket_descriptor, std::pair<std::unique_ptr<std::mutex>, bool> 
+        {std::move(new_mutex_manager), false}});
 
     request_count_map_emplace_return = request_count_map_.emplace(
         new_socket_descriptor, 0);
 
     if(!(record_status_map_emplace_return.second
-         && write_mutex_map_emplace_return.second
+         && write_mutex_map_insert_return.second
          && request_count_map_emplace_return.second))
       throw std::logic_error {ERROR_STRING("Socket descriptor emplacement "
         "failed due to duplication.")};
@@ -378,8 +382,8 @@ AcceptConnection()
     // iterator is valid and the socket descriptor must be removed from the map.
     if(record_status_map_emplace_return.second)
       record_status_map_.erase(record_status_map_emplace_return.first);
-    if(write_mutex_map_emplace_return.second)
-      write_mutex_map_.erase(write_mutex_map_emplace_return.first);
+    if(write_mutex_map_insert_return.second)
+      write_mutex_map_.erase(write_mutex_map_insert_return.first);
     if(request_count_map_emplace_return.second)
       request_count_map_.erase(request_count_map_emplace_return.first);
     close(new_socket_descriptor);
@@ -503,7 +507,11 @@ AcceptRequests()
         {it->second.Read(fd)};
       if(request_identifiers.size())
       {
-        std::mutex* write_mutex_ptr {write_mutex_map_.find(fd)->second.get()};
+        std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
+          write_mutex_map_iter {write_mutex_map_.find(fd)};
+        std::mutex* write_mutex_ptr 
+          {write_mutex_map_iter->second.first.get()};
+        bool* write_mutex_bad_state_ptr {&write_mutex_map_iter->second.second};
         // ACQUIRE interface_state_mutex_.
         std::lock_guard<std::mutex> interface_state_lock
           {FCGIServerInterface::interface_state_mutex_};
@@ -515,7 +523,7 @@ AcceptRequests()
           request_data_ptr = &(request_map_.find(request_id)->second);
           FCGIRequest request {request_id,
             FCGIServerInterface::interface_identifier_, this, request_data_ptr,
-            write_mutex_ptr};
+            write_mutex_ptr, write_mutex_bad_state_ptr};
           requests.push_back(std::move(request));
         }
       } // RELEASE interface_state_mutex_.
@@ -958,8 +966,15 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
 bool fcgi_si::FCGIServerInterface::
 SendRecord(int connection, const std::vector<uint8_t>& result)
 {
+  std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator it
+    {write_mutex_map_.find(connection)};
   // ACQUIRE the write mutex for the connection.
-  std::lock_guard<std::mutex> write_lock {*write_mutex_map_[connection]};
+  std::unique_lock<std::mutex> write_lock
+    {*(it->second.first)};
+  // Check if the connection is corrupt.
+  if(it->second.second)
+    throw std::runtime_error {ERROR_STRING("A connection from the "
+      "interface to the client was found which had a corrupted state.")};
 
   // Send record.
   size_t number_written =

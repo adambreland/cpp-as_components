@@ -113,7 +113,8 @@ fcgi_si::FCGIRequest::FCGIRequest(RequestIdentifier request_id,
   unsigned long interface_id,
   FCGIServerInterface* interface_ptr,
   RequestData* request_data_ptr,
-  std::mutex* write_mutex_ptr)
+  std::mutex* write_mutex_ptr,
+  bool* bad_connection_state_ptr)
 : associated_interface_id_   {interface_id},
   interface_ptr_             {interface_ptr},
   request_identifier_        {request_id},
@@ -125,7 +126,8 @@ fcgi_si::FCGIRequest::FCGIRequest(RequestIdentifier request_id,
   close_connection_          {request_data_ptr->close_connection_},
   was_aborted_               {false},
   completed_                 {false},
-  write_mutex_ptr_           {write_mutex_ptr}
+  write_mutex_ptr_           {write_mutex_ptr},
+  bad_connection_state_ptr_  {bad_connection_state_ptr}
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
      || write_mutex_ptr == nullptr)
@@ -157,7 +159,8 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   close_connection_          {request.close_connection_},
   was_aborted_               {request.was_aborted_},
   completed_                 {request.completed_},
-  write_mutex_ptr_           {request.write_mutex_ptr_}
+  write_mutex_ptr_           {request.write_mutex_ptr_},
+  bad_connection_state_ptr_  {request.bad_connection_state_ptr_}
 {
   request.associated_interface_id_ = 0;
   request.interface_ptr_ = nullptr;
@@ -169,6 +172,7 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.close_connection_ = false;
   request.completed_ = true;
   request.write_mutex_ptr_ = nullptr;
+  request.bad_connection_state_ptr_ = nullptr;
 }
 
 fcgi_si::FCGIRequest&
@@ -188,6 +192,7 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
     was_aborted_ = request.was_aborted_;
     completed_ = request.completed_;
     write_mutex_ptr_ = request.write_mutex_ptr_;
+    bad_connection_state_ptr_ = request.bad_connection_state_ptr_;
 
     request.associated_interface_id_ = 0;
     request.interface_ptr_ = nullptr;
@@ -201,6 +206,7 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
     request.was_aborted_ = false;
     request.completed_ = true;
     request.write_mutex_ptr_ = nullptr;
+    request.bad_connection_state_ptr_ = nullptr;
   }
   return *this;
 }
@@ -389,7 +395,7 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   // Check if the interface has been destroyed.
   if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
   {
-    completed_ = true;
+    completed_   = true;
     was_aborted_ = true;
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was destroyed before the request.")};
@@ -397,7 +403,7 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   // Check if the interface is in a bad state.
   if(interface_ptr_->bad_interface_state_detected_)
   {
-    completed_ = true;
+    completed_   = true;
     was_aborted_ = true;
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was in a bad state.")};
@@ -428,6 +434,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     if(!InterfaceStateCheckForWritingUponMutexAcquisition())
       return false;
   }
+  // interface_state_mutex_ held.
   
   std::size_t working_number_to_write {number_to_write};
   // write_lock has the following property in the loop below:
@@ -458,7 +465,12 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
 
     // Conditionally ACQUIRE *write_mutex_ptr_.
     if(!write_lock.owns_lock())
+    {
       write_lock.lock();
+      if(*bad_connection_state_ptr_)
+        throw std::runtime_error {ERROR_STRING("A connection from the "
+          "interface to the client was found which had a corrupted state.")};
+    }
     // *write_mutex_ptr_ is held.
 
     // Conditionally RELEASE interface_state_mutex_ to free the interface
@@ -500,6 +512,36 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           {
             if(errno != EINTR)
             {
+              // If some data was written and a throw will occur, the interface
+              // must be set to a bad state. However, this must be done under
+              // the protection of interface_state_mutex_. But, the mutex
+              // cannot be acquired if the write mutex is held. And, the write
+              // mutex cannot be released without indicating some error as
+              // another thread may hold interface_state_mutex_ to acquire the
+              // write mutex. If the write mutex was immediately acquired and
+              // data was written, that data would most likely be corrupt as a
+              // partial record was likely written here .The solution is to set
+              // the bad_connection_state flag of the write mutex pair before
+              // releasing the write mutex.
+              if(write_lock.owns_lock())
+              {
+                *bad_connection_state_ptr_ = true;
+                write_lock.unlock();
+                if(!interface_mutex_held)
+                {
+                  try
+                  {
+                    interface_state_lock.lock();
+                  }
+                  catch(...)
+                  {
+                    std::terminate();
+                  }
+                  if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+                    return false;
+                }
+                interface_ptr_->bad_interface_state_detected_ = true;
+              }
               std::error_code ec {errno, std::system_category()};
               throw std::system_error {ec, ERRNO_ERROR_STRING("select")};
             }
@@ -549,10 +591,35 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         return false;
       } 
       // An unrecoverable error was encountered during the write.
+      // *write_mutex_ptr_ is held.
       else
       {
-        // RELEASE *write_mutex_ptr_.
-        write_lock.unlock();
+        // The same situation applies here as above. Writing some data and
+        // throwing corrupts the connection.
+        //
+        // Conditionally RELEASE *write_mutex_ptr_.
+        if(working_number_to_write < number_to_write)
+        {
+          *bad_connection_state_ptr_ = true;
+          write_lock.unlock();
+          if(!interface_mutex_held)
+          {
+            try
+            {
+              interface_state_lock.lock();
+            }
+            catch(...)
+            {
+              std::terminate();
+            }
+            if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+              return false;
+          }
+          interface_ptr_->bad_interface_state_detected_ = true;
+        }
+        // Conditionally RELEASE *write_mutex_ptr_.
+        if(write_lock.owns_lock())
+          write_lock.unlock();
         std::error_code ec {errno, std::system_category()};
         throw std::system_error {ec, ERRNO_ERROR_STRING("write from a call to "
           "socket_functions::SocketWrite")};
