@@ -249,73 +249,31 @@ class FCGIRequest {
   //
   // Parameters: none.
   //
-  // Preconditions: see Synchronization.
-  //
-  // Synchronization requirements and discussion:
+  // Preconditions:
   // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception. After a throw, it 
   //    must be assumed that the request cannot be serviced and should be 
   //    destroyed.
+  // 2) If an exception was thrown:
+  //    a) The request cannot be serviced. The request was completed and should
+  //       be destroyed.
+  //    b) Either the interface of the request has been destroyed or
+  //       bad_interface_state_detected_ == true.
   //
   // Effects:
   // 1) If true was returned:
   //    a) The interface is in a valid state for writing. The write mutex of the
   //       request may be acquired. The file descriptor given by
   //       request_identifier.descriptor() is associated with a valid 
-  //       description.
+  //       description, i.e. it is associated with the connected socket of the
+  //       request.
   // 2) If false was returned:
   //    a) The connection was closed by the interface.
   //    b) The request was completed. completed_ and was_aborted_ were set.
   //    c) The request was removed from the interface.
-  // 3) If an exception was thrown:
-  //    a) The request cannot be serviced. The request was completed and should
-  //       be destroyed.
   bool InterfaceStateCheckForWritingUponMutexAcquisition();
-
-  // Determines a partition of the byte sequence defined by
-  // [begin_iter, end_iter) whose parts can be sent as the content of FastCGI
-  // records. Determines headers and scatter-gather write information.
-  //
-  // Parameters:
-  // begin_iter: An iterator which points to the first byte of the byte
-  //             sequence to be partitioned into records.
-  // end_iter:   An iterator to one-past-the-last byte of the byte sequence
-  //             to be partitioned.
-  // type:       The FastCGI record type of the records.
-  //
-  // Preconditions:
-  // 1) The range formed by [begin_iter, end_iter) must be a contiguous
-  //    sequence of byte-sized objects.
-  //
-  // Exceptions:
-  // 1) May throw exceptions derived from std::exception. In the case of
-  //    a throw, the call had no effect (strong exception guarantee).
-  //
-  // Effects:
-  // 1) Meaning of returned tuple elements:
-  //       Access: std::get<0>; Type: std::vector<uint8_t>; A vector of
-  //    bytes which holds information which is implicitly referenced in
-  //    the struct iovec instances returned by the call.
-  //       Access: std::get<1>; Type: std::vector<struct iovec>; A vector
-  //    of struct iovec instances. These instances hold the information
-  //    needed for a call to writev. References to bytes in [begin_iter,
-  //    end_iter) and the vector of bytes returned by the call are referenced
-  //    in these instances of struct iovec.
-  //       Access: std::get<2>; Type: std::size_t; The number of bytes that
-  //    a call to writev would write if all bytes referenced by the returned
-  //    array of struct iovec instances were written.
-  //       Access: std::get<3>; Type: ByteIter; If the range given by
-  //    [begin_iter, end_iter) could be completely encoded, this iterator is
-  //    equal to end_iter. If the range could not be completely encoded, this
-  //    iterator gives the range of bytes which could be. The next call
-  //    to PartitionByteSequence should use this iterator to initialize 
-  //    begin_iter.
-  template<typename ByteIter>
-  std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
-    ByteIter>
-  PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type);
 
   // Attempts to a perform a scatter-gather write on the active socket given
   // by fd.

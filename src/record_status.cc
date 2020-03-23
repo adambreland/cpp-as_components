@@ -61,7 +61,7 @@ fcgi_si::RecordStatus::Read(int connection)
   constexpr int kBufferSize {512};
   uint8_t read_buffer[kBufferSize];
 
-  // Return value to be potentially modified during processing.
+  // Return value to be modified during processing.
   std::vector<RequestIdentifier> request_identifiers {};
 
   // Read from the connection until it would block (no more data),
@@ -80,7 +80,7 @@ fcgi_si::RecordStatus::Read(int connection)
       {
         // Connection was closed. Discard any read data and update interface
         // state.
-        i_ptr_->ClosedConnectionFoundDuringAcceptRequests(connection);
+        i_ptr_->connections_found_closed_set_.insert(connection);
         return {};
       }
 

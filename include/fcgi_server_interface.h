@@ -108,23 +108,47 @@ class FCGIServerInterface {
     request_count_map_[request_id.descriptor()]++;
   }
 
-  // Called when a closed connection is found from a scope within a call
-  // to AcceptRequests().
-  //
+  // Iterates over the referenced containers of descriptors which are
+  // scheduled for closure and attempts to close the descriptors. This helper
+  // is intended to iterate over connections_found_closed_set_ and
+  // application_closure_request_set_.
+  // 
   // Parameters:
-  // connection: the socket that was found to have been closed by the peer.
+  // first_ptr, second_ptr:   Pointers to containers which contains connected
+  //                          socket descriptors.
+  // first_iter, second_iter: Iterators which point to the starting descriptors
+  //                          of *first_ptr and *second_ptr, respectively.
+  // first_end_iter:          A pointer to one-past-the-last element of
+  //                          *first_ptr which will be processed.
+  // second_end_iter:         A pointer to one-past-the-last element of
+  //                          *second_ptr which will be processed.
   //
+  // Preconditions:  
+  // 1) interface_state_mutex_ must be held prior to a call.
+  // 2) C::value_type is int.
+  // 3) C::iterator satsifies, at least, the requirements of 
+  //    LegacyForwardIterator.
+  //
+  // Exceptions:
+  // 1) A call may cause program termination if an exception occurs which could
+  //    result in a file descriptor leak or spurious closure by the interface.
+  // 2) May throw exceptions derived from std::exception.
+  // 3) In the event of a throw:
+  //    a) the interface is in a state which allows safe execution of the 
+  //       interface destructor (basic exception guarantee).
+  //    b) bad_interface_state_detected_ == true
   //
   // Effects:
-  // 1) Acquires and releases interface_state_mutex_.
-  // 2) a) Removes the connection from all maps with a domain equal to
-  //       the set of connections: record_status_map_, write_mutex_map_,
-  //       closure_request_map_, and request_count_map_.
-  //    b) Removes all of the associated requests from request_map_. Note that
-  //       FCGIRequest object methods are implemented to check for missing
-  //       RequestIdentifier values and missing connections. Absence indicates
-  //       that the connection was found to be closed by the interface.
-  void ClosedConnectionFoundDuringAcceptRequests(int connection);
+  // 1) Both of the referenced containers were emptied.
+  // 2) The connected sockets represented by the descriptors given by the union
+  //    of the containers were closed.
+  // 3) If a connection had assigned requests, the descriptor of the
+  //    connection was added to dummy_descriptor_set_ and the descriptor
+  //    was associated with the description of FCGI_LISTENSOCK_FILENO.
+  template <typename C>
+  void ConnectionClosureProcessing(C* first_ptr, typename C ::iterator 
+    first_iter, typename C ::iterator first_end_iter, C* second_ptr, 
+    typename C ::iterator second_iter, typename C ::iterator second_end_iter);
 
   // Examines the completed record associated with the connected socket
   // represented by connection and performs various actions according to
@@ -206,16 +230,20 @@ class FCGIServerInterface {
   // Exceptions:
   // 1) A call may cause program termination if an exception occurs which could
   //    result in a file descriptor leak or spurious closure by the interface.
-  // 2) May throw exeptions derived from std::exception.
+  // 2) A call may throw exceptions derived from std::exception.
   // 3) In the event of a throw:
-  //    a) One of the following is true:
+  //    a) The interface is left in a state which ensures the safe execution of
+  //       the interface destructor (basic exception guarantee). In
+  //       particular, one of the following is true:
   //       1) connection was removed from both record_status_map_ and
   //          write_mutex_map_ and close(connection) was called.
   //       2) connection remains in both record_status_map_ and write_mutex_map_
   //          and close(connection) was not called.
-  //    b) It must be assumed that the interface is corrupted and should be
+  //    b) It is indeterminate if the requests in request_map_ which were
+  //       associated with connection were removed or modified.
+  //    c) It must be assumed that the interface is corrupted and should be
   //       destroyed.
-  //    c) bad_interface_state_detected_ == true
+  //    d) bad_interface_state_detected_ == true
   //
   // Effects:
   // 1) Requests in request_map_ which were associated with connection and
@@ -232,8 +260,6 @@ class FCGIServerInterface {
   //       will no be reused until properly processed as a member of 
   //       dummy_desriptor_set_.
   void RemoveConnection(int connection);
-
-  void RemoveConnectionFromSharedState(int connection);
 
   // Attemps to remove the request pointed to by request_map_iter from
   // request_map_ while also updating request_count_map_.
@@ -261,7 +287,7 @@ class FCGIServerInterface {
   // 1) If request_id was a key to an item of request_map_, the item was
   //    removed from request_map_ and
   //    request_count_map_[request_id.descriptor()] was decremented.
-  inline void fcgi_si::FCGIServerInterface::RemoveRequest(
+  inline void RemoveRequest(
     std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
   {
     RemoveRequestHelper(request_map_iter);
@@ -296,7 +322,7 @@ class FCGIServerInterface {
   // 1) If request_id was a key to an item of request_map_, the item was
   //    removed from request_map_ and
   //    request_count_map_[request_id.descriptor()] was decremented.
-  inline void fcgi_si::FCGIServerInterface::RemoveRequest(RequestIdentifier
+  inline void RemoveRequest(RequestIdentifier
     request_id)
   {
     std::map<RequestIdentifier, RequestData>::iterator find_return 
@@ -366,8 +392,6 @@ class FCGIServerInterface {
   bool SendGetValuesResult(int connection, const RecordStatus& record_status);
 
   bool SendRecord(int connection, const std::vector<uint8_t>& result);
-
-  bool UnassignedRequestCleanup(int connection);
 
   // DATA MEMBERS
 
@@ -444,5 +468,7 @@ class FCGIServerInterface {
 };
 
 } // namespace fcgi_si.
+
+#include "include/fcgi_server_interface_templates.h"
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_

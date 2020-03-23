@@ -57,9 +57,13 @@
 //          !(request_data_ptr_->connection_closed_by_interface_)
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
-//       must check if its interface has been destroyed. This is done by
-//       comparing the value of FCGIServerInterface::interface_identifier_ to
-//       the value of associated_interface_id_.
+//       must check if:
+//       1) Its interface has been destroyed. This is done by comparing the 
+//          value of FCGIServerInterface::interface_identifier_ to the value of
+//          associated_interface_id_.
+//       2) Its interface is in a bad state. This is done after the check for
+//          interface destruction by checking if 
+//          bad_interface_state_detected_ == true.
 //    b) Any use of:
 //       1) The file descriptor of the connection (such as from
 //          request_id.descriptor()) in a method which requires that the
@@ -225,8 +229,9 @@ fcgi_si::FCGIRequest::~FCGIRequest()
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
-    // Check if the interface has not been destroyed.
-    if(FCGIServerInterface::interface_identifier_ == associated_interface_id_)
+    // Check if the interface has not been destroyed and is not in a bad state.
+    if((FCGIServerInterface::interface_identifier_ == associated_interface_id_)
+       && (interface_ptr_->bad_interface_state_detected_ == false))
     {
       // Try to remove the request from the interface.
       try 
@@ -241,8 +246,7 @@ fcgi_si::FCGIRequest::~FCGIRequest()
       }
       catch(...) 
       {
-        if(close_connection_)
-          interface_ptr_->bad_interface_state_detected_ = true;
+        interface_ptr_->bad_interface_state_detected_ = true;
       }
     }
   } // RELEASE interface_state_mutex_.
@@ -266,6 +270,14 @@ bool fcgi_si::FCGIRequest::AbortStatus()
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was destroyed before the request.")};
   }
+  // Check if the interface is in a bad state.
+  if(interface_ptr_->bad_interface_state_detected_)
+  {
+    completed_ = true;
+    was_aborted_ = true;
+    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
+      "with an FCGIRequest object was in a bad state.")};
+  }
   // Check if the connection has been closed by the interface.
   if(request_data_ptr_->connection_closed_by_interface_)
   {
@@ -281,6 +293,9 @@ bool fcgi_si::FCGIRequest::AbortStatus()
   return was_aborted_;
 } // RELEASE interface_state_mutex_
 
+// Synchronization:
+// 1) Acquires and releases interface_state_mutex_.
+//
 // Race condition discussion:
 // If interface_state_mutex_ is not held for the duration of the write, it is
 // possible that a race condition may occur. There are two steps to
@@ -376,9 +391,16 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   {
     completed_ = true;
     was_aborted_ = true;
-
     throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
       "with an FCGIRequest object was destroyed before the request.")};
+  }
+  // Check if the interface is in a bad state.
+  if(interface_ptr_->bad_interface_state_detected_)
+  {
+    completed_ = true;
+    was_aborted_ = true;
+    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
+      "with an FCGIRequest object was in a bad state.")};
   }
   // Check if the interface has closed the connection.
   if(request_data_ptr_->connection_closed_by_interface_)

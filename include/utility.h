@@ -38,86 +38,7 @@ namespace fcgi_si {
 // 1) Four bytes are written to the buffer pointed to by byte_iter. The
 //    byte sequence encodes length in the FastCGI name-value pair format.
 template<typename ByteIter>
-void EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
-{
-  // TODO Add template type property checking with static asserts.
-
-  // Set the leading bit to 1 to indicate that a four-byte sequence is
-  // present.
-  *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
-
-  for(char i {0}; i < 3; i++)
-  {
-    ++byte_iter;
-
-    *byte_iter = length >> (16 - (8*i));
-  }
-}
-
-// Determines and returns the length in bytes of a name or value when that
-// length was encoded using four bytes in the FastCGI name-value pair format.
-//
-// Parameters:
-// byte_iter: An iterator to the first byte of a four-byte sequence.
-//
-// Requires:
-// The four-byte sequence pointed to by byte_iter is the encoding
-// in the FastCGI name-value pair format of the length of another
-// byte sequence that requires a four-byte length encoding.
-//
-// Effects:
-// 1) The value returned is the number of bytes encoded in the four-byte
-//    sequence pointed to by byte_iter.
-template <typename ByteIter>
-uint32_t ExtractFourByteLength(ByteIter byte_iter)
-{
-  // TODO Add template type property checking with static_asserts.
-
-  // Mask out the leading 1 bit which must be present per the FastCGI
-  // name-value pair format. This bit does not encode length information.
-  // It indicates that the byte sequence has four elements instead of one.
-  uint32_t length {static_cast<uint32_t>(
-    static_cast<uint8_t>(*byte_iter) & 0x7fU)};
-  // Perform three shifts by 8 bits to extract all four bytes.
-  for(char i {0}; i < 3; i++)
-  {
-    length <<= 8;
-    ++byte_iter;
-
-    length += static_cast<uint8_t>(*byte_iter);
-  }
-  return length;
-}
-
-// Generates a FastCGI header and writes it to the indicated buffer. The values
-// of the arguments are encoded per the FastCGI record header binary format.
-//
-// Parameters:
-// byte_ptr:       A pointer to the first byte of the buffer which will hold
-//                 the header.
-// type:           The FastCGI type of the record described by the header.
-// FCGI_id:        The FastCGI request identifier of the record described by
-//                 the header.
-// content_length: The content length of the record described by the header.
-// padding_length: The padding length of the record described by the header.
-//
-// Requires:
-// 1) byte_ptr is not null.
-// 2) The buffer pointed to by byte_ptr must be able to hold at least
-//    FCGI_HEADER_LEN bytes.
-//
-// Exceptions: noexcept
-//
-// Effects:
-// 1) FCGI_HEADER_LEN bytes, starting at the byte pointed to by byte_ptr,
-//    are written. The written byte sequence is a FastCGI header which
-//    encodes the values passed to PopulateHeader. Two byte fields are given
-//    the same value for every header:
-//    a) The first byte is given the value FCGI_VERSION_1 which equals 1.
-//    b) The last byte, which is reserved by the FastCGI protocol, is zero.
-void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
-  std::uint16_t FCGI_id, std::uint16_t content_length,
-  std::uint8_t padding_length) noexcept;
+void EncodeFourByteLength(uint32_t length, ByteIter byte_iter);
 
 // Processes name-value pairs and returns a tuple containing information which
 // allows a byte sequence to be written via a scatter-gather I/O system call.
@@ -214,344 +135,102 @@ template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
   std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
-  FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
-{
-  if(pair_iter == end)
-    return {true, 0, {}, {}, 0, end};
+  FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
 
-  const std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
-  const ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
-  const uint16_t aligned_record_MAX {fcgi_si::kMaxRecordContentByteLength - 7};
-  // Reduce by 7 to ensure that the length of a "full" record is a
-  // multiple of 8.
-
-  // Determine the initial values of the break variables.
-
-  long remaining_iovec_count {fcgi_si::iovec_MAX};
-  // Use the current Linux default if information cannot be obtained.
-  if(remaining_iovec_count == -1)
-    remaining_iovec_count = 1024;
-  remaining_iovec_count = std::min<long>(remaining_iovec_count, 
-    std::numeric_limits<int>::max());
-  // Reduce by one to ensure that a struct for padding is always available.
-  remaining_iovec_count--;
- 
-  // Reduce by FCGI_HEADER_LEN - 1 = 7 to ensure that padding can always be
-  // added.
-  std::size_t remaining_byte_count {ssize_t_MAX - 7};
-
-  // Lambda functions to simplify the loops below.
-  auto size_iter = [&](int i)->std::size_t
-  {
-    if(i == 0)
-      return pair_iter->first.size();
-    else
-      return pair_iter->second.size();
-  };
-
-  auto data_iter = [&](int i)->const uint8_t*
-  {
-    if(i == 0)
-      return static_cast<const uint8_t*>(static_cast<const void*>(
-        pair_iter->first.data()));
-    else
-      return static_cast<const uint8_t*>(static_cast<const void*>(
-        pair_iter->second.data()));
-  };
-  // A binary sequence of headers and length information encoded in the
-  // FastCGI name-value pair format is created and returned to
-  // the caller. A pair which holds an index into iovec_list and an index into
-  // local_buffers is stored whenever a record
-  // is referred to by an iovec_list element. This pair allows pointer values
-  // to be determined once the memory allocated for local_buffers
-  // will no longer change.
-  std::vector<std::uint8_t> local_buffers {};
-  std::vector<std::pair<std::vector<iovec>::size_type,
-    std::vector<uint8_t>::size_type>> index_pairs {};
-  // iovec_list will usually hold three instances of iovec for every
-  // name-value pair. The first instance describes name and value length
-  // information. It points to a range of bytes in local_buffers.
-  // The second and third instances hold name and value information,
-  // repsectively. They point to the buffers of containers from a source
-  // std::pair object when such buffers exist.
-  std::vector<iovec> iovec_list {};
-
-  std::size_t number_to_write {0};
-  std::size_t previous_content_length {0};
-  std::vector<uint8_t>::size_type previous_header_offset {0};
-  std::size_t nv_pair_bytes_placed {0};
-  bool incomplete_nv_write {false};
-  bool name_or_value_too_big {false};
-  bool overflow_detected {false};
-
-  for(/*no-op*/; pair_iter != end; ++pair_iter)
-  {
-    if(!remaining_iovec_count || !remaining_byte_count)
-      break;
-    // Variables for name and value information.
-    std::size_t size_array[3] = {};
-    // sums starts at zero and holds partial sums of size_array.
-    // It is used to check for potential numeric overflow.
-    std::size_t sums[3] = {};
-    std::vector<uint8_t>::size_type name_value_buffer_offset
-      {local_buffers.size()};
-    const std::uint8_t* data_array[2];
-    // Reset for a new pair.
-    nv_pair_bytes_placed = offset;
-    // Collect information about the name and value byte sequences.
-    for(int i {1}; i < 3; ++i)
-    {
-      size_array[i] = size_iter(i-1);
-      if(size_array[i])
-        data_array[i-1] = data_iter(i-1);
-      else
-        data_array[i-1] = nullptr;
-      if(size_array[i] <= fcgi_si::kNameValuePairSingleByteLength)
-      {
-        // A safe narrowing of size_array[i] from std::size_t to std::uint8_t.
-        local_buffers.push_back(size_array[i]);
-        size_array[0] += 1;
-      }
-      else if(size_array[i] <= fcgi_si::kNameValuePairFourByteLength)
-      {
-        // A safe narrowing of size from std::size_t to a representation of
-        // a subset of the range of uint32_t.
-        EncodeFourByteLength(size_array[i],
-          std::back_inserter(local_buffers));
-        size_array[0] += 4;
-      }
-      else
-      {
-        name_or_value_too_big = true;
-        break;
-      }
-    }
-    sums[1] = size_array[0];
-    // Check if processing must stop, including because of an overflow from
-    // name and value lengths.
-    if(name_or_value_too_big || size_array[1] > (size_t_MAX - sums[1])
-       || (sums[2] = size_array[1] + sums[1],
-           size_array[2] > (size_t_MAX - sums[2])))
-    {
-      if(size_array[0])
-      {
-        local_buffers.erase(local_buffers.end() - size_array[0],
-          local_buffers.end());
-      }
-      if(!name_or_value_too_big)
-        overflow_detected = true;
-      break; // Stop iterating over pairs.
-    }
-    else // We can proceed normally to iteratively produce FastCGI records.
-    {
-      std::size_t total_length {size_array[2] + sums[2]};
-      std::size_t remaining_nv_bytes_to_place {total_length
-        - nv_pair_bytes_placed};
-
-      auto determine_index = [&]()->std::size_t
-      {
-        int i {0};
-        for(/*no-op*/; i < 2; i++)
-          if(nv_pair_bytes_placed < sums[i+1])
-            return i;
-        return i;
-      };
-
-      bool padding_limit_reached {false};
-      // Start loop which produces records.
-      while(remaining_nv_bytes_to_place && !padding_limit_reached)
-      {
-        if(!previous_content_length) // Start a new record.
-        {
-          // Need enough iovec structs for a header, data, and padding.
-          // Need enough bytes for a header and some data. An iovec struct
-          // and fcgi_si::FCGI_HEADER_LEN - 1 bytes were reserved.
-          if((remaining_iovec_count >= 2) &&
-             (remaining_byte_count >= (fcgi_si::FCGI_HEADER_LEN + 1)))
-          {
-            previous_header_offset = local_buffers.size();
-            index_pairs.push_back({iovec_list.size(), previous_header_offset});
-            iovec_list.push_back({nullptr, fcgi_si::FCGI_HEADER_LEN});
-            local_buffers.insert(local_buffers.end(), fcgi_si::FCGI_HEADER_LEN, 0);
-            fcgi_si::PopulateHeader(local_buffers.data() + previous_header_offset,
-              type, FCGI_id, 0, 0);
-            number_to_write += fcgi_si::FCGI_HEADER_LEN;
-            remaining_byte_count -= fcgi_si::FCGI_HEADER_LEN;
-            remaining_iovec_count--;
-          }
-          else
-          {
-            incomplete_nv_write = true; // As remaining_nv_bytes_to_place != 0.
-            break;
-          }
-        }
-        // Start loop over the three potential buffers.
-        std::size_t index {determine_index()};
-        for(/*no-op*/; index < 3; index++)
-        {
-          // Variables which determine how much we can write.
-          std::size_t remaining_content_capacity
-            {aligned_record_MAX - previous_content_length};
-          std::size_t current_limit
-            {std::min(remaining_byte_count, remaining_content_capacity)};
-          std::size_t number_to_place
-            {std::min(remaining_nv_bytes_to_place, current_limit)};
-          // Determine how many we can write for a given buffer.
-          std::size_t local_remaining
-            {size_array[index] - (nv_pair_bytes_placed - sums[index])};
-          std::size_t local_number_to_place
-            {std::min(local_remaining, number_to_place)};
-          // Write the determined amount.
-          if(index == 0) // Special processing for name-value length info.
-          {
-            iovec_list.push_back({nullptr, local_number_to_place});
-            // If we are in the name value length information byte sequence,
-            // i.e. index == 0, then nv_pair_bytes_placed acts as an offset
-            // into a subsequence of these bytes.
-            index_pairs.push_back({iovec_list.size() - 1,
-              name_value_buffer_offset + nv_pair_bytes_placed});
-            remaining_iovec_count--;
-          }
-          else // Adding an iovec structure for name or value byte sequence.
-          {
-            // Either of size_array[1] or size_array[2] may be zero. For
-            // example, we may add a iovec instance for size_array[0]
-            // that specifies an empty name or value.
-            if(local_number_to_place)
-            {
-              struct iovec new_iovec {
-                const_cast<uint8_t*>(data_array[index-1])
-                  + (size_array[index] - local_remaining),
-                local_number_to_place
-              };
-              iovec_list.push_back(new_iovec);
-              remaining_iovec_count--;
-            }
-          }
-          // Update tracking variables.
-          nv_pair_bytes_placed += local_number_to_place;
-          remaining_nv_bytes_to_place -= local_number_to_place;
-          number_to_write += local_number_to_place;
-          remaining_byte_count -= local_number_to_place;
-          // Update record information.
-          previous_content_length += local_number_to_place;
-          local_buffers[previous_header_offset
-            + fcgi_si::kHeaderContentLengthB1Index]
-            = static_cast<uint8_t>(previous_content_length >> 8);
-          local_buffers[previous_header_offset
-            + fcgi_si::kHeaderContentLengthB0Index]
-            = static_cast<uint8_t>(previous_content_length);
-          // Check if a limit was reached. Need at least an iovec struct for
-          // padding. Need enough bytes for padding. These limits were
-          // reserved in the initialization of remaining_iovec_count and
-          // remaining_byte_count.
-          if(!remaining_iovec_count || !remaining_byte_count)
-          {
-            padding_limit_reached = true;
-            if(nv_pair_bytes_placed < total_length)
-              incomplete_nv_write = true;
-            break;
-          }
-          // Check if the record was finished.
-          if(previous_content_length == aligned_record_MAX)
-          {
-            previous_content_length = 0;
-            break; // Need to start a new record.
-          }
-        }
-      }
-    }
-    offset = 0;
-    if(incomplete_nv_write)
-      break;
-  }
-  // Check if padding is needed.
-  // (Safe narrowing.)
-  uint8_t pad_mod(previous_content_length % fcgi_si::FCGI_HEADER_LEN);
-  if(pad_mod)
-  {
-    uint8_t pad_mod_complement(fcgi_si::FCGI_HEADER_LEN - pad_mod);
-      // Safe narrowing.
-    index_pairs.push_back({iovec_list.size(), local_buffers.size()});
-    iovec_list.push_back({nullptr, pad_mod_complement});
-    local_buffers.insert(local_buffers.end(), pad_mod_complement, 0);
-    local_buffers[previous_header_offset + fcgi_si::kHeaderPaddingLengthIndex]
-      = pad_mod_complement;
-    number_to_write += pad_mod_complement;
-  }
-  // Since the memory of local_buffers is stable, fill in
-  // iov_base pointers from local_buffers.data().
-  for(auto pair : index_pairs)
-    iovec_list[pair.first].iov_base =
-      static_cast<void*>(local_buffers.data() + pair.second);
-  // Check for rejection based on a limit or name or value that was too big.
-  return std::make_tuple(
-    !name_or_value_too_big && !overflow_detected,
-    number_to_write,
-    std::move(iovec_list),
-    std::move(local_buffers),
-    ((incomplete_nv_write) ? nv_pair_bytes_placed : 0),
-    pair_iter
-  );
-}
-
-//    A utility function used for testing. ExtractContent reads a file which
-// contains a sequence of FastCGI records. These records are assumed to be
-// from a single, complete record sequence. (Multiple records may be present in
-// a sequence when it is associated with a stream record type from the FastCGI
-// protocol.) Two operations are performed.
-//
-//    First, several error checks are performed.
-// 1) Each header is validated for type and request identifer. Header
-//    errors terminate sequence processing.
-// 2) The actual number of bytes present for each section of a record is
-//    compared to the expected number. Logcially, incomplete sections may only
-//    occur when the end of the file is reached.
-// 3) The total length of each record is verified to be a multiple of eight
-//    bytes.
-//
-//    Second, the content byte sequence formed from the concatenation of
-// the record content sections is constructed and returned.
+// Determines and returns the length in bytes of a name or value when that
+// length was encoded using four bytes in the FastCGI name-value pair format.
 //
 // Parameters:
-// fd: The file descriptor of the file to be read.
-// type: The expected FastCGI record type of the record sequence.
-// id: The expected FastCGI request identifier of each record in the sequence.
+// byte_iter: An iterator to the first byte of a four-byte sequence.
 //
 // Requires:
-// 1) The file offset of fd is assumed to be at the start of the record
-//    sequence.
-// 2) It is assumed that no other data is present in the file.
-// 3) Only EINTR is handled when fd is read. (Other errors cause function
-//    return with a false value for the first boolean variable of the returned
-//    tuple.)
+// The four-byte sequence pointed to by byte_iter is the encoding
+// in the FastCGI name-value pair format of the length of another
+// byte sequence that requires a four-byte length encoding.
 //
 // Effects:
-// 1) Meaning of returned tuple elements.
-//       Access: std::get<0>; Type: bool; True if no unrecoverable errors
-//    were encountered when the file was read. False otherwise. The values of
-//    the other members of the tuple are unspecified when this member is false.
-//       Access: std::get<1>; Type: bool; True if neither a FastCGI type error
-//    nor an identifier error was present and no incomplete record section was
-//    present. False otherwise.
-//       Access: std::get<2>; Type: bool; If no header errors or incomplete
-//    section occurred while reading the sequence, this flag indicates if the
-//    sequence was terminated by a record with zero content length (true) or
-//    not (false). If header errors or incomplete section occurred, the flag is
-//    false.
-//       Access: std::get<3>; Type: bool; If no read errors were present
-//    and no header or incomplete section errors were present, this flag is
-//    true if no records were present or if all processed records had a total
-//    record length which was a multiple of eight. The flag is false if header
-//    or incomplete section errors were present or if a record was present
-//    whose total length was not a multiple of eight bytes.
-//       Access: std::get<4>; Type: std::vector<uint8_t>; The extracted
-//    content of the records processed up to:
-//    a) the point of error (such as the end of a partial record)
-//    b) a record with a zero content length
-//    c) the end of the file.
-std::tuple<bool, bool, bool, bool, std::vector<uint8_t>>
-ExtractContent(int fd, FCGIType type, uint16_t id);
+// 1) The value returned is the number of bytes encoded in the four-byte
+//    sequence pointed to by byte_iter.
+template <typename ByteIter>
+uint32_t ExtractFourByteLength(ByteIter byte_iter);
+
+// Determines a partition of the byte sequence defined by
+// [begin_iter, end_iter) whose parts can be sent as the content of FastCGI
+// records. This function is intended to be called in a loop if the byte
+// sequence is too long to be handled in one call. Each call produces headers
+// and scatter-gather write information.
+//
+// Parameters:
+// begin_iter: An iterator which points to the first byte of the byte
+//             sequence to be partitioned into records.
+// end_iter:   An iterator to one-past-the-last byte of the byte sequence
+//             to be partitioned.
+// type:       The FastCGI record type to be used for the produced records.
+// FCGI_id:    The FastCGI request identifier to be used for the produced
+//             records.
+//
+// Preconditions:
+// 1) The range formed by [begin_iter, end_iter) must be a contiguous
+//    sequence of byte-sized objects.
+//
+// Exceptions:
+// 1) May throw exceptions derived from std::exception. In the case of
+//    a throw, the call had no effect (strong exception guarantee).
+//
+// Effects:
+// 1) Meaning of returned tuple elements:
+//       Access: std::get<0>; Type: std::vector<uint8_t>; A vector of
+//    bytes which holds information which is implicitly referenced in
+//    the struct iovec instances returned by the call.
+//       Access: std::get<1>; Type: std::vector<struct iovec>; A vector
+//    of struct iovec instances. These instances hold the information
+//    needed for a call to writev. References to bytes in [begin_iter,
+//    end_iter) and the vector of bytes returned by the call are referenced
+//    in these instances of struct iovec.
+//       Access: std::get<2>; Type: std::size_t; The number of bytes that
+//    a call to writev would write if all bytes referenced by the returned
+//    array of struct iovec instances were written.
+//       Access: std::get<3>; Type: ByteIter; If the range given by
+//    [begin_iter, end_iter) could be completely encoded, this iterator is
+//    equal to end_iter. If the range could not be completely encoded, this
+//    iterator gives the range of bytes which could be. The next call
+//    to PartitionByteSequence should use this iterator to initialize 
+//    begin_iter.
+template<typename ByteIter>
+std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
+  ByteIter>
+PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
+  std::uint16_t FCGI_id);
+
+// Generates a FastCGI header and writes it to the indicated buffer. The values
+// of the arguments are encoded per the FastCGI record header binary format.
+//
+// Parameters:
+// byte_ptr:       A pointer to the first byte of the buffer which will hold
+//                 the header.
+// type:           The FastCGI type of the record described by the header.
+// FCGI_id:        The FastCGI request identifier of the record described by
+//                 the header.
+// content_length: The content length of the record described by the header.
+// padding_length: The padding length of the record described by the header.
+//
+// Requires:
+// 1) byte_ptr is not null.
+// 2) The buffer pointed to by byte_ptr must be able to hold at least
+//    FCGI_HEADER_LEN bytes.
+//
+// Exceptions: noexcept
+//
+// Effects:
+// 1) FCGI_HEADER_LEN bytes, starting at the byte pointed to by byte_ptr,
+//    are written. The written byte sequence is a FastCGI header which
+//    encodes the values passed to PopulateHeader. Two byte fields are given
+//    the same value for every header:
+//    a) The first byte is given the value FCGI_VERSION_1 which equals 1.
+//    b) The last byte, which is reserved by the FastCGI protocol, is zero.
+void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length) noexcept;
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
@@ -585,7 +264,7 @@ ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
 // Parameters:
 // c: The value to be converted.
 //
-// Requires: No preconditions.
+// Preconditions: none.
 //
 // Effects:
 // 1) A vector containing a sequence of bytes which represents the decimal
@@ -593,5 +272,7 @@ ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
 std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
 
 } // namespace fcgi_si
+
+#include "include/utility_templates.h"
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_

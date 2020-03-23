@@ -397,78 +397,69 @@ AcceptRequests()
   std::vector<fcgi_si::FCGIRequest> requests {};
   
   // CLEANUP
-
-  // Process connections which were found to have been closed by the peer
-  // and connections which were requested to be closed through FCGIRequest
-  // objects. Start with connections_found_closed_set_ as we can remove
-  // connections which can be closed in this set from
-  // application_closure_request_set_.
-  std::vector<int> connection_skip_set {};
   {
     // ACQUIRE interface_state_mutex_.
-    std::lock_guard<std::mutex> interface_state_lock
+    std::lock_guard<std::mutex> interface_state_lock 
       {FCGIServerInterface::interface_state_mutex_};
-    for(auto closed_conn_iter {connections_found_closed_set_.begin()};
-        closed_conn_iter != connections_found_closed_set_.end();
-        /*no-op*/)
-    {
-      // Check if there are no requests and, hence, no assigned requests.
-      // Unassigned requests were removed when the connection was added to the
-      // set and cannot be generated after that addition. This is because the
-      // connection was removed from record_status_map_.
-      if(request_count_map_[*closed_conn_iter] == 0)
-      {
-        // application_closure_request_set_ is handled by the call.
-        RemoveConnectionFromSharedState(*closed_conn_iter);
-        // Safely remove the connection from connections_found_closed_set_.
-        auto closed_conn_iter_erase = closed_conn_iter;
-        ++closed_conn_iter;
-        connections_found_closed_set_.erase(closed_conn_iter_erase);
-      }
-      else // Requests are present. There is no point to search again.
-      {
-        connection_skip_set.push_back(*closed_conn_iter);
-        ++closed_conn_iter;
-      }
-    }
-    // Process connections in application_closure_request_set_. The loop uses
-    // connection_skip_set as a companion sorted list to indentify connections
-    // which can be skipped. Both sets (as sorted lists) are iterated over in
-    // tandem.
+
+    // Remove dummy descriptors if possible.
     //
-    // Note that a connection closure request is NOT honored if other requests
-    // on the connection have been assigned to be serviced by the application.
-    auto connection_skip_set_iter {connection_skip_set.begin()};
-    for(auto close_request_conn_iter {application_closure_request_set_.begin()};
-        close_request_conn_iter != application_closure_request_set_.end();
-        /*no-op*/)
+    // Exception safety: 
+    // Removal of a descriptor from dummy_descriptor_set_ and calling close on
+    // that descriptor must be transactional. If performance of these actions was 
+    // not a transactional step, the following scenario is possible:  
+    // 1) The descriptor is released for use but not removed from  
+    //    dummy_descriptor_set_.
+    // 2) The descriptor is allocated for use by the application.
+    // 3) When the destructor of the interface executes, the descriptor is 
+    //    spuriously closed as the descriptor remained in dummy_descriptor_set_.
+    for(auto dds_iter {dummy_descriptor_set_.begin()};
+        dds_iter != dummy_descriptor_set_.end(); /*no-op*/)
     {
-      // Maintain skip set discipline and skip connections which have requests.
-      if(connection_skip_set_iter != connection_skip_set.end())
+      std::map<RequestIdentifier, RequestData>::iterator request_map_iter
+        {request_map_.lower_bound(RequestIdentifier {*dds_iter, 0})};
+      // The absence of requests allows closure of the descriptor.
+      // Remember that RequestIdentifier is lexically ordered.
+      if(request_map_iter == request_map_.end() 
+          || request_map_iter->first.descriptor() > *dds_iter)
       {
-        if(*close_request_conn_iter > *connection_skip_set_iter)
-          ++connection_skip_set_iter;
-        else if(*close_request_conn_iter == *connection_skip_set_iter)
+        try
         {
-          ++connection_skip_set_iter;
-          ++close_request_conn_iter;
-          continue;
+          int connection_to_be_closed {*dds_iter};
+          std::set<int>::iterator safe_erasure_iterator {dds_iter};
+          ++dds_iter;
+          // Erase first to prevent closure without removal from
+          // dummy_descriptor_set_.
+          dummy_descriptor_set_.erase(safe_erasure_iterator);
+          int close_return {close(connection_to_be_closed)};
+          if(close_return == -1 && errno != EINTR)
+          {
+            std::error_code ec {errno, std::system_category()};
+            throw std::system_error {ec, "close"};
+          }   
+        }
+        catch(...)
+        {
+          bad_interface_state_detected_ = true;
+          throw;
         }
       }
-      // Check for requests which have been exposed to the application.
-      // Requests which have not been received in full are deleted.
-      bool assigned_req {UnassignedRequestCleanup(*close_request_conn_iter)};
-      if(!assigned_req)
-      {
-        // Safely remove the connection from application_closure_request_set_.
-        auto close_request_conn_erase_iter {close_request_conn_iter};
-        ++close_request_conn_iter;
-        record_status_map_.erase(*close_request_conn_erase_iter);
-        // Connection removed from application_closure_request_set_ here.
-        RemoveConnectionFromSharedState(*close_request_conn_erase_iter);
-      }
+      else // Leave the descriptor until all requests have been removed.
+        ++dds_iter;
     }
-  } // RELEASE interface_state_mutex_.
+
+    // Close connection descriptors for connections which were found to be 
+    // closed and for which closure was requested by FCGIRequest objects.
+    // Update interface state to allow FCGIRequest objects to inspect for
+    // connection closure. 
+    //
+    // Note that dummy_descriptor_set_ is disjoint from the union of
+    // connection_found_closed_set_ and application_closure_request_set_.
+    ConnectionClosureProcessing(&connections_found_closed_set_,
+      connections_found_closed_set_.begin(), connections_found_closed_set_.end(),
+      &application_closure_request_set_, application_closure_request_set_.begin(),
+      application_closure_request_set_.end());
+  } // RELEASE interface_state_mutex_;
 
   // DESCRIPTOR MONITORING
 
@@ -537,27 +528,6 @@ AcceptRequests()
 
   return requests;
 }
-
-void fcgi_si::FCGIServerInterface::
-ClosedConnectionFoundDuringAcceptRequests(int connection)
-{
-  // Remove the connection from the record_status_map_ so that it is not
-  // included in a call to select().
-  record_status_map_.erase(connection);
-
-  // Iterate over requests: delete unassigned requests and check for
-  // assigned requests.
-  // ACQUIRE interface_state_mutex_ to access and modify shared state.
-  std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
-  bool active_requests_present {UnassignedRequestCleanup(connection)};
-  // Check if the connection can be closed or assigned requests require
-  // closure to be delayed.
-  if(!active_requests_present)
-    RemoveConnectionFromSharedState(connection);
-  else
-    connections_found_closed_set_.insert(connection);
-} // RELEASE interface_state_mutex_.
 
 fcgi_si::RequestIdentifier fcgi_si::FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
@@ -712,14 +682,70 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
-void fcgi_si::FCGIServerInterface::
-RemoveConnectionFromSharedState(int connection)
+void fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
 {
-  write_mutex_map_.erase(connection);
-  application_closure_request_set_.erase(connection);
-  request_count_map_.erase(connection);
-
-  close(connection);
+  // Care must be taken to prevent descriptor leaks or double closures.
+  try
+  {
+    bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
+    if(assigned_requests)
+    {
+      // Go through the process to make the descriptor a dummy.
+      // Implicitly and atomically call close(connection).
+      //
+      // TODO Should a way to check for errors on the implicit closure of
+      // connection be implemented?
+      int dup2_return {};
+      while((dup2_return = dup2(FCGI_LISTENSOCK_FILENO, connection)) == -1)
+      {
+        if(errno == EINTR || errno == EBUSY)
+          continue;
+        else
+        {
+          std::error_code ec {errno, std::system_category()};
+          throw std::system_error {ec, "dup2"};
+        }
+      }
+      // Order as given. If insertion throws, erasure never occurs and the
+      // descriptor is not leaked.
+      dummy_descriptor_set_.insert(connection);
+      try
+      {
+        record_status_map_.erase(connection);
+        write_mutex_map_.erase(connection);
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+    }
+    else
+    {
+      // Order as given. If erasure is not ordered before the call of
+      // close(connection), it is possible that erasure does not occur and
+      // close(connection) will be called twice.
+      try
+      {
+        record_status_map_.erase(connection);
+        write_mutex_map_.erase(connection);
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+      int close_return {close(connection)};
+      if(close_return == -1 && errno != EINTR)
+      {
+        std::error_code ec {errno, std::system_category()};
+        throw std::system_error {ec, "close"};
+      }
+    }
+  }
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
 }
 
 void fcgi_si::FCGIServerInterface::
@@ -748,7 +774,44 @@ RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
     throw;
   }
 }
-    
+
+bool fcgi_si::FCGIServerInterface::
+RequestCleanupDuringConnectionClosure(int connection)
+{
+  try
+  {
+    bool assigned_requests_present {false};
+    for(auto request_map_iter =
+          request_map_.lower_bound(RequestIdentifier {connection, 0});
+        !(request_map_iter == request_map_.end()
+          || request_map_iter->first.descriptor() > connection);
+        /*no-op*/)
+    {
+      if(request_map_iter->second.get_status() ==
+        fcgi_si::RequestStatus::kRequestAssigned)
+      {
+        request_map_iter->second.set_connection_closed_by_interface();
+        assigned_requests_present = true;
+        ++request_map_iter;
+      }
+      else
+      {
+        // Safely erase the request.
+        std::map<RequestIdentifier, RequestData>::iterator request_map_erase_iter 
+          {request_map_iter};
+        ++request_map_iter;
+        RemoveRequest(request_map_erase_iter);
+      }
+    }
+    return assigned_requests_present;
+  }
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
+}
+
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
                    uint8_t protocol_status, int32_t app_status)
@@ -911,30 +974,3 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   }
   return true;
 } // RELEASE the write mutex for the connection.
-
-bool fcgi_si::FCGIServerInterface::
-UnassignedRequestCleanup(int connection)
-{
-  bool assigned_requests_present {false};
-  for(auto request_map_iter =
-        request_map_.lower_bound(RequestIdentifier {connection, 0});
-      !(request_map_iter == request_map_.end()
-        || request_map_iter->first.descriptor() > connection);
-      /*no-op*/)
-  {
-    if(request_map_iter->second.get_status() ==
-       fcgi_si::RequestStatus::kRequestAssigned)
-    {
-      assigned_requests_present = true;
-      ++request_map_iter;
-    }
-    else
-    {
-      // Safely erase the request.
-      auto request_map_erase_iter {request_map_iter};
-      ++request_map_iter;
-      RemoveRequest(request_map_erase_iter);
-    }
-  }
-  return assigned_requests_present;
-}
