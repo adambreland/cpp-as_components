@@ -380,13 +380,25 @@ AcceptConnection()
     // Ensure that the original state of FCGIServerInterface is restored before
     // rethrowing. The flag can only be true if insertion occurred. If so, the
     // iterator is valid and the socket descriptor must be removed from the map.
-    if(record_status_map_emplace_return.second)
-      record_status_map_.erase(record_status_map_emplace_return.first);
-    if(write_mutex_map_insert_return.second)
-      write_mutex_map_.erase(write_mutex_map_insert_return.first);
-    if(request_count_map_emplace_return.second)
-      request_count_map_.erase(request_count_map_emplace_return.first);
-    close(new_socket_descriptor);
+    try
+    {
+      if(record_status_map_emplace_return.second)
+        record_status_map_.erase(record_status_map_emplace_return.first);
+      if(write_mutex_map_insert_return.second)
+        write_mutex_map_.erase(write_mutex_map_insert_return.first);
+      if(request_count_map_emplace_return.second)
+        request_count_map_.erase(request_count_map_emplace_return.first);
+      if(close(new_socket_descriptor) == -1)
+        if(errno != EINTR)
+        {
+          std::error_code ec {errno, std::system_category()};
+          throw std::system_error {ec};
+        }
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
     throw;
   }
   // NON-LOCAL STATE modification block end
@@ -451,6 +463,8 @@ AcceptRequests()
       else // Leave the descriptor until all requests have been removed.
         ++dds_iter;
     }
+
+    // Check for corrupted connections which must be closed. 
 
     // Close connection descriptors for connections which were found to be 
     // closed and for which closure was requested by FCGIRequest objects.
@@ -690,12 +704,20 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
+// Syncrhonization:
+// 1) interface_state_mutex_ must be held prior to a call.
 void fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
 {
   // Care must be taken to prevent descriptor leaks or double closures.
   try
   {
     bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
+    // ACQUIRE and RELEASE the write mutex of the connection to ensure that a 
+    // request does not hold it while the connection is being erased.
+    std::unique_lock<std::mutex> write_lock
+      {*(write_mutex_map_[connection].first)};
+    write_lock.unlock();
+    // Close the connection in one of two ways.
     if(assigned_requests)
     {
       // Go through the process to make the descriptor a dummy.
@@ -783,6 +805,8 @@ RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
   }
 }
 
+// Synchronization:
+// 1) interface_state_mutex_ must be held prior to a call.
 bool fcgi_si::FCGIServerInterface::
 RequestCleanupDuringConnectionClosure(int connection)
 {
@@ -822,7 +846,7 @@ RequestCleanupDuringConnectionClosure(int connection)
 
 bool fcgi_si::FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
-                   uint8_t protocol_status, int32_t app_status)
+  uint8_t protocol_status, int32_t app_status)
 {
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
 
@@ -971,10 +995,34 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   // ACQUIRE the write mutex for the connection.
   std::unique_lock<std::mutex> write_lock
     {*(it->second.first)};
+
   // Check if the connection is corrupt.
+  // Conditionally RELEASE the write mutex.
   if(it->second.second)
+  {
+    write_lock.unlock();
+    // ACQUIRE interface_state_mutex_
+    try
+    {
+      std::lock_guard<std::mutex> interface_state_lock
+        {FCGIServerInterface::interface_state_mutex_};
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
+    try
+    {
+      connections_found_closed_set_.insert(connection);
+    }
+    catch(...)
+    {
+      bad_interface_state_detected_ = true;
+      throw;
+    }
     throw std::runtime_error {ERROR_STRING("A connection from the "
       "interface to the client was found which had a corrupted state.")};
+  } // If the above block executes, the function has exited by this point.
 
   // Send record.
   size_t number_written =
@@ -983,9 +1031,21 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   if(number_written < result.size())
   {
     if(errno == EPIPE)
+    {
+      connections_found_closed_set_.insert(connection);
       return false;
-    else throw std::runtime_error {ERRNO_ERROR_STRING(
-      "write from a call to NonblockingPollingSocketWrite")};
+    }
+    else 
+    {
+      if(number_written != 0)
+      {
+        // The connection to the client was just corrupted.
+        write_mutex_map_[connection].second = true;
+        connections_found_closed_set_.insert(connection);
+      }
+      throw std::runtime_error {ERRNO_ERROR_STRING(
+        "write from a call to NonblockingPollingSocketWrite")};
+    }
   }
   return true;
 } // RELEASE the write mutex for the connection.

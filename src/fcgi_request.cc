@@ -427,6 +427,42 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   std::unique_lock<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_, std::defer_lock_t {}};
 
+  // An internal helper function used when application_closure_request_set_
+  // of the interface must be accessed. This occurs when:
+  // 1) The connection was found to be closed and close_connection_ == true
+  // 2) The connection from the server to the client was corrupted from
+  //    an incomplete write.
+  auto TryToAddToApplicationClosureRequestSet = 
+  [this, interface_mutex_held, &interface_state_lock]()->bool
+  {
+    // Conditionally ACQUIRE interface_state_mutex_.
+    if(!interface_mutex_held)
+    {
+      try
+      {
+        interface_state_lock.lock();
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+      if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+        return false;
+    }
+    // interface_state_mutex held.
+    try
+    {
+      interface_ptr_->application_closure_request_set_.insert(
+        request_identifier_.descriptor());
+      return true;
+    }
+    catch(...)
+    {
+      interface_ptr_->bad_interface_state_detected_ = true;
+      throw;
+    }
+  };
+
   // Conditionally ACQUIRE interface_state_mutex_.
   if(!interface_mutex_held)
   {
@@ -523,24 +559,15 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               // partial record was likely written here .The solution is to set
               // the bad_connection_state flag of the write mutex pair before
               // releasing the write mutex.
+
+              // Conditionally RELEASE *write_mutex_ptr_.
               if(write_lock.owns_lock())
               {
                 *bad_connection_state_ptr_ = true;
                 write_lock.unlock();
-                if(!interface_mutex_held)
-                {
-                  try
-                  {
-                    interface_state_lock.lock();
-                  }
-                  catch(...)
-                  {
-                    std::terminate();
-                  }
-                  if(!InterfaceStateCheckForWritingUponMutexAcquisition())
-                    return false;
-                }
-                interface_ptr_->bad_interface_state_detected_ = true;
+                // May ACQUIRE interface_state_mutex_.
+                if(!TryToAddToApplicationClosureRequestSet())
+                  return false;
               }
               std::error_code ec {errno, std::system_category()};
               throw std::system_error {ec, ERRNO_ERROR_STRING("select")};
@@ -563,7 +590,14 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         // Conditionally ACQUIRE interface_state_mutex_
         if(!interface_mutex_held)
         {
-          interface_state_lock.lock();
+          try
+          {
+            interface_state_lock.lock();
+          }
+          catch(...)
+          {
+            std::terminate();
+          }          
           if(!InterfaceStateCheckForWritingUponMutexAcquisition())
             return false;
         }
@@ -596,26 +630,15 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       {
         // The same situation applies here as above. Writing some data and
         // throwing corrupts the connection.
-        //
+
         // Conditionally RELEASE *write_mutex_ptr_.
-        if(working_number_to_write < number_to_write)
+        if(working_number_to_write < number_to_write) // Some but not all.
         {
           *bad_connection_state_ptr_ = true;
           write_lock.unlock();
-          if(!interface_mutex_held)
-          {
-            try
-            {
-              interface_state_lock.lock();
-            }
-            catch(...)
-            {
-              std::terminate();
-            }
-            if(!InterfaceStateCheckForWritingUponMutexAcquisition())
-              return false;
-          }
-          interface_ptr_->bad_interface_state_detected_ = true;
+          // May ACQUIRE interface_state_mutex_.
+          if(!TryToAddToApplicationClosureRequestSet())
+            return false;
         }
         // Conditionally RELEASE *write_mutex_ptr_.
         if(write_lock.owns_lock())
