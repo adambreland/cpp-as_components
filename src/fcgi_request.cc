@@ -29,32 +29,67 @@
 
 // Class implementation notes:
 // 1) Updating interface state:
-//    a) Requests are responsible for removing themselves from their interface.
-//       The interface will not remove an item from request_map_ if the
-//       associated request has been assigned to the application.
-//    b) Removal must occur when the request is no longer relevant to the
+//    a) Removing requests from the collection of requests tracked by the
+//       interface. 
+//          Requests are responsible for removing themselves from their
+//       interface. The interface will not remove an item from request_map_ if
+//       the associated request has been assigned to the application.
+//       (Assignment and FCGIRequest object construction are equivalent.)
+//          Removal must occur when the request is no longer relevant to the
 //       interface. This occurs when:
 //       1) A call to Complete is made on the request.
 //       2) Through calls on the request, it is detected that the client closed
 //          the request connection.
 //       3) Through calls on the request, it is detected that the interface
 //          closed the request connection.
-//       4) The destructor of a request is called and the request has not
+//       4) Through calls on a request, the request informs the interface
+//          that the connection of the request should be closed because the
+//          request corrupted the connection from a partial write.
+//       5) Through calls on the request, the request discovers that the
+//          connection of the request has been corrupted.
+//       6) The destructor of a request is called and the request has not
 //          yet removed itself from the interface.
-//    c) The cases above may be viewed as occurring on the transition of 
+//       
+//          The cases above may be viewed as occurring on the transition of 
 //       completed_ from false to true. This should only occur once for a 
 //       request and, once it has occurred, the request is no longer relevant
 //       to its interface.
-//    d) Removing a request should be performed by:
-//          interface_ptr_->RemoveRequest(request_identifier_);
+//          Removing a request should be performed by:
+//             interface_ptr_->RemoveRequest(request_identifier_);
 //       The call to RemoveRequest maintains invariants on interface state.
-//    e) When a request is completed and the connection of the request is
-//       still open, the request should conditionally add the descriptor of the
-//       connection to application_closure_request_set_ as per the value of
-//       close_connection_. In other words, application_closure_request_set_
-//       is modified if: 
-//          close_connection_ && 
-//          !(request_data_ptr_->connection_closed_by_interface_)
+//    b) Updating interface state for connection closure.
+//       1) Normal connection closure processing.
+//             When a request is completed and the connection of the request is
+//          still open, the request should conditionally add the descriptor of
+//          the connection to application_closure_request_set_ according to the
+//          value of close_connection_. In other words, 
+//          application_closure_request_set_ is modified if: 
+//             close_connection_ && 
+//               !(request_data_ptr_->connection_closed_by_interface_)
+//       2) Connection closure processing due to connection corruption.
+//             Because the FastCGI protocol is based on records, a partial
+//          write to a connection from the server to the client corrupts the
+//          connection. Partial writes only occur when an error prevents a
+//          write from being completed. In this case, the server must abort
+//          requests on the connection. This is done in the FastCGI protocol
+//          by closing the connection. Note that the request cannot be ended
+//          with a failure status as doing so would require writing an
+//          FCGI_END_REQUEST record on the corrupted connection.
+//             The shared application_closure_request_set_ of the request's
+//          FCGIServerInterface object is used to indicate that the connection
+//          should be closed in this case.
+//    c) Indicating that a connection is corrupt.
+//          When a request corrupts its connection from a partial write, it
+//       must set the flag associated with the connection's write mutex. This
+//       must be performed under the protection of the write mutex as this flag
+//       is shared state.
+//    d) Putting the interface into a bad state.
+//          Anytime interface state should be updated but the update cannot be
+//       made due to an error, the interface should be put into a bad state
+//       by setting interface_ptr_->bad_interface_state_detected_. If the
+//       interface has been destroyed, has already been put into a bad state,
+//       or the connection of the request has been closed, then the bad state
+//       flag need not be set.
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
 //       must check if:
@@ -73,7 +108,11 @@
 //       connection_closed_by_interface_ in the RequestData object associated
 //       with the request. If the connection was closed, the state above cannot
 //       be used.
-//    c) Acquisition of a write mutex may only occur when interface_state_mutex_
+//    c) Any write to the connection must be preceded by a check for connection
+//       corruption. This is done under the protection of the write mutex by
+//       checking if the boolean value associated with the write mutex has been
+//       set.
+//    d) Acquisition of a write mutex may only occur when interface_state_mutex_
 //       is held.
 //       1) FCGIRequest objects are separate from their associated
 //          FCGIServerInterface object yet need to access state which belongs to
@@ -138,10 +177,14 @@ fcgi_si::FCGIRequest::FCGIRequest(RequestIdentifier request_id,
       "constructed.")};
   }
 
+  // TODO double check noexcept specifications for move assignments.
+  // It is currently assumed that move assignments are noexcept.
+  // This assumption also applies to the move constructor and move assignment
+  // operator.
   environment_map_       = std::move(request_data_ptr->environment_map_);
   request_stdin_content_ = std::move(request_data_ptr->FCGI_STDIN_);
   request_data_content_  = std::move(request_data_ptr->FCGI_DATA_);
-
+  
   // Update the status of the RequestData object to reflect its use in the
   // construction of an FCGIRequest which will be exposed to the application.
   request_data_ptr_->request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
@@ -233,8 +276,16 @@ fcgi_si::FCGIRequest::~FCGIRequest()
   if(!completed_)
   {
     // ACQUIRE interface_state_mutex_.
-    std::lock_guard<std::mutex> interface_state_lock
-      {FCGIServerInterface::interface_state_mutex_};
+    std::unique_lock<std::mutex> interface_state_lock
+      {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+    try
+    {
+      interface_state_lock.lock();
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
     // Check if the interface has not been destroyed and is not in a bad state.
     if((FCGIServerInterface::interface_identifier_ == associated_interface_id_)
        && (interface_ptr_->bad_interface_state_detected_ == false))
@@ -242,13 +293,18 @@ fcgi_si::FCGIRequest::~FCGIRequest()
       // Try to remove the request from the interface.
       try 
       {
-        interface_ptr_->RemoveRequest(request_identifier_);
+        // completed_ may be regarded as being implicitly set. There is no need
+        // to actually set it as the request is being destroyed.
+
+        // Check for connection closure first as request_data_ptr_ is about to
+        // be invalidated by RemoveRequest.
         if(close_connection_ 
            && !(request_data_ptr_->connection_closed_by_interface_))
         {
           interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
         }
+        interface_ptr_->RemoveRequest(request_identifier_);
       }
       catch(...) 
       {
@@ -289,6 +345,8 @@ bool fcgi_si::FCGIRequest::AbortStatus()
   {
     completed_   = true;
     was_aborted_ = true;
+    // RemoveRequest implicitly sets bad_interface_state_detected_ if it
+    // throws.
     interface_ptr_->RemoveRequest(request_identifier_);
     return was_aborted_;
   }
@@ -425,7 +483,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   const std::size_t number_to_write, bool interface_mutex_held)
 {
   std::unique_lock<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_, std::defer_lock_t {}};
+    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
 
   // An internal helper function used when application_closure_request_set_
   // of the interface must be accessed. This occurs when:
@@ -452,6 +510,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     // interface_state_mutex held.
     try
     {
+      completed_ = true;
+      was_aborted_ = true;
+      interface_ptr_->RemoveRequest(request_identifier_);
       interface_ptr_->application_closure_request_set_.insert(
         request_identifier_.descriptor());
       return true;
@@ -503,6 +564,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     if(!write_lock.owns_lock())
     {
       write_lock.lock();
+      // Removing the request from the interface will be deferred to the
+      // destructor of the request.
       if(*bad_connection_state_ptr_)
         throw std::runtime_error {ERROR_STRING("A connection from the "
           "interface to the client was found which had a corrupted state.")};
@@ -601,6 +664,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           if(!InterfaceStateCheckForWritingUponMutexAcquisition())
             return false;
         }
+        // interface_state_mutex_ held.
         completed_   = true;
         was_aborted_ = true;
         interface_ptr_->RemoveRequest(request_identifier_);

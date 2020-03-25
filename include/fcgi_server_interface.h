@@ -293,7 +293,7 @@ class FCGIServerInterface {
     RemoveRequestHelper(request_map_iter);
   }
 
-  // Attemps to remove the request given by request_id from request_map_ while
+  // Attempts to remove the request given by request_id from request_map_ while
   // also updating request_count_map_.
   //
   // Parameters:
@@ -305,11 +305,12 @@ class FCGIServerInterface {
   // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Exceptions:
-  // 1) Throws an exception derived from std::exception if:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) Throws an exception derived from std::exception if:
   //    a) No request was present in request_map_ for request_id.
   //    b) The request count for the descriptor of the request could not
   //       be decremented.
-  // 2) After an exception throw:
+  // 3) After an exception throw:
   //    a) bad_interface_state_detected_ == true.
   //    b) request_map_ and request_count_map_ are unchanged.
   //    b) It must be assumed that the interface is corrupt and should be
@@ -335,7 +336,7 @@ class FCGIServerInterface {
   // count on descriptor.
   //
   // Parameters:
-  // iter:       An iterator the request or to request_map_.end() is the
+  // iter:       An iterator to the request or to request_map_.end() if the
   //             request is not in request_map_.
   //
   // Preconditions:
@@ -422,27 +423,28 @@ class FCGIServerInterface {
 
   std::set<int> dummy_descriptor_set_ {};
 
-  // Static state used by FCGIRequest objects to check if the interface with
-  // which they are associated is alive. The mutex is also used for general
-  // synchronization among request objects and between request objects and
-  // the interface. interface_identifier_ == 0 if no interface object is
-  // currently in a valid state.
-  static std::mutex interface_state_mutex_;
-  static unsigned long interface_identifier_;
-  static unsigned long previous_interface_identifier_;
+  ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 
   // A map to retrieve a connection's write mutex. These mutexes are used by
   // the interface and by FCGIRequest objects.
   //
-  // This map is only accessed by the interface. It is not accessed through
-  // application calls on an FCGIRequest object.
+  // The boolean member of std::pair<std::unique_ptr<std::mutex>, bool> is
+  // shared state and should only be accessed under the protection of the
+  // associated write mutex.
   //
   // (A unique_ptr was used as using std::mutex directly results in
   // compiler errors.)
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>> 
     write_mutex_map_ {};
 
-  ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
+  // Static state used by FCGIRequest objects to check if the interface with
+  // which they are associated is alive. The mutex is also used for general
+  // synchronization among request objects and between request objects and
+  // the interface. interface_identifier_ == 0 if no interface object is
+  // currently constructed.
+  static std::mutex interface_state_mutex_;
+  static unsigned long interface_identifier_;
+  static unsigned long previous_interface_identifier_;
 
   // This set holds the status of socket closure requests from FCGIRequest
   // objects. This is necessary as a web server can indicate in the
