@@ -30,7 +30,7 @@
 // Class implementation notes:
 // 1) Updating interface state:
 //    a) Removing requests from the collection of requests tracked by the
-//       interface. 
+//       interface:
 //          Requests are responsible for removing themselves from their
 //       interface. The interface will not remove an item from request_map_ if
 //       the associated request has been assigned to the application.
@@ -148,28 +148,29 @@
 //
 // Synchronization:
 // 1) It is assumed that interface_state_mutex_ is held prior to a call.
-fcgi_si::FCGIRequest::FCGIRequest(RequestIdentifier request_id,
+fcgi_si::FCGIRequest::FCGIRequest(
+  RequestIdentifier request_id,
   unsigned long interface_id,
   FCGIServerInterface* interface_ptr,
   RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr,
   bool* bad_connection_state_ptr)
-: associated_interface_id_   {interface_id},
-  interface_ptr_             {interface_ptr},
-  request_identifier_        {request_id},
-  request_data_ptr_          {request_data_ptr},
-  environment_map_           {},
-  request_stdin_content_     {},
-  request_data_content_      {},
-  role_                      {request_data_ptr->role_},
-  close_connection_          {request_data_ptr->close_connection_},
-  was_aborted_               {false},
-  completed_                 {false},
-  write_mutex_ptr_           {write_mutex_ptr},
-  bad_connection_state_ptr_  {bad_connection_state_ptr}
+  : associated_interface_id_   {interface_id},
+    interface_ptr_             {interface_ptr},
+    request_identifier_        {request_id},
+    request_data_ptr_          {request_data_ptr},
+    environment_map_           {},
+    request_stdin_content_     {},
+    request_data_content_      {},
+    role_                      {request_data_ptr->role_},
+    close_connection_          {request_data_ptr->close_connection_},
+    was_aborted_               {false},
+    completed_                 {false},
+    write_mutex_ptr_           {write_mutex_ptr},
+    bad_connection_state_ptr_  {bad_connection_state_ptr}
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
-     || write_mutex_ptr == nullptr)
+     || write_mutex_ptr == nullptr || bad_connection_state_ptr_ == nullptr)
      || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
   {
     interface_ptr_->bad_interface_state_detected_ = true;
@@ -254,13 +255,12 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
   return *this;
 }
 
-// If a request was not completed, the destructor attempts to remove the
-// request from the interface.
+// If a request was not completed, the destructor attempts to update interface
+// state to reflect that the request is no longer relevant to the interface.
 //
 // Exceptions:
 // 1) An exception may be thrown by the attempt to acquire
-//    interface_state_mutex_. This will result in program termination
-//    if the destructor is being called by the exception handling mechanism.
+//    interface_state_mutex_. This will result in program termination.
 //
 // Synchronization:
 // 1) Acquires and releases interface_state_mutex_.
@@ -268,9 +268,15 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
 // Effects:
 // 1) If the request was not completed and the destructor exited normally,
 //    one of the following applies:
-//    a) the request was removed from the interface
-//    b) the bad_interface_state_detected_ flag of the interface was set (as per
-//    the specification of RemoveRequest).
+//    a) The bad_interface_state_detected_ flag of the interface was not set
+//       and interface state was updated:
+//       1) The request was removed from the interface.
+//       2) If close_connection_ and the connection was not already closed,
+//          the descriptor of the connection was added to
+//          application_closure_request_set_.
+//    b) Interface state could not be updated successfully. The
+//       bad_interface_state_detected_ flag of the interface was set.
+// 2) If the request was completed, the call had no effect.
 fcgi_si::FCGIRequest::~FCGIRequest()
 {
   if(!completed_)
@@ -284,6 +290,7 @@ fcgi_si::FCGIRequest::~FCGIRequest()
     }
     catch(...)
     {
+      // bad_interface_state_detected_ cannot be set. The program must end.
       std::terminate();
     }
     // Check if the interface has not been destroyed and is not in a bad state.

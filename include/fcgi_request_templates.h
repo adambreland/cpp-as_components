@@ -1,5 +1,5 @@
 // Template definitions for fcgi_si::FCGIRequest. This file is included as
-// a definition header by the FCGIRequest header.
+// a template definition header by the FCGIRequest header.
 
 #ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 #define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_

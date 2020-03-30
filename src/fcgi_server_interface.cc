@@ -422,8 +422,8 @@ AcceptRequests()
     //
     // Exception safety: 
     // Removal of a descriptor from dummy_descriptor_set_ and calling close on
-    // that descriptor must be transactional. If performance of these actions was 
-    // not a transactional step, the following scenario is possible:  
+    // that descriptor must be transactional. If performance of these actions
+    // was not a transactional step, the following scenario is possible:  
     // 1) The descriptor is released for use but not removed from  
     //    dummy_descriptor_set_.
     // 2) The descriptor is allocated for use by the application.
@@ -463,8 +463,6 @@ AcceptRequests()
       else // Leave the descriptor until all requests have been removed.
         ++dds_iter;
     }
-
-    // Check for corrupted connections which must be closed. 
 
     // Close connection descriptors for connections which were found to be 
     // closed and for which closure was requested by FCGIRequest objects.

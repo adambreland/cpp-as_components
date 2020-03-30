@@ -214,8 +214,9 @@ class FCGIRequest {
   // Requires:
   // 1) request_id_ is a key of request_map_.
   // 2) All pointers are associated with the FCGIServerInterface object
-  //    of request_map_. The correct RequestData object and write mutex
-  //    were used to initialize request_data_ptr and write_mutex_ptr.
+  //    of request_map_. The correct RequestData object and write mutex pair
+  //    were used to initialize request_data_ptr, write_mutex_ptr, and
+  //    bad_connection_state_ptr.
   // 3) interface_id is the identifier of the FCGIServerInterface object
   //    associated with request_map_.
   //
@@ -224,7 +225,8 @@ class FCGIRequest {
   //
   // Exceptions:
   // 1) Throws std::logic_error if:
-  //    a) Any of interface_ptr, request_data_ptr, or write_mutex_ptr are null.
+  //    a) Any of interface_ptr, request_data_ptr, write_mutex_ptr, or
+  //       bad_connection_state_ptr are null.
   //    b) An FCGIRequest has already been generated from *request_data_ptr.
   //
   //    If a throw occurs, bad_interface_state_detected_ is set (as this
@@ -349,12 +351,7 @@ class FCGIRequest {
   // with the request should be closed by the interface.
   bool close_connection_;
 
-  // A local abort flag that is set when a request abort is detected by:
-  // 1) The discovery that the connection over which responses has been sent
-  //    has been closed by the client.
-  // 2) The discovery that the interface associated with the request has
-  //    closed the connection over which a response must be sent.
-  // 3) Inspection with a call to AbortStatus.
+  // A local abort flag.
   bool was_aborted_;
 
   bool completed_;
