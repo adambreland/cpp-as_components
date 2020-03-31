@@ -88,7 +88,7 @@ class FCGIRequest {
   //       destroyed.
   //
   // Effects:
-  // 1) If the call returned true.
+  // 1) If the call returned true:
   //    a) Terminal empty records for the FCGI_STDOUT and FCGI_STDERR streams
   //       were sent. The records close these streams according to the
   //       FastCGI protocol. In addition, the client was informed that the
@@ -97,7 +97,7 @@ class FCGIRequest {
   //       of app_status.
   //    b) The request was completed. Calls to Complete, Write, and WriteError
   //       will have no effect.
-  // 2) If the call returned false.
+  // 2) If the call returned false:
   //    a) If the request had not been completed at the time of the call:
   //       1) It was discovered that the connection to the client is closed.
   //          No further action is needed for this request.
@@ -153,24 +153,24 @@ class FCGIRequest {
   //    sequence of byte-sized objects.
   //
   // Exceptions:
-  // 1) A call may throw exceptions derived from std::exception. See Effects. 
+  // 1) A call may throw exceptions derived from std::exception. 
+  // 2) If an exception was thrown:
+  //    a) No conclusions may be drawn about what part, if any, of the message
+  //       was sent.
+  //    b) A non-recoverable error must be assumed. The request should be
+  //       destroyed.
   //
   // Effects:
-  // 1) True was returned.
+  // 1) If true was returned.
   //    a) The byte sequence given by [begin_iter, end_iter) was sent to the 
   //       client.
-  // 2) False was returned.
+  // 2) If false was returned.
   //    a) If the request had not been previously completed:
   //       1) The connection was found to be closed. No further action need be
   //          taken to service the request. The request should be destroyed.
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
-  //    b) If the request had been previously completed, the call has no effect.
-  // 3) An exception was thrown:
-  //    a) No conclusions may be drawn about what part, if any, of the message
-  //       was sent.
-  //    b) A non-recoverable error must be assumed. The request should be
-  //       destroyed.
+  //    b) If the request had been previously completed, the call had no effect.
   template<typename ByteIter>
   bool Write(ByteIter begin_iter, ByteIter end_iter);
 
@@ -278,29 +278,32 @@ class FCGIRequest {
   bool InterfaceStateCheckForWritingUponMutexAcquisition();
 
   // Attempts to a perform a scatter-gather write on the active socket given
-  // by fd.
+  // by request_identifier_.descriptor(). If errors occur during the write
+  // or if connection closure is discovered, interface invariants are
+  // maintained. If interface invariants may not be maintained, the program
+  // is terminated.
   //
   // Parameters:
-  // fd:                   The file descriptor of the connected socket to which
-  //                       data will be written.
   // iovec_ptr:            A pointer to an array of struct iovec instances.
-  // iovec_count:          The number of struct iovec instances to read data
-  //                       from.
+  // iovec_count:          The number of struct iovec instances from which to
+  //                       read data.
   // number_to_write:      The total number of bytes which would be written if
   //                       all the data referenced in the range
-  //                       [*iovec_ptr, *(iovec_ptr + iovec_count)) was written.
+  //                       [iovec_ptr, iovec_ptr + iovec_count) was written.
   // interface_mutex_held: A flag which allows a caller to indicate whether
   //                       or not interface_state_mutex_ is held before a call.
   //                       This allows WriteHelper to be called in contexts
   //                       which must maintain mutex ownership during the call
-  //                       and in contexts which do not have or need mutex
-  //                       ownership.
+  //                       and in contexts which do not need interface mutex
+  //                       ownership over the entire call.
   //
   // Preconditions:
   // 1) completed_ == false.
   // 2) The value of interface_mutex_held must be accurate. In other words,
   //    interface_mutex_held is true if and only if interface_state_mutex_
-  //    is held by the caller. 
+  //    is held by the caller.
+  // 3) If interface_mutex_held == true, then the interface must be in a valid
+  //    state.
   //
   // Exceptions:
   // 1) Exceptions derived from std::exception may be thrown.
@@ -309,7 +312,11 @@ class FCGIRequest {
   //       was sent.
   //    b) A non-recoverable error must be assumed. The request should be
   //       destroyed.
-  //    c) Request completion may or may not have occurred.
+  //    c) The transition of completed_ from false to true may or may not
+  //       have occurred.
+  //    d) Connection corruption invariants were maintained. The connection
+  //       may have been corrupted. If so, the descriptor of the connection was
+  //       added to application_closure_request_set_.
   //
   // Synchronization:
   // 1) interface_state_mutex_ may be acquired depending on the value of
@@ -325,6 +332,9 @@ class FCGIRequest {
   //       destroyed.
   //    b) completed_ == true
   //    c) The request was removed from the interface.
+  //    d) Connection corruption invariants were maintained. The connection
+  //       may have been corrupted. If so, the descriptor of the connection was
+  //       added to application_closure_request_set_. 
   bool ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
@@ -335,29 +345,29 @@ class FCGIRequest {
   template<typename ByteIter>
   bool WriteHelper(ByteIter begin_iter, ByteIter end_iter, FCGIType type);
 
+  // State for internal request management. Constant after initialization.
   unsigned long associated_interface_id_;
   FCGIServerInterface* interface_ptr_;
   RequestIdentifier request_identifier_;
   RequestData* request_data_ptr_;
+  std::mutex* write_mutex_ptr_;
+  bool* bad_connection_state_ptr_;
 
+  // Request information. Constant after initialization.
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;
   std::vector<uint8_t> request_stdin_content_;
   std::vector<uint8_t> request_data_content_;
-
-  // For inspection of the role requested by the client server.
   uint16_t role_;
-
-  // A flag to inform the call to Complete() that the connection associated
-  // with the request should be closed by the interface.
+    // A flag which indicates that the connection associated with the request
+    // should be closed by the interface after the request is no longer
+    // relevant to the interface.
   bool close_connection_;
 
-  // A local abort flag.
+  // Variables.
+    // A local abort flag which partially reflects client_set_abort_ of
+    // the request's RequestData instance in request_map_.
   bool was_aborted_;
-
   bool completed_;
-
-  std::mutex* write_mutex_ptr_;
-  bool* bad_connection_state_ptr_;
 };
 
 } // namespace fcgi_si

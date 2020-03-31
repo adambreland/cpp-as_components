@@ -284,8 +284,9 @@ class FCGIServerInterface {
   //       destroyed.
   //
   // Effects:
-  // 1) If request_id was a key to an item of request_map_, the item was
-  //    removed from request_map_ and
+  // 1) If request_id was a key to an item of request_map_ and
+  //    request_count_map_[request_id.descriptor()] could be decremented, the
+  //    item was removed from request_map_ and 
   //    request_count_map_[request_id.descriptor()] was decremented.
   inline void RemoveRequest(
     std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
@@ -320,8 +321,9 @@ class FCGIServerInterface {
   // 1) Depended on by FCGIRequest to safely remove an item from request_map_.
   //
   // Effects:
-  // 1) If request_id was a key to an item of request_map_, the item was
-  //    removed from request_map_ and
+  // 1) If request_id was a key to an item of request_map_ and
+  //    request_count_map_[request_id.descriptor()] could be decremented, the
+  //    item was removed from request_map_ and 
   //    request_count_map_[request_id.descriptor()] was decremented.
   inline void RemoveRequest(RequestIdentifier
     request_id)

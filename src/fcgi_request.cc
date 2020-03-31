@@ -63,7 +63,7 @@
 //          still open, the request should conditionally add the descriptor of
 //          the connection to application_closure_request_set_ according to the
 //          value of close_connection_. In other words, 
-//          application_closure_request_set_ is modified if: 
+//          application_closure_request_set_ should be modified if: 
 //             close_connection_ && 
 //               !(request_data_ptr_->connection_closed_by_interface_)
 //       2) Connection closure processing due to connection corruption.
@@ -143,8 +143,7 @@
 
 
 // Implementation notes:
-// Note that this constructor should only be called by an
-// FCGIServerInterface object.
+// This constructor should only be called by an FCGIServerInterface object.
 //
 // Synchronization:
 // 1) It is assumed that interface_state_mutex_ is held prior to a call.
@@ -159,15 +158,15 @@ fcgi_si::FCGIRequest::FCGIRequest(
     interface_ptr_             {interface_ptr},
     request_identifier_        {request_id},
     request_data_ptr_          {request_data_ptr},
+    write_mutex_ptr_           {write_mutex_ptr},
+    bad_connection_state_ptr_  {bad_connection_state_ptr},
     environment_map_           {},
     request_stdin_content_     {},
     request_data_content_      {},
     role_                      {request_data_ptr->role_},
     close_connection_          {request_data_ptr->close_connection_},
     was_aborted_               {false},
-    completed_                 {false},
-    write_mutex_ptr_           {write_mutex_ptr},
-    bad_connection_state_ptr_  {bad_connection_state_ptr}
+    completed_                 {false}
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
      || write_mutex_ptr == nullptr || bad_connection_state_ptr_ == nullptr)
@@ -196,27 +195,28 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   interface_ptr_             {request.interface_ptr_},
   request_identifier_        {request.request_identifier_},
   request_data_ptr_          {request.request_data_ptr_},
+  write_mutex_ptr_           {request.write_mutex_ptr_},
+  bad_connection_state_ptr_  {request.bad_connection_state_ptr_},
   environment_map_           {std::move(request.environment_map_)},
   request_stdin_content_     {std::move(request.request_stdin_content_)},
   request_data_content_      {std::move(request.request_data_content_)},
   role_                      {request.role_},
   close_connection_          {request.close_connection_},
   was_aborted_               {request.was_aborted_},
-  completed_                 {request.completed_},
-  write_mutex_ptr_           {request.write_mutex_ptr_},
-  bad_connection_state_ptr_  {request.bad_connection_state_ptr_}
+  completed_                 {request.completed_}
 {
   request.associated_interface_id_ = 0;
   request.interface_ptr_ = nullptr;
   request.request_identifier_ = fcgi_si::RequestIdentifier {};
   request.request_data_ptr_ = nullptr;
+  request.write_mutex_ptr_ = nullptr;
+  request.bad_connection_state_ptr_ = nullptr;
   request.environment_map_.clear();
   request.request_stdin_content_.clear();
   request.request_data_content_.clear();
+  // request.role_ is unchanged.
   request.close_connection_ = false;
   request.completed_ = true;
-  request.write_mutex_ptr_ = nullptr;
-  request.bad_connection_state_ptr_ = nullptr;
 }
 
 fcgi_si::FCGIRequest&
@@ -228,6 +228,8 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
     interface_ptr_ = request.interface_ptr_;
     request_identifier_ = request.request_identifier_;
     request_data_ptr_ = request.request_data_ptr_;
+    write_mutex_ptr_ = request.write_mutex_ptr_;
+    bad_connection_state_ptr_ = request.bad_connection_state_ptr_;
     environment_map_ = std::move(request.environment_map_);
     request_stdin_content_ = std::move(request.request_stdin_content_);
     request_data_content_ = std::move(request.request_data_content_);
@@ -235,13 +237,13 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
     close_connection_ = request.close_connection_;
     was_aborted_ = request.was_aborted_;
     completed_ = request.completed_;
-    write_mutex_ptr_ = request.write_mutex_ptr_;
-    bad_connection_state_ptr_ = request.bad_connection_state_ptr_;
 
     request.associated_interface_id_ = 0;
     request.interface_ptr_ = nullptr;
     request.request_identifier_ = fcgi_si::RequestIdentifier {};
     request.request_data_ptr_ = nullptr;
+    request.write_mutex_ptr_ = nullptr;
+    request.bad_connection_state_ptr_ = nullptr;
     request.environment_map_.clear();
     request.request_stdin_content_.clear();
     request.request_data_content_.clear();
@@ -249,12 +251,11 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
     request.close_connection_ = false;
     request.was_aborted_ = false;
     request.completed_ = true;
-    request.write_mutex_ptr_ = nullptr;
-    request.bad_connection_state_ptr_ = nullptr;
   }
   return *this;
 }
 
+// Implementation specification:
 // If a request was not completed, the destructor attempts to update interface
 // state to reflect that the request is no longer relevant to the interface.
 //
@@ -321,14 +322,16 @@ fcgi_si::FCGIRequest::~FCGIRequest()
   } // RELEASE interface_state_mutex_.
 }
 
+// Implementation notes:
 // Synchronization:
 // 1) Acquires interface_state_mutex_.
 bool fcgi_si::FCGIRequest::AbortStatus()
 {
   if(completed_ || was_aborted_)
     return was_aborted_;
-
-  // ACQUIRE interface_state_mutex_ to determine current abort state.
+  
+  // The actual abort status is unknown if this point is reached.
+  // ACQUIRE interface_state_mutex_ to determine current abort status.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
   // Check if the interface has been destroyed.
@@ -362,16 +365,18 @@ bool fcgi_si::FCGIRequest::AbortStatus()
     was_aborted_ = true;
 
   return was_aborted_;
-} // RELEASE interface_state_mutex_
+} // RELEASE interface_state_mutex_.
 
+// Implementation notes:
 // Synchronization:
 // 1) Acquires and releases interface_state_mutex_.
+// 2) May acquire and release a write mutex.
 //
 // Race condition discussion:
 // If interface_state_mutex_ is not held for the duration of the write, it is
 // possible that a race condition may occur. There are two steps to
 // consider:
-// 1) Removal of the request from the interface.
+// 1) Removing the request from the interface.
 // 2) Notifying the client that the request is complete.
 //
 //    According to the mutex acquisition discipline, a write mutex can only be
@@ -386,12 +391,13 @@ bool fcgi_si::FCGIRequest::AbortStatus()
 //   In this scenario, an error on the part of the client can corrupt interface
 // state. Holding the interface mutex during the write prevents the interface
 // from spuriously validating an erroneous begin request record.
-bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
+bool fcgi_si::FCGIRequest::Complete(std::int32_t app_status)
 {
   if(completed_)
     return false;
 
-  constexpr char seq_num {4}; // Three headers and an 8-byte body. 3+1=4
+  constexpr int seq_num {4}; // Three headers and an 8-byte body. 3+1=4
+  constexpr int app_status_byte_length {32 / 8};
   uint8_t header_and_end_content[seq_num][fcgi_si::FCGI_HEADER_LEN];
 
   fcgi_si::PopulateHeader(&header_and_end_content[0][0],
@@ -405,20 +411,17 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
     request_identifier_.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
 
   // Fill end request content.
-  for(char i {0}; i < seq_num ; i++)
+  for(int i {0}; i < app_status_byte_length ; ++i)
     header_and_end_content[3][i] = static_cast<uint8_t>(
       app_status >> (24 - (8*i)));
-  header_and_end_content[3][4] = fcgi_si::FCGI_REQUEST_COMPLETE;
-  for(char i {5}; i < fcgi_si::FCGI_HEADER_LEN; i++)
+  header_and_end_content[3][app_status_byte_length] = 
+    fcgi_si::FCGI_REQUEST_COMPLETE;
+  for(int i {app_status_byte_length + 1}; i < fcgi_si::FCGI_HEADER_LEN; ++i)
     header_and_end_content[3][i] = 0;
 
-  // Fill iovec structures
-  struct iovec iovec_array[seq_num];
-  for(char i {0}; i < seq_num; i++)
-  {
-    iovec_array[i].iov_base = &header_and_end_content[i][0];
-    iovec_array[i].iov_len  = fcgi_si::FCGI_HEADER_LEN;
-  }
+  // Fill iovec structure for a call to ScatterGatherWriteHelper.
+  constexpr std::size_t number_to_write {seq_num*fcgi_si::FCGI_HEADER_LEN};
+  struct iovec iovec_wrapper[1] = {{header_and_end_content, number_to_write}};
 
   // ACQUIRE interface_state_mutex_ to allow interface request_map_
   // update and to prevent race conditions between the client server and
@@ -429,10 +432,15 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
     return false;
 
   // Implicitly ACQUIRE and RELEASE *write_mutex_ptr_.
-  bool write_return {ScatterGatherWriteHelper(iovec_array, seq_num,
-    seq_num*fcgi_si::FCGI_HEADER_LEN, true)};
+  bool write_return {ScatterGatherWriteHelper(iovec_wrapper, 1, number_to_write,
+    true)};
 
   // Update interface state and FCGIRequest state.
+  //
+  // If write_return is false, ScatterGatherWriteHelper updated interface
+  // state by removing the request. Also, the connection is closed. The
+  // descriptor does not need to be conditionally added to
+  // application_closure_request_set_.
   if(write_return)
   {
     completed_ = true;
@@ -441,6 +449,7 @@ bool fcgi_si::FCGIRequest::Complete(int32_t app_status)
     {
       try
       {
+        // It's possible that the the descriptor is already in the set.
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
       }
@@ -487,18 +496,21 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
 
 bool fcgi_si::FCGIRequest::
 ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
-  const std::size_t number_to_write, bool interface_mutex_held)
+  std::size_t number_to_write, bool interface_mutex_held)
 {
   std::unique_lock<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
 
   // An internal helper function used when application_closure_request_set_
-  // of the interface must be accessed. This occurs when:
+  // of the interface may be be accessed. This occurs when:
   // 1) The connection was found to be closed and close_connection_ == true
   // 2) The connection from the server to the client was corrupted from
   //    an incomplete write.
+  //
+  // If insert == true, insertion is attempted.
+  // If insert == false, insertion is attempted if close_connection == true.
   auto TryToAddToApplicationClosureRequestSet = 
-  [this, interface_mutex_held, &interface_state_lock]()->bool
+  [this, interface_mutex_held, &interface_state_lock](bool insert)->bool
   {
     // Conditionally ACQUIRE interface_state_mutex_.
     if(!interface_mutex_held)
@@ -520,8 +532,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       completed_ = true;
       was_aborted_ = true;
       interface_ptr_->RemoveRequest(request_identifier_);
-      interface_ptr_->application_closure_request_set_.insert(
-        request_identifier_.descriptor());
+      if(insert || close_connection_)
+        interface_ptr_->application_closure_request_set_.insert(
+          request_identifier_.descriptor());
       return true;
     }
     catch(...)
@@ -530,15 +543,6 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       throw;
     }
   };
-
-  // Conditionally ACQUIRE interface_state_mutex_.
-  if(!interface_mutex_held)
-  {
-    interface_state_lock.lock();
-    if(!InterfaceStateCheckForWritingUponMutexAcquisition())
-      return false;
-  }
-  // interface_state_mutex_ held.
   
   std::size_t working_number_to_write {number_to_write};
   // write_lock has the following property in the loop below:
@@ -552,35 +556,40 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   int select_descriptor_range {fd + 1};
   // A set for file descriptors for a select call below.
   fd_set write_set {};
-  // interface_state_mutex_ is guaranteed to be held during the first iteration.
-  bool first_iteration {true};
+
   while(working_number_to_write > 0) // Start write loop.
   {
     // Conditionally ACQUIRE interface_state_mutex_.
-    // If the mutex is acquired, is is possible that the interface was destroyed
-    // or that the connection was closed.
-    if(!interface_mutex_held && !first_iteration && !write_lock.owns_lock())
+    // If interface_state_mutex_ is acquired, is is possible that the interface
+    // was destroyed or that the connection was closed.
+    if(!interface_mutex_held && !write_lock.owns_lock())
     {
       interface_state_lock.lock();
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
         return false;
     }
-    first_iteration = false;
 
     // Conditionally ACQUIRE *write_mutex_ptr_.
     if(!write_lock.owns_lock())
     {
       write_lock.lock();
-      // Removing the request from the interface will be deferred to the
-      // destructor of the request.
       if(*bad_connection_state_ptr_)
+      {
+        // application_closure_request_set_ does not need to be updated. An
+        // appropriate update was performed by the entity which set
+        // *bad_connection_state_ptr_ from false to true.
+        completed_ = true;
+        was_aborted_ = true;
+        interface_ptr_->RemoveRequest(request_identifier_);
         throw std::runtime_error {ERROR_STRING("A connection from the "
           "interface to the client was found which had a corrupted state.")};
+      }
     }
     // *write_mutex_ptr_ is held.
 
     // Conditionally RELEASE interface_state_mutex_ to free the interface
-    // before the write.
+    // before the write. The mutex will still be held by the caller if
+    // interface_mutex_held == true.
     if(interface_state_lock.owns_lock())
       interface_state_lock.unlock();
 
@@ -593,7 +602,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       write_lock.unlock();
       working_number_to_write = 0;
     }
-    else // The number written is less than number_to_write. We must check 
+    else // The number written was less than number_to_write. We must check 
          // errno.
     {
       // EINTR is handled by ScatterGatherSocketWrite.
@@ -631,12 +640,14 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               // releasing the write mutex.
 
               // Conditionally RELEASE *write_mutex_ptr_.
+              // write_lock.owns_lock() is equivalent to a partial write and,
+              // in this case, connection corruption.
               if(write_lock.owns_lock())
               {
                 *bad_connection_state_ptr_ = true;
                 write_lock.unlock();
                 // May ACQUIRE interface_state_mutex_.
-                if(!TryToAddToApplicationClosureRequestSet())
+                if(!TryToAddToApplicationClosureRequestSet(true))
                   return false;
               }
               std::error_code ec {errno, std::system_category()};
@@ -658,41 +669,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         // RELEASE *write_mutex_ptr_.
         write_lock.unlock();
         // Conditionally ACQUIRE interface_state_mutex_
-        if(!interface_mutex_held)
-        {
-          try
-          {
-            interface_state_lock.lock();
-          }
-          catch(...)
-          {
-            std::terminate();
-          }          
-          if(!InterfaceStateCheckForWritingUponMutexAcquisition())
-            return false;
-        }
-        // interface_state_mutex_ held.
-        completed_   = true;
-        was_aborted_ = true;
-        interface_ptr_->RemoveRequest(request_identifier_);
-
-        if(close_connection_)
-        {
-          try
-          {
-            interface_ptr_->application_closure_request_set_.insert(
-              request_identifier_.descriptor());
-          }
-          catch(...)
-          {
-            interface_ptr_->bad_interface_state_detected_ = true;
-            throw;
-          }
-        }
-        // Conditionally RELEASE interface_state_mutex_.
-        if(interface_state_lock.owns_lock())
-          interface_state_lock.unlock();
-
+        // If close_connection_ == true, try to add to
+        // application_closure_request_set_.
+        TryToAddToApplicationClosureRequestSet(false);
         return false;
       } 
       // An unrecoverable error was encountered during the write.
@@ -700,20 +679,19 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       else
       {
         // The same situation applies here as above. Writing some data and
-        // throwing corrupts the connection.
+        // exiting corrupts the connection.
 
         // Conditionally RELEASE *write_mutex_ptr_.
-        if(working_number_to_write < number_to_write) // Some but not all.
+        if(std::get<2>(write_return) < number_to_write) // Some but not all.
         {
           *bad_connection_state_ptr_ = true;
+          // *write_mutex_ptr_ MUST NOT be held to prevent potential deadlock.
+          // RELEASE *write_mutex_ptr_.
           write_lock.unlock();
           // May ACQUIRE interface_state_mutex_.
-          if(!TryToAddToApplicationClosureRequestSet())
+          if(!TryToAddToApplicationClosureRequestSet(true))
             return false;
         }
-        // Conditionally RELEASE *write_mutex_ptr_.
-        if(write_lock.owns_lock())
-          write_lock.unlock();
         std::error_code ec {errno, std::system_category()};
         throw std::system_error {ec, ERRNO_ERROR_STRING("write from a call to "
           "socket_functions::SocketWrite")};

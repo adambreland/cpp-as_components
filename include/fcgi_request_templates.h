@@ -35,7 +35,9 @@ bool fcgi_si::FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
     write_success = ScatterGatherWriteHelper(
       std::get<1>(partition_return).data(),
       std::get<1>(partition_return).size(), 
-      std::get<2>(partition_return), false);
+      std::get<2>(partition_return),
+      false
+    );
     begin_iter = std::get<3>(partition_return);
   }
   return write_success;
