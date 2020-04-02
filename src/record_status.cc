@@ -80,7 +80,7 @@ fcgi_si::RecordStatus::Read(int connection)
       {
         // Connection was closed. Discard any read data and update interface
         // state.
-        i_ptr_->connections_found_closed_set_.insert(connection);
+        i_ptr_->connections_to_close_set_.insert(connection);
         return {};
       }
 

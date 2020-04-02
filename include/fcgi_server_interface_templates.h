@@ -3,6 +3,14 @@
 
 #include <type_traits>
 
+// Implementation notes:
+// This function is a specialized instance of a general iteration algorithm
+// over two sorted lists. It processes both lists together and performs the
+// same conceptual action for an item regardless of which lists the item
+// occurs in. It this sense, it is equivalent to performing a set union on the
+// two lists and then iterating over the union.
+// 
+// This function also clears both lists during the single processing pass.
 template <typename C>
 void fcgi_si::FCGIServerInterface::
 ConnectionClosureProcessing(C* first_ptr, typename C ::iterator first_iter,

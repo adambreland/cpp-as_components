@@ -17,7 +17,7 @@
 
 namespace fcgi_si {
 
-//
+// 
 //
 //
 class FCGIServerInterface {
@@ -108,13 +108,13 @@ class FCGIServerInterface {
     request_count_map_[request_id.descriptor()]++;
   }
 
-  // Iterates over the referenced containers of descriptors which are
-  // scheduled for closure and attempts to close the descriptors. This helper
-  // is intended to iterate over connections_found_closed_set_ and
+  // Iterates over the referenced containers of descriptors. These descriptors
+  // are scheduled for closure. Attempts to close the descriptors. This 
+  // helper is intended to iterate over connections_to_close_set_ and
   // application_closure_request_set_.
   // 
   // Parameters:
-  // first_ptr, second_ptr:   Pointers to containers which contains connected
+  // first_ptr, second_ptr:   Pointers to containers which contain connected
   //                          socket descriptors.
   // first_iter, second_iter: Iterators which point to the starting descriptors
   //                          of *first_ptr and *second_ptr, respectively.
@@ -125,9 +125,12 @@ class FCGIServerInterface {
   //
   // Preconditions:  
   // 1) interface_state_mutex_ must be held prior to a call.
-  // 2) C::value_type is int.
-  // 3) C::iterator satsifies, at least, the requirements of 
+  // 2) (Duck typing) C::iterator and C::value_type are types and C::erase is a
+  //    member function. All have the usual semantics.
+  // 3) C::value_type is int.
+  // 4) C::iterator satsifies, at least, the requirements of 
   //    LegacyForwardIterator.
+  // 
   //
   // Exceptions:
   // 1) A call may cause program termination if an exception occurs which could
@@ -140,7 +143,7 @@ class FCGIServerInterface {
   //
   // Effects:
   // 1) Both of the referenced containers were emptied.
-  // 2) The connected sockets represented by the descriptors given by the union
+  // 2) The connected sockets represented by the descriptors in the union
   //    of the containers were closed.
   // 3) If a connection had assigned requests, the descriptor of the
   //    connection was added to dummy_descriptor_set_ and the descriptor
@@ -222,7 +225,8 @@ class FCGIServerInterface {
   // dummy_descriptor_set_.
   //
   // Parameters:
-  // connection: The connected socket descriptor to be removed.
+  // connection: The connected socket descriptor to be removed from the
+  //             interface.
   //
   // Preconditions:  
   // 1) interface_state_mutex_ must be held prior to a call.
@@ -250,15 +254,17 @@ class FCGIServerInterface {
   //    which were not assigned were removed from request_map_.
   // 2) Requests in request_map_ which were associated with connection and
   //    which were assigned had the connection_closed_by_interface_ flag of
-  //    their RequestData_ object set.
+  //    their RequestData object set.
   // 3) If no assigned requests were present, the connection was closed.
   // 4) If assigned requests were present:
   //    a) The descriptor was added to dummy_descriptor_set_.
   //    b) The connected socket associated with the descriptor was closed.
   //    c) The descriptor is associated with the file description of 
   //       FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
-  //       will no be reused until properly processed as a member of 
+  //       will not be reused until properly processed as a member of 
   //       dummy_desriptor_set_.
+  // 5) The element associated with the key connection was removed from
+  //    write_mutex_map_.  
   void RemoveConnection(int connection);
 
   // Attemps to remove the request pointed to by request_map_iter from
@@ -419,11 +425,16 @@ class FCGIServerInterface {
   // information from the client is a sequence of complete FastCGI records.
   std::map<int, RecordStatus> record_status_map_ {};
 
-  // A set for connections which were found to have been closed by the peer.
+  // A set for connections which were found to have been closed by the peer or
+  // which were corrupted by the interface through a partial write.
   // Connection closure occurs in a cleanup step.
-  std::set<int> connections_found_closed_set_ {};
+  std::set<int> connections_to_close_set_ {};
 
   std::set<int> dummy_descriptor_set_ {};
+
+  // A flag which is checked by AcceptRequests when it is entered. When
+  // set, AcceptRequests throws immediately.
+  bool local_bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 

@@ -31,12 +31,63 @@
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
+// Implementation notes:
+// 1) Mutex acquisition patterns and related actions:
+//    a) With no other mutexes held, the interface may either:
+//        1) Acquire and then release a write mutex.
+//        2) Acquire interface_state_mutex_, acquire a write mutex, and then
+//           release these in the opposite order of acquisition.
+//    b) In particular, the pattern "has write mutex, wants interface mutex" is
+//       forbidden as it may lead to deadlock.
+//    c) If write mutexes should be destroyed, the following pattern must be 
+//       followed:
+//       1) No mutexes are held.
+//       2) Acquire interface_state_mutex_.
+//       3) Acquire a write mutex.
+//       4) Release the write mutex which was just acquired. Holding the
+//          interface mutex ensures that the write mutex will not be acquired
+//          by a request as requests follow the discipline of only acquiring a
+//          write mutex while holding the interface mutex.
+//       5) Acquire and release other write mutexes if needed.
+//       6) Implicitly destroy the write mutexes.
+//       7) Update interface state so that any requests which still exist for
+//          a connection whose write mutex was destroyed will not try to
+//          acquire the destroyed write mutex.
+//    d) File descriptor invalidation through calling close on the descriptor
+//       may only occur under the protection of the interface mutex. Requests
+//       treat mutex validity and file descriptor validity as equivalent.
+//       These properties are currently signaled through the 
+//       connection_closed_by_interface_ flag of the RequestData object of the
+//       request.
+// 2) State checks after mutex acquisition:
+//    a) Whenever interface_state_mutex_ is obtained with the intention of
+//       using interface state for an action other than interface destruction, 
+//       bad_interface_state_detected_ must be checked. If true, some part of
+//       the shared interface state is corrupt. An exception should be thrown.
+//       The interface should be destroyed.
+//    b) Whenever a write mutex is obtained with the intention of writing data
+//       to the connection protected by the interface, the boolean value 
+//       associated with the write mutex must be checked. If true, the
+//       connection is corrupted.
+// 2) Invariants on state:
+//    a) The sets dummy_descriptor_set_ and 
+//       (application_closure_request_set_ U connections_to_close_set_)
+//       should be disjoint before and after connection cleanup.
+//    b) The interface destructor should always be able to safely destroy the
+//       interface by:
+//       1) Closing the connections in either of write_mutex_map_ or
+//          record_status_map_.
+//       2) Closing the connections in dummy_descriptor_set_.
+//       Any action which would prevent safe destruction must result in
+//       program termination.
+
+
 // Initialize static class data members.
 std::mutex fcgi_si::FCGIServerInterface::interface_state_mutex_ {};
 unsigned long fcgi_si::FCGIServerInterface::interface_identifier_ {0};
 unsigned long fcgi_si::FCGIServerInterface::previous_interface_identifier_ {0};
 
-fcgi_si::FCGIServerInterface::
+::fcgi_si::FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   uint16_t role, int32_t app_status_on_abort)
 : app_status_on_abort_ {app_status_on_abort},
@@ -202,18 +253,22 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   interface_identifier_ = previous_interface_identifier_;
 } // RELEASE interface_state_mutex_.
 
-fcgi_si::FCGIServerInterface::~FCGIServerInterface()
+::fcgi_si::FCGIServerInterface::~FCGIServerInterface()
 {
   // Any exception results in program termination.
   try
   {
+    for(auto dds_iter {dummy_descriptor_set_.begin(); 
+      dds_iter != dummy_descriptor_set_.end(); ++dds_iter})
+      close(*dds_iter);
+
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
     // FCGIRequest objects for write mutexes ensures that no write mutex will
-    // be held when the loop completes.
+    // be held when the loop completes until the interface mutex is released.
     for(auto write_mutex_iter {write_mutex_map_.begin()};
         write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
     {
@@ -237,7 +292,7 @@ fcgi_si::FCGIServerInterface::~FCGIServerInterface()
   }
 }
 
-int fcgi_si::FCGIServerInterface::
+int ::fcgi_si::FCGIServerInterface::
 AcceptConnection()
 {
   struct sockaddr_storage new_connection_address;
@@ -392,7 +447,7 @@ AcceptConnection()
         if(errno != EINTR)
         {
           std::error_code ec {errno, std::system_category()};
-          throw std::system_error {ec};
+          throw std::system_error {ec, "close"};
         }
     }
     catch(...)
@@ -407,16 +462,22 @@ AcceptConnection()
 } // RELEASE interface_state_mutex_.
 
 std::vector<fcgi_si::FCGIRequest>
-fcgi_si::FCGIServerInterface::
+::fcgi_si::FCGIServerInterface::
 AcceptRequests()
 {
-  std::vector<fcgi_si::FCGIRequest> requests {};
+  std::vector<FCGIRequest> requests {};
+
+  if(local_bad_interface_state_detected_)
+      throw std::logic_error {"The interface was found to be corrupt."};
   
   // CLEANUP
   {
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock 
       {FCGIServerInterface::interface_state_mutex_};
+
+    if(bad_interface_state_detected_)
+      throw std::logic_error {"The interface was found to be corrupt."};
 
     // Remove dummy descriptors if possible.
     //
@@ -434,8 +495,10 @@ AcceptRequests()
     {
       std::map<RequestIdentifier, RequestData>::iterator request_map_iter
         {request_map_.lower_bound(RequestIdentifier {*dds_iter, 0})};
+
       // The absence of requests allows closure of the descriptor.
-      // Remember that RequestIdentifier is lexically ordered.
+      // Remember that RequestIdentifier is lexically ordered and that a
+      // request with an FCGI_id of zero is never added to request_map_.
       if(request_map_iter == request_map_.end() 
           || request_map_iter->first.descriptor() > *dds_iter)
       {
@@ -445,7 +508,10 @@ AcceptRequests()
           std::set<int>::iterator safe_erasure_iterator {dds_iter};
           ++dds_iter;
           // Erase first to prevent closure without removal from
-          // dummy_descriptor_set_.
+          // dummy_descriptor_set_ and potential double closure.
+          //
+          // Assume that erase either doesn't throw or meets the strong
+          // exception guarantee. In either case a descriptor won't be leaked.
           dummy_descriptor_set_.erase(safe_erasure_iterator);
           int close_return {close(connection_to_be_closed)};
           if(close_return == -1 && errno != EINTR)
@@ -464,22 +530,28 @@ AcceptRequests()
         ++dds_iter;
     }
 
-    // Close connection descriptors for connections which were found to be 
-    // closed and for which closure was requested by FCGIRequest objects.
+    // Close connection descriptors for which closure was requested.
     // Update interface state to allow FCGIRequest objects to inspect for
     // connection closure. 
     //
     // Note that dummy_descriptor_set_ is disjoint from the union of
-    // connection_found_closed_set_ and application_closure_request_set_.
-    ConnectionClosureProcessing(&connections_found_closed_set_,
-      connections_found_closed_set_.begin(), connections_found_closed_set_.end(),
+    // connections_to_close_set_ and application_closure_request_set_. This
+    // is necessary as the presence of a descriptor in both categories of
+    // descriptors may result in double closure.
+    ConnectionClosureProcessing(&connections_to_close_set_,
+      connections_to_close_set_.begin(), connections_to_close_set_.end(),
       &application_closure_request_set_, application_closure_request_set_.begin(),
       application_closure_request_set_.end());
   } // RELEASE interface_state_mutex_;
 
   // DESCRIPTOR MONITORING
 
-  // Construct descriptor set to wait on for select.
+  // TODO Determine a better I/O multiplexing system call or library function.
+  // For example, some glibc implementations have an upper limit of 1023 for
+  // file descriptor values due to the size of FD_SET (which is just an integer
+  // type used as a bitset).
+  //
+  // Construct a descriptor set to wait on for select.
   fd_set read_set;
   FD_ZERO(&read_set);
   // Add listening socket to read_set for new connections.
@@ -500,9 +572,15 @@ AcceptRequests()
   int select_return {};
   while((select_return =
     select(number_for_select, &read_set, nullptr, nullptr, nullptr))
-    == -1 && (errno == EINTR || errno == EAGAIN)){}
+    == -1 && (errno == EINTR || errno == EAGAIN))
+    continue;
   if(select_return == -1) // Unrecoverable error from select().
-    throw std::runtime_error {ERRNO_ERROR_STRING("select")};
+  {
+    if(errno == EBADF)
+      local_bad_interface_state_detected_ = true;
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error {ec, "select"};
+  }
   // Check connected sockets (as held in record_status_map_) before the
   // listening socket.
   int connections_read {0};
@@ -515,7 +593,7 @@ AcceptRequests()
     if(FD_ISSET(fd, &read_set))
     {
       connections_read++;
-      std::vector<fcgi_si::RequestIdentifier> request_identifiers
+      std::vector<RequestIdentifier> request_identifiers
         {it->second.Read(fd)};
       if(request_identifiers.size())
       {
@@ -702,18 +780,44 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
-// Syncrhonization:
+// Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
+void ::fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
 {
   // Care must be taken to prevent descriptor leaks or double closures.
+
+  // A lambda which checks for the presence of the connection in and attempts
+  // to erase the connection from record_status_map_ and write_mutex_map_.
+  // Terminates the program if erasure doesn't or can't occur.
+  auto EraseConnectionOrTerminate = [this](int connection)->void
+  {
+    try
+    {
+      std::map<int, RecordStatus>::iterator record_iter 
+        {record_status_map_.find(connection)};
+      std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
+        write_iter {write_mutex_map_.find(connection)}; 
+      if(record_iter == record_status_map_.end() 
+        || write_iter == write_mutex_map_.end())
+        throw std::logic_error {"An expected connection was not present in "
+          "record_status_map_ or write_mutex_map_"};
+
+      record_status_map_.erase(record_iter);
+      write_mutex_map_.erase(write_iter);
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
+  };
+
   try
   {
     bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
     // ACQUIRE and RELEASE the write mutex of the connection to ensure that a 
     // request does not hold it while the connection is being erased.
     std::unique_lock<std::mutex> write_lock
-      {*(write_mutex_map_[connection].first)};
+      {*(write_mutex_map_.at(connection).first)};
     write_lock.unlock();
     // Close the connection in one of two ways.
     if(assigned_requests)
@@ -737,30 +841,14 @@ void fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
       // Order as given. If insertion throws, erasure never occurs and the
       // descriptor is not leaked.
       dummy_descriptor_set_.insert(connection);
-      try
-      {
-        record_status_map_.erase(connection);
-        write_mutex_map_.erase(connection);
-      }
-      catch(...)
-      {
-        std::terminate();
-      }
+      EraseConnectionOrTerminate(connection);
     }
     else
     {
       // Order as given. If erasure is not ordered before the call of
       // close(connection), it is possible that erasure does not occur and
       // close(connection) will be called twice.
-      try
-      {
-        record_status_map_.erase(connection);
-        write_mutex_map_.erase(connection);
-      }
-      catch(...)
-      {
-        std::terminate();
-      }
+      EraseConnectionOrTerminate(connection);
       int close_return {close(connection)};
       if(close_return == -1 && errno != EINTR)
       {
@@ -1011,7 +1099,7 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
     }
     try
     {
-      connections_found_closed_set_.insert(connection);
+      connections_to_close_set_.insert(connection);
     }
     catch(...)
     {
@@ -1030,7 +1118,7 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   {
     if(errno == EPIPE)
     {
-      connections_found_closed_set_.insert(connection);
+      connections_to_close_set_.insert(connection);
       return false;
     }
     else 
@@ -1039,7 +1127,7 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
       {
         // The connection to the client was just corrupted.
         write_mutex_map_[connection].second = true;
-        connections_found_closed_set_.insert(connection);
+        connections_to_close_set_.insert(connection);
       }
       throw std::runtime_error {ERRNO_ERROR_STRING(
         "write from a call to NonblockingPollingSocketWrite")};
