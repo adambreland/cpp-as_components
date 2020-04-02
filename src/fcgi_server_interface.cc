@@ -597,20 +597,22 @@ AcceptRequests()
         {it->second.Read(fd)};
       if(request_identifiers.size())
       {
+        // ACQUIRE interface_state_mutex_.
+        std::lock_guard<std::mutex> interface_state_lock
+          {FCGIServerInterface::interface_state_mutex_};
+
         std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
           write_mutex_map_iter {write_mutex_map_.find(fd)};
         std::mutex* write_mutex_ptr 
           {write_mutex_map_iter->second.first.get()};
-        bool* write_mutex_bad_state_ptr {&write_mutex_map_iter->second.second};
-        // ACQUIRE interface_state_mutex_.
-        std::lock_guard<std::mutex> interface_state_lock
-          {FCGIServerInterface::interface_state_mutex_};
+        bool* write_mutex_bad_state_ptr
+          {&(write_mutex_map_iter->second.second)};
         // For each request_id, find the associated RequestData object, extract
         // a pointer to it, and create an FCGIRequest object from it.
         for(RequestIdentifier request_id : request_identifiers)
         {
-          RequestData* request_data_ptr {nullptr};
-          request_data_ptr = &(request_map_.find(request_id)->second);
+          RequestData* request_data_ptr
+            {&(request_map_.find(request_id)->second)};
           FCGIRequest request {request_id,
             FCGIServerInterface::interface_identifier_, this, request_data_ptr,
             write_mutex_ptr, write_mutex_bad_state_ptr};

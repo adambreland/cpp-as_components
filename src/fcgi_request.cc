@@ -187,7 +187,7 @@ fcgi_si::FCGIRequest::FCGIRequest(
   
   // Update the status of the RequestData object to reflect its use in the
   // construction of an FCGIRequest which will be exposed to the application.
-  request_data_ptr_->request_status_ = fcgi_si::RequestStatus::kRequestAssigned;
+  request_data_ptr_->request_status_ = RequestStatus::kRequestAssigned;
 }
 
 fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept

@@ -13,27 +13,27 @@ namespace fcgi_si {
 
 class RecordStatus {
 public:
-  inline bool EmptyRecord() const
+  inline bool EmptyRecord() const noexcept
   {
     return content_bytes_expected_ == 0;
   }
 
-  inline bool get_invalid_status() const
+  inline bool get_invalid_status() const noexcept
   {
     return invalid_record_;
   }
 
-  inline const std::vector<uint8_t>& get_local_content() const
+  inline const std::vector<uint8_t>& get_local_content() const noexcept
   {
-    return {local_record_content_buffer_};
+    return local_record_content_buffer_;
   }
 
-  inline fcgi_si::RequestIdentifier get_request_id() const
+  inline fcgi_si::RequestIdentifier get_request_id() const noexcept
   {
     return request_id_;
   }
 
-  inline fcgi_si::FCGIType get_type() const
+  inline fcgi_si::FCGIType get_type() const noexcept
   {
     return type_;
   }
@@ -41,30 +41,30 @@ public:
   std::vector<RequestIdentifier> Read(int connection);
 
   RecordStatus() = default;
-  RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr);
+  RecordStatus(fcgi_si::FCGIServerInterface* interface_ptr) noexcept;
   RecordStatus(const RecordStatus&) = delete;
-  RecordStatus(RecordStatus&&);
+  RecordStatus(RecordStatus&&) noexcept;
 
   RecordStatus& operator=(const RecordStatus&) = delete;
-  RecordStatus& operator=(RecordStatus&&);
+  RecordStatus& operator=(RecordStatus&&) noexcept;
 
   ~RecordStatus() = default;
 
 private:
-  inline uint32_t ExpectedBytes() const
+  inline uint32_t ExpectedBytes() const noexcept
   {
     return padding_bytes_expected_ + content_bytes_expected_
-           + fcgi_si::FCGI_HEADER_LEN;
+           + FCGI_HEADER_LEN;
   }
 
   inline bool
-  IsHeaderComplete() const
+  IsHeaderComplete() const noexcept
   {
-    return bytes_received_ >= fcgi_si::FCGI_HEADER_LEN;
+    return bytes_received_ >= FCGI_HEADER_LEN;
   }
 
   inline bool
-  IsRecordComplete() const
+  IsRecordComplete() const noexcept
   {
     return ExpectedBytes() == bytes_received_;
   }
@@ -73,7 +73,7 @@ private:
 
   // The header of the FCGI record. The number of valid bytes in a
   // prefix of header is determined by the value of bytes received.
-  uint8_t header_[fcgi_si::FCGI_HEADER_LEN];
+  uint8_t header_[FCGI_HEADER_LEN];
 
   // An accumulator variable to track header, content, and padding
   // completion and, hence, record completion.
@@ -82,8 +82,8 @@ private:
   uint16_t content_bytes_expected_;
   uint8_t padding_bytes_expected_;
 
-  fcgi_si::FCGIType type_;
-  fcgi_si::RequestIdentifier request_id_;
+  FCGIType type_;
+  RequestIdentifier request_id_;
 
   // When the header is completed, the record is either rejected or
   // accepted. This is performed by UpdateAfterHeaderCompletion.
@@ -97,7 +97,7 @@ private:
   // an associated application request in which to store the content.
   std::vector<uint8_t> local_record_content_buffer_;
 
-  fcgi_si::FCGIServerInterface* i_ptr_;
+  FCGIServerInterface* i_ptr_;
 };
 
 } // namespace fcgi_si
