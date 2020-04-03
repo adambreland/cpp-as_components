@@ -17,8 +17,10 @@
 #include "include/protocol_constants.h"
 #include "include/utility.h"
 
+namespace fcgi_si {
+
 template<typename ByteIter>
-bool fcgi_si::FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
+bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
   FCGIType type)
 {
   if(completed_)
@@ -44,15 +46,17 @@ bool fcgi_si::FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
 }
 
 template<typename ByteIter>
-bool fcgi_si::FCGIRequest::Write(ByteIter begin_iter, ByteIter end_iter)
+bool FCGIRequest::Write(ByteIter begin_iter, ByteIter end_iter)
 {
   return WriteHelper(begin_iter, end_iter, FCGIType::kFCGI_STDOUT);
 }
 
 template<typename ByteIter>
-bool fcgi_si::FCGIRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
+bool FCGIRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
 {
   return WriteHelper(begin_iter, end_iter, FCGIType::kFCGI_STDERR);
 }
+
+} // namespace fcgi_si
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_

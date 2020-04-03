@@ -140,14 +140,14 @@
 //      is released.
 //   d) A request may never acquire interface_state_mutex_ while a write mutex
 //      is held. Doing so may lead to deadlock.
-
+namespace fcgi_si {
 
 // Implementation notes:
 // This constructor should only be called by an FCGIServerInterface object.
 //
 // Synchronization:
 // 1) It is assumed that interface_state_mutex_ is held prior to a call.
-fcgi_si::FCGIRequest::FCGIRequest(
+FCGIRequest::FCGIRequest(
   RequestIdentifier request_id,
   unsigned long interface_id,
   FCGIServerInterface* interface_ptr,
@@ -190,7 +190,7 @@ fcgi_si::FCGIRequest::FCGIRequest(
   request_data_ptr_->request_status_ = RequestStatus::kRequestAssigned;
 }
 
-fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
+FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
 : associated_interface_id_   {request.associated_interface_id_},
   interface_ptr_             {request.interface_ptr_},
   request_identifier_        {request.request_identifier_},
@@ -207,7 +207,7 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
 {
   request.associated_interface_id_ = 0;
   request.interface_ptr_ = nullptr;
-  request.request_identifier_ = fcgi_si::RequestIdentifier {};
+  request.request_identifier_ = RequestIdentifier {};
   request.request_data_ptr_ = nullptr;
   request.write_mutex_ptr_ = nullptr;
   request.bad_connection_state_ptr_ = nullptr;
@@ -219,8 +219,7 @@ fcgi_si::FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.completed_ = true;
 }
 
-fcgi_si::FCGIRequest&
-fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
+FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request) noexcept
 {
   if(this != &request)
   {
@@ -240,7 +239,7 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
 
     request.associated_interface_id_ = 0;
     request.interface_ptr_ = nullptr;
-    request.request_identifier_ = fcgi_si::RequestIdentifier {};
+    request.request_identifier_ = RequestIdentifier {};
     request.request_data_ptr_ = nullptr;
     request.write_mutex_ptr_ = nullptr;
     request.bad_connection_state_ptr_ = nullptr;
@@ -278,7 +277,7 @@ fcgi_si::FCGIRequest::operator=(FCGIRequest&& request) noexcept
 //    b) Interface state could not be updated successfully. The
 //       bad_interface_state_detected_ flag of the interface was set.
 // 2) If the request was completed, the call had no effect.
-fcgi_si::FCGIRequest::~FCGIRequest()
+FCGIRequest::~FCGIRequest()
 {
   if(!completed_)
   {
@@ -325,7 +324,7 @@ fcgi_si::FCGIRequest::~FCGIRequest()
 // Implementation notes:
 // Synchronization:
 // 1) Acquires interface_state_mutex_.
-bool fcgi_si::FCGIRequest::AbortStatus()
+bool FCGIRequest::AbortStatus()
 {
   if(completed_ || was_aborted_)
     return was_aborted_;
@@ -391,7 +390,7 @@ bool fcgi_si::FCGIRequest::AbortStatus()
 //   In this scenario, an error on the part of the client can corrupt interface
 // state. Holding the interface mutex during the write prevents the interface
 // from spuriously validating an erroneous begin request record.
-bool fcgi_si::FCGIRequest::Complete(std::int32_t app_status)
+bool FCGIRequest::Complete(std::int32_t app_status)
 {
   if(completed_)
     return false;
@@ -463,7 +462,7 @@ bool fcgi_si::FCGIRequest::Complete(std::int32_t app_status)
   return write_return;
 } // RELEASE interface_state_mutex_.
 
-bool fcgi_si::FCGIRequest::
+bool FCGIRequest::
 InterfaceStateCheckForWritingUponMutexAcquisition()
 {
   // Check if the interface has been destroyed.
@@ -494,7 +493,7 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   return true;
 }
 
-bool fcgi_si::FCGIRequest::
+bool FCGIRequest::
 ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   std::size_t number_to_write, bool interface_mutex_held)
 {
@@ -700,3 +699,5 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   } // Exit write loop.
   return true;
 }
+
+} // namespace fcgi_si

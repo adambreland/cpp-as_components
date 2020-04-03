@@ -6,12 +6,14 @@
 #include "include/protocol_constants.h"
 #include "include/utility.h"
 
-void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
+namespace fcgi_si {
+
+void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
   std::uint16_t FCGI_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept
 {
-  std::uint8_t header_array[fcgi_si::FCGI_HEADER_LEN];
-  header_array[0] = fcgi_si::FCGI_VERSION_1;
+  std::uint8_t header_array[FCGI_HEADER_LEN];
+  header_array[0] = FCGI_VERSION_1;
   header_array[1] = static_cast<uint8_t>(type);
   header_array[2] = static_cast<uint8_t>(FCGI_id >> 8);
   header_array[3] = static_cast<uint8_t>(FCGI_id);
@@ -21,11 +23,10 @@ void fcgi_si::PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   header_array[7] = 0;
 
   std::memcpy(static_cast<void*>(byte_ptr), static_cast<void*>(header_array),
-    fcgi_si::FCGI_HEADER_LEN);
+    FCGI_HEADER_LEN);
 }
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-fcgi_si::
 ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
 {
   uint32_t bytes_processed {0};
@@ -90,7 +91,7 @@ ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
   return result;
 }
 
-std::vector<uint8_t> fcgi_si::uint32_tToUnsignedCharacterVector(uint32_t c)
+std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c)
 {
   // This implementation allows the absolute size of char to be larger than
   // one byte. It is assumed that only ASCII digits are present in c_string.
@@ -98,3 +99,5 @@ std::vector<uint8_t> fcgi_si::uint32_tToUnsignedCharacterVector(uint32_t c)
   std::vector<uint8_t> c_vector {c_string.begin(), c_string.end()};
   return c_vector;
 }
+
+} // namspace fcgi_si

@@ -17,15 +17,15 @@
 // The value zero is used for type_ as no FastCGI record has this value as a
 // type. This is appropriate as no record identity has yet been assigned to the
 // RecordStatus object.
-::fcgi_si::RecordStatus::
-RecordStatus(FCGIServerInterface* interface_ptr) noexcept
+namespace fcgi_si {
+
+RecordStatus::RecordStatus(FCGIServerInterface* interface_ptr) noexcept
 : header_ {}, bytes_received_ {0}, content_bytes_expected_ {0},
   padding_bytes_expected_ {0}, type_ {static_cast<fcgi_si::FCGIType>(0)},
   request_id_ {}, invalid_record_ {false}, i_ptr_ {interface_ptr}
 {}
 
-::fcgi_si::RecordStatus::
-RecordStatus(RecordStatus&& record_status) noexcept
+RecordStatus::RecordStatus(RecordStatus&& record_status) noexcept
 : bytes_received_ {record_status.bytes_received_},
   content_bytes_expected_ {record_status.content_bytes_expected_},
   padding_bytes_expected_ {record_status.padding_bytes_expected_},
@@ -39,8 +39,7 @@ RecordStatus(RecordStatus&& record_status) noexcept
   std::memcpy(header_, record_status.header_, FCGI_HEADER_LEN);
 }
 
-::fcgi_si::RecordStatus& ::fcgi_si::RecordStatus::
-operator=(RecordStatus&& record_status) noexcept
+RecordStatus& RecordStatus::operator=(RecordStatus&& record_status) noexcept
 {
   if(this != &record_status)
   {
@@ -59,8 +58,7 @@ operator=(RecordStatus&& record_status) noexcept
   return *this;
 }
 
-std::vector<fcgi_si::RequestIdentifier>
-fcgi_si::RecordStatus::Read(int connection)
+std::vector<RequestIdentifier> RecordStatus::Read(int connection)
 {
   // Number of bytes read at a time from connected sockets.
   constexpr int kBufferSize {512};
@@ -150,8 +148,8 @@ fcgi_si::RecordStatus::Read(int connection)
             if(!invalid_record_)
             {
               if(request_id_.FCGI_id() == 0
-                  || type_ == fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST
-                  || type_ == fcgi_si::FCGIType::kFCGI_ABORT_REQUEST)
+                  || type_ == FCGIType::kFCGI_BEGIN_REQUEST
+                  || type_ == FCGIType::kFCGI_ABORT_REQUEST)
               {
                 // Append to local buffer.
 
@@ -167,21 +165,21 @@ fcgi_si::RecordStatus::Read(int connection)
                 // The key request_id_ must be present as the record is valid
                 // and it is not a begin request record.
                 std::lock_guard<std::mutex> interface_state_lock
-                  {i_ptr_->interface_state_mutex_};
+                  {FCGIServerInterface::interface_state_mutex_};
                 auto request_map_iter =
                   i_ptr_->request_map_.find(request_id_);
                 switch(type_) {
-                  case fcgi_si::FCGIType::kFCGI_PARAMS : {
+                  case FCGIType::kFCGI_PARAMS : {
                     request_map_iter->second.AppendToPARAMS(
                       &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
-                  case fcgi_si::FCGIType::kFCGI_STDIN : {
+                  case FCGIType::kFCGI_STDIN : {
                     request_map_iter->second.AppendToSTDIN(
                       &read_buffer[number_bytes_processed], number_to_write);
                     break;
                   }
-                  case fcgi_si::FCGIType::kFCGI_DATA : {
+                  case FCGIType::kFCGI_DATA : {
                     request_map_iter->second.AppendToDATA(
                       &read_buffer[number_bytes_processed], number_to_write);
                     break;
@@ -247,7 +245,7 @@ fcgi_si::RecordStatus::Read(int connection)
   return request_identifiers;
 }
 
-void ::fcgi_si::RecordStatus::UpdateAfterHeaderCompletion(int connection)
+void RecordStatus::UpdateAfterHeaderCompletion(int connection)
 {
   // Extract number of content bytes from two bytes.
   content_bytes_expected_ = header_[kHeaderContentLengthB1Index];
@@ -308,3 +306,5 @@ void ::fcgi_si::RecordStatus::UpdateAfterHeaderCompletion(int connection)
     }
   }
 } // RELEASE interface_state_mutex_.
+
+} // namespace fcgi_si

@@ -8,23 +8,24 @@
 #include "include/utility.h"
 #include "include/request_data.h"
 
-fcgi_si::RequestData::
-RequestData(uint16_t role, bool close_connection)
+namespace fcgi_si {
+
+RequestData::RequestData(uint16_t role, bool close_connection)
 : FCGI_PARAMS_complete_ {false}, FCGI_STDIN_complete_ {false},
   FCGI_DATA_complete_ {false}, role_ {role}, client_set_abort_ {false},
   close_connection_ {close_connection},
-  request_status_ {fcgi_si::RequestStatus::kRequestPending},
+  request_status_ {RequestStatus::kRequestPending},
   connection_closed_by_interface_ {false}
 {}
 
-bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
+bool RequestData::ProcessFCGI_PARAMS()
 {
   bool result {true};
   if(FCGI_PARAMS_.size())
   {
     using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
     std::vector<byte_seq_pair> name_value_pair_list
-      {fcgi_si::ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
+      {ProcessBinaryNameValuePairs(FCGI_PARAMS_.size(),
       FCGI_PARAMS_.data())};
     if(name_value_pair_list.size())
     {
@@ -64,3 +65,5 @@ bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
     result = false;
   return result;
 }
+
+} // namespace fcgi_si

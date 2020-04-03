@@ -80,14 +80,14 @@
 //       2) Closing the connections in dummy_descriptor_set_.
 //       Any action which would prevent safe destruction must result in
 //       program termination.
-
+namespace fcgi_si {
 
 // Initialize static class data members.
-std::mutex fcgi_si::FCGIServerInterface::interface_state_mutex_ {};
-unsigned long fcgi_si::FCGIServerInterface::interface_identifier_ {0};
-unsigned long fcgi_si::FCGIServerInterface::previous_interface_identifier_ {0};
+std::mutex FCGIServerInterface::interface_state_mutex_ {};
+unsigned long FCGIServerInterface::interface_identifier_ {0};
+unsigned long FCGIServerInterface::previous_interface_identifier_ {0};
 
-::fcgi_si::FCGIServerInterface::
+FCGIServerInterface::
 FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   uint16_t role, int32_t app_status_on_abort)
 : app_status_on_abort_ {app_status_on_abort},
@@ -132,11 +132,11 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
 
   // Ensure that the supplied listening socket is non-blocking. This property
   // is assumed in the design of the AcceptRequests() loop.
-  int flags = fcntl(fcgi_si::FCGI_LISTENSOCK_FILENO, F_GETFL);
+  int flags = fcntl(FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
   flags |= O_NONBLOCK;
-  if(fcntl(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  if(fcntl(FCGI_LISTENSOCK_FILENO,
      F_SETFL, flags) == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_SETFL")};
 
@@ -149,7 +149,7 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
   int getsockopt_return {};
 
-  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1) && (errno == EINTR)){}
   if(getsockopt_return == -1)
@@ -158,7 +158,7 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   socket_domain_ = socket_domain;
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1) && (errno == EINTR)){}
   if(getsockopt_return == -1)
@@ -168,7 +168,7 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
       "of an FCGIServerInterface object\nwas not a stream socket.")};
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
     SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer,
       &getsockopt_int_buffer_size)) == -1) && (errno == EINTR))
     continue;
@@ -253,7 +253,7 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   interface_identifier_ = previous_interface_identifier_;
 } // RELEASE interface_state_mutex_.
 
-::fcgi_si::FCGIServerInterface::~FCGIServerInterface()
+FCGIServerInterface::~FCGIServerInterface()
 {
   // Any exception results in program termination.
   try
@@ -287,13 +287,12 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   }
 }
 
-int ::fcgi_si::FCGIServerInterface::
-AcceptConnection()
+int FCGIServerInterface::AcceptConnection()
 {
   struct sockaddr_storage new_connection_address;
   socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
   int accept_return {};
-  while((accept_return = accept(fcgi_si::FCGI_LISTENSOCK_FILENO,
+  while((accept_return = accept(FCGI_LISTENSOCK_FILENO,
     (struct sockaddr*)&new_connection_address, &new_connection_address_length))
     == -1 && errno == EINTR)
   {
@@ -456,8 +455,7 @@ AcceptConnection()
   return new_socket_descriptor;
 } // RELEASE interface_state_mutex_.
 
-std::vector<fcgi_si::FCGIRequest> 
-fcgi_si::FCGIServerInterface::AcceptRequests()
+std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 {
   std::vector<FCGIRequest> requests {};
 
@@ -549,7 +547,7 @@ fcgi_si::FCGIServerInterface::AcceptRequests()
   fd_set read_set;
   FD_ZERO(&read_set);
   // Add listening socket to read_set for new connections.
-  FD_SET(fcgi_si::FCGI_LISTENSOCK_FILENO, &read_set);
+  FD_SET(FCGI_LISTENSOCK_FILENO, &read_set);
   // 0 + 1 = 1 Set for proper select call if no connected sockets are present.
   int number_for_select {1};
   // Reverse to access highest fd immediately.
@@ -623,16 +621,16 @@ fcgi_si::FCGIServerInterface::AcceptRequests()
   return requests;
 }
 
-fcgi_si::RequestIdentifier fcgi_si::FCGIServerInterface::
+RequestIdentifier FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
-  fcgi_si::RequestIdentifier result {};
-  fcgi_si::RecordStatus& record_status {*record_status_ptr};
+  RequestIdentifier result {};
+  RecordStatus& record_status {*record_status_ptr};
 
   // Check if it is a management record.
   if(record_status.get_request_id().FCGI_id() == 0)
   {
-    if(record_status.get_type() == fcgi_si::FCGIType::kFCGI_GET_VALUES)
+    if(record_status.get_type() == FCGIType::kFCGI_GET_VALUES)
       SendGetValuesResult(connection, record_status);
     else // Unknown type,
       SendFCGIUnknownType(connection, record_status.get_type());
@@ -642,23 +640,23 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
   {}
   else // The record must be a valid application record. Process it.
   {
-    fcgi_si::RequestIdentifier request_id {record_status.get_request_id()};
+    RequestIdentifier request_id {record_status.get_request_id()};
 
     switch(record_status.get_type())
     {
-      case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST: {
+      case FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
         uint16_t role {record_status.get_local_content()[
-          fcgi_si::kBeginRequestRoleB1Index]};
+          kBeginRequestRoleB1Index]};
         role <<= 8;
         role += record_status.get_local_content()[
-          fcgi_si::kBeginRequestRoleB0Index];
+          kBeginRequestRoleB0Index];
 
         // Check for rejection based on role, maximum request count,
         // and application-set overload.
         if(role != role_)
           SendFCGIEndRequest(connection, request_id,
-            fcgi_si::FCGI_UNKNOWN_ROLE, EXIT_FAILURE);
+            FCGI_UNKNOWN_ROLE, EXIT_FAILURE);
         else
         {
           bool at_maximum_request_limit {false};
@@ -674,19 +672,19 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
           if(at_maximum_request_limit)
             (maximum_request_count_per_connection_ == 1) ?
               SendFCGIEndRequest(connection, request_id,
-                fcgi_si::FCGI_CANT_MPX_CONN, EXIT_FAILURE) :
+                FCGI_CANT_MPX_CONN, EXIT_FAILURE) :
               SendFCGIEndRequest(connection, request_id,
-                fcgi_si::FCGI_OVERLOADED, EXIT_FAILURE);
+                FCGI_OVERLOADED, EXIT_FAILURE);
           else if(application_overload_)
             SendFCGIEndRequest(connection, request_id,
-              fcgi_si::FCGI_OVERLOADED, EXIT_FAILURE);
+              FCGI_OVERLOADED, EXIT_FAILURE);
           else // We can accept the request.
           {
             // Extract close_connection value.
             bool close_connection =
               !(record_status.get_local_content()[
-                  fcgi_si::kBeginRequestFlagsIndex]
-                & fcgi_si::FCGI_KEEP_CONN);
+                  kBeginRequestFlagsIndex]
+                & FCGI_KEEP_CONN);
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock
               {FCGIServerInterface::interface_state_mutex_};
@@ -695,7 +693,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         }
         break;
       }
-      case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST: {
+      case FCGIType::kFCGI_ABORT_REQUEST: {
         // Has the request already been assigned?
         bool send_end_request {false};
         { // Start lock handling block.
@@ -705,7 +703,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
           auto request_data_it {request_map_.find(request_id)};
 
           if(request_data_it->second.get_status()
-             == fcgi_si::RequestStatus::kRequestAssigned)
+             == RequestStatus::kRequestAssigned)
             request_data_it->second.set_abort();
           else // Not assigned. We can erase the request and update state.
           {
@@ -719,16 +717,16 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
         } // RELEASE interface_state_mutex_.
         if(send_end_request)
           SendFCGIEndRequest(connection, request_id,
-            fcgi_si::FCGI_REQUEST_COMPLETE, app_status_on_abort_);
+            FCGI_REQUEST_COMPLETE, app_status_on_abort_);
           // Don't bother checking if the connection was closed by the
           // peer by inspecting the return value of the call to
           // SendFCGIEndRequest() as it would be difficult to act on
           // this information in the middle of the call to read.
         break;
       }
-      case fcgi_si::FCGIType::kFCGI_PARAMS:
-      case fcgi_si::FCGIType::kFCGI_STDIN:
-      case fcgi_si::FCGIType::kFCGI_DATA: {
+      case FCGIType::kFCGI_PARAMS:
+      case FCGIType::kFCGI_STDIN:
+      case FCGIType::kFCGI_DATA: {
         bool send_end_request {false};
         // Should we complete the stream?
         if(record_status.EmptyRecord())
@@ -738,9 +736,9 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
             {FCGIServerInterface::interface_state_mutex_};
           auto request_data_it {request_map_.find(request_id)};
 
-          (record_status.get_type() == fcgi_si::FCGIType::kFCGI_PARAMS) ?
+          (record_status.get_type() == FCGIType::kFCGI_PARAMS) ?
             request_data_it->second.CompletePARAMS() :
-          (record_status.get_type() == fcgi_si::FCGIType::kFCGI_STDIN)  ?
+          (record_status.get_type() == FCGIType::kFCGI_STDIN)  ?
             request_data_it->second.CompleteSTDIN() :
             request_data_it->second.CompleteDATA();
 
@@ -768,7 +766,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 
         if(send_end_request) // (Because of a malformed FCGI_PARAMS stream.)
           SendFCGIEndRequest(connection, request_id,
-            fcgi_si::FCGI_REQUEST_COMPLETE, EXIT_FAILURE);
+            FCGI_REQUEST_COMPLETE, EXIT_FAILURE);
         break;
       }
     }
@@ -778,7 +776,7 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void ::fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
+void FCGIServerInterface::RemoveConnection(int connection)
 {
   // Care must be taken to prevent descriptor leaks or double closures.
 
@@ -860,7 +858,7 @@ void ::fcgi_si::FCGIServerInterface::RemoveConnection(int connection)
   }
 }
 
-void fcgi_si::FCGIServerInterface::
+void FCGIServerInterface::
 RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
 {
   try
@@ -889,8 +887,7 @@ RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-bool fcgi_si::FCGIServerInterface::
-RequestCleanupDuringConnectionClosure(int connection)
+bool FCGIServerInterface::RequestCleanupDuringConnectionClosure(int connection)
 {
   try
   {
@@ -902,7 +899,7 @@ RequestCleanupDuringConnectionClosure(int connection)
         /*no-op*/)
     {
       if(request_map_iter->second.get_status() ==
-        fcgi_si::RequestStatus::kRequestAssigned)
+        RequestStatus::kRequestAssigned)
       {
         request_map_iter->second.set_connection_closed_by_interface();
         assigned_requests_present = true;
@@ -926,7 +923,7 @@ RequestCleanupDuringConnectionClosure(int connection)
   }
 }
 
-bool fcgi_si::FCGIServerInterface::
+bool FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   uint8_t protocol_status, int32_t app_status)
 {
@@ -948,44 +945,44 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   }
 
   // Set header.
-  fcgi_si::PopulateHeader(result.data(), fcgi_si::FCGIType::kFCGI_END_REQUEST,
-    request_id.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
+  PopulateHeader(result.data(), FCGIType::kFCGI_END_REQUEST,
+    request_id.FCGI_id(), FCGI_HEADER_LEN, 0);
   // Set body.
   for(char i {0}; i < 4; i++)
   {
-    result[(i + 1) + fcgi_si::kHeaderReservedByteIndex] =
+    result[(i + 1) + kHeaderReservedByteIndex] =
       app_status_byte_array[i];
   }
-  result[5 + fcgi_si::kHeaderReservedByteIndex]   =
+  result[5 + kHeaderReservedByteIndex]   =
     protocol_status;
   // Remaining bytes were set to zero during string initialization.
 
   return SendRecord(connection, result);
 }
 
-bool fcgi_si::FCGIServerInterface::
-SendFCGIUnknownType(int connection, fcgi_si::FCGIType type)
+bool FCGIServerInterface::
+SendFCGIUnknownType(int connection, FCGIType type)
 {
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
 
   // Set header.
-  fcgi_si::PopulateHeader(result.data(), fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE,
-    fcgi_si::FCGI_NULL_REQUEST_ID, fcgi_si::FCGI_HEADER_LEN, 0);
+  PopulateHeader(result.data(), FCGIType::kFCGI_UNKNOWN_TYPE,
+    FCGI_NULL_REQUEST_ID, FCGI_HEADER_LEN, 0);
   // Set body. (Only the first byte in the body is used.)
-  result[1 + fcgi_si::kHeaderReservedByteIndex]   =
+  result[1 + kHeaderReservedByteIndex]   =
     static_cast<uint8_t>(type);
   // Remaining bytes were set to zero during string initialization.
 
   return SendRecord(connection, result);
 }
 
-bool fcgi_si::FCGIServerInterface::
+bool FCGIServerInterface::
 SendGetValuesResult(int connection, const RecordStatus& record_status)
 {
   using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
   std::vector<byte_seq_pair> get_value_pairs {};
   if(record_status.get_local_content().size())
-    get_value_pairs = fcgi_si::ProcessBinaryNameValuePairs(
+    get_value_pairs = ProcessBinaryNameValuePairs(
       record_status.get_local_content().size(),
       record_status.get_local_content().data());
 
@@ -994,8 +991,8 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   // Construct result pairs disregarding any name that is not understood and
   // omitting duplicates. Enumerate the cases for the switch.
   std::map<std::vector<uint8_t>, char> value_present_map
-    {{fcgi_si::FCGI_MAX_CONNS, 0}, {fcgi_si::FCGI_MAX_REQS, 1},
-    {fcgi_si::FCGI_MPXS_CONNS, 2}};
+    {{FCGI_MAX_CONNS, 0}, {FCGI_MAX_REQS, 1},
+    {FCGI_MPXS_CONNS, 2}};
   for(auto iter {get_value_pairs.begin()};
       (iter != get_value_pairs.end()) && value_present_map.size(); ++iter)
   {
@@ -1006,11 +1003,11 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
       switch(vpm_it->second)
       {
         case 0:
-          result = fcgi_si::uint32_tToUnsignedCharacterVector(
+          result = uint32_tToUnsignedCharacterVector(
             maximum_connection_count_);
           break;
         case 1:
-          result = fcgi_si::uint32_tToUnsignedCharacterVector(
+          result = uint32_tToUnsignedCharacterVector(
             maximum_request_count_per_connection_);
           break;
         case 2:
@@ -1024,7 +1021,7 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   // Process result pairs to generate the response string.
 
   // Allocate space for header.
-  std::vector<uint8_t> result(fcgi_si::FCGI_HEADER_LEN, 0);
+  std::vector<uint8_t> result(FCGI_HEADER_LEN, 0);
 
   // Since only known names are accepted, assume that the lengths of
   // the names and values can fit in either 7 or 31 bits, i.e. 1 or 4 bytes.
@@ -1034,14 +1031,14 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   {
     // Encode name length.
     uint32_t item_size(pair_iter->first.size());
-    (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
+    (item_size <= kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      fcgi_si::EncodeFourByteLength(item_size, std::back_inserter(result));
+      EncodeFourByteLength(item_size, std::back_inserter(result));
     // Encode value length.
     item_size = pair_iter->second.size();
-    (item_size <= fcgi_si::kNameValuePairSingleByteLength) ?
+    (item_size <= kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
-      fcgi_si::EncodeFourByteLength(item_size, std::back_inserter(result));
+      EncodeFourByteLength(item_size, std::back_inserter(result));
     // Append character bytes of name and value.
     result.insert(result.end(), pair_iter->first.begin(),
       pair_iter->first.end());
@@ -1055,21 +1052,21 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
   // Pad the record to a multiple of FCGI_HEADER_LEN.
   uint64_t header_and_content_length(result.size());
   uint64_t content_length {header_and_content_length
-    - fcgi_si::FCGI_HEADER_LEN};
+    - FCGI_HEADER_LEN};
     // A safe narrowing conversion.
-  uint8_t remainder(header_and_content_length % fcgi_si::FCGI_HEADER_LEN);
+  uint8_t remainder(header_and_content_length % FCGI_HEADER_LEN);
   uint8_t pad_length {
-    (remainder) ? fcgi_si::FCGI_HEADER_LEN - remainder
+    (remainder) ? FCGI_HEADER_LEN - remainder
                 : 0};
   result.insert(result.end(), pad_length, 0);
-  fcgi_si::PopulateHeader(result.data(),
-    fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, fcgi_si::FCGI_NULL_REQUEST_ID,
+  PopulateHeader(result.data(),
+    FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
     content_length, pad_length);
 
   return SendRecord(connection, result);
 }
 
-bool fcgi_si::FCGIServerInterface::
+bool FCGIServerInterface::
 SendRecord(int connection, const std::vector<uint8_t>& result)
 {
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator it
@@ -1131,3 +1128,5 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
   }
   return true;
 } // RELEASE the write mutex for the connection.
+
+} // namespace fcgi_si

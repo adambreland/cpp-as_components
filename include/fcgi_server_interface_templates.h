@@ -3,6 +3,8 @@
 
 #include <type_traits>
 
+namespace fcgi_si {
+
 // Implementation notes:
 // This function is a specialized instance of a general iteration algorithm
 // over two sorted lists. It processes both lists together and performs the
@@ -12,7 +14,7 @@
 // 
 // This function also clears both lists during the single processing pass.
 template <typename C>
-void fcgi_si::FCGIServerInterface::
+void FCGIServerInterface::
 ConnectionClosureProcessing(C* first_ptr, typename C ::iterator first_iter,
   typename C ::iterator first_end_iter, C* second_ptr, 
   typename C ::iterator second_iter, typename C ::iterator second_end_iter)
@@ -82,5 +84,7 @@ ConnectionClosureProcessing(C* first_ptr, typename C ::iterator first_iter,
     throw;
   }
 }
+
+} // namspace fcgi_si
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_TEMPLATES_H_
