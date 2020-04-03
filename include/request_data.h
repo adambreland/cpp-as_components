@@ -31,6 +31,7 @@ public:
   {
     return client_set_abort_;
   }
+
   inline void set_abort()
   {
     client_set_abort_ = true;
@@ -40,6 +41,7 @@ public:
   {
     return close_connection_;
   }
+
   inline uint16_t get_role() const
   {
     return role_;
@@ -56,31 +58,46 @@ public:
   {
     return FCGI_PARAMS_complete_;
   }
+
   inline void CompletePARAMS()
   {
     FCGI_PARAMS_complete_ = true;
   }
-  void AppendToPARAMS(const uint8_t* buffer_ptr, size count);
+
+  inline void AppendToPARAMS(const uint8_t* buffer_ptr, size count)
+  {
+    FCGI_PARAMS_.insert(FCGI_PARAMS_.end(), buffer_ptr, buffer_ptr + count);
+  }
 
   inline bool get_STDIN_completion() const
   {
     return FCGI_STDIN_complete_;
   }
+
   inline void CompleteSTDIN()
   {
     FCGI_STDIN_complete_ = true;
   }
-  void AppendToSTDIN(const uint8_t* buffer_ptr, size count);
+
+  inline void AppendToSTDIN(const uint8_t* buffer_ptr, size count)
+  {
+    FCGI_STDIN_.insert(FCGI_STDIN_.end(), buffer_ptr, buffer_ptr + count);
+  }
 
   inline bool get_DATA_completion() const
   {
     return FCGI_DATA_complete_;
   }
+
   inline void CompleteDATA()
   {
     FCGI_DATA_complete_ = true;
   }
-  void AppendToDATA(const uint8_t* buffer_ptr, size count);
+
+  inline void AppendToDATA(const uint8_t* buffer_ptr, size count)
+  {
+    FCGI_DATA_.insert(FCGI_DATA_.end(), buffer_ptr, buffer_ptr + count);
+  }
 
   // Move only.
   RequestData() = default;

@@ -17,27 +17,6 @@ RequestData(uint16_t role, bool close_connection)
   connection_closed_by_interface_ {false}
 {}
 
-void fcgi_si::RequestData::
-AppendToPARAMS(const uint8_t* buffer_ptr, size count)
-{
-  for(int i {0}; i < count; i++)
-    FCGI_PARAMS_.push_back(*(buffer_ptr + i));
-}
-
-void fcgi_si::RequestData::
-AppendToSTDIN(const uint8_t* buffer_ptr, size count)
-{
-  for(int i {0}; i < count; i++)
-    FCGI_STDIN_.push_back(*(buffer_ptr + i));
-}
-
-void fcgi_si::RequestData::
-AppendToDATA(const uint8_t* buffer_ptr, size count)
-{
-  for(int i {0}; i < count; i++)
-    FCGI_DATA_.push_back(*(buffer_ptr + i));
-}
-
 bool fcgi_si::RequestData::ProcessFCGI_PARAMS()
 {
   bool result {true};

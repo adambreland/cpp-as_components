@@ -398,29 +398,29 @@ bool fcgi_si::FCGIRequest::Complete(std::int32_t app_status)
 
   constexpr int seq_num {4}; // Three headers and an 8-byte body. 3+1=4
   constexpr int app_status_byte_length {32 / 8};
-  uint8_t header_and_end_content[seq_num][fcgi_si::FCGI_HEADER_LEN];
+  uint8_t header_and_end_content[seq_num][FCGI_HEADER_LEN];
 
-  fcgi_si::PopulateHeader(&header_and_end_content[0][0],
-    fcgi_si::FCGIType::kFCGI_STDOUT,
+  PopulateHeader(&header_and_end_content[0][0],
+    FCGIType::kFCGI_STDOUT,
     request_identifier_.FCGI_id(), 0, 0);
-  fcgi_si::PopulateHeader(&header_and_end_content[1][0],
-    fcgi_si::FCGIType::kFCGI_STDERR,
+  PopulateHeader(&header_and_end_content[1][0],
+    FCGIType::kFCGI_STDERR,
     request_identifier_.FCGI_id(), 0, 0);
-  fcgi_si::PopulateHeader(&header_and_end_content[2][0],
-    fcgi_si::FCGIType::kFCGI_END_REQUEST,
-    request_identifier_.FCGI_id(), fcgi_si::FCGI_HEADER_LEN, 0);
+  PopulateHeader(&header_and_end_content[2][0],
+    FCGIType::kFCGI_END_REQUEST,
+    request_identifier_.FCGI_id(), FCGI_HEADER_LEN, 0);
 
   // Fill end request content.
   for(int i {0}; i < app_status_byte_length ; ++i)
     header_and_end_content[3][i] = static_cast<uint8_t>(
       app_status >> (24 - (8*i)));
   header_and_end_content[3][app_status_byte_length] = 
-    fcgi_si::FCGI_REQUEST_COMPLETE;
-  for(int i {app_status_byte_length + 1}; i < fcgi_si::FCGI_HEADER_LEN; ++i)
+    FCGI_REQUEST_COMPLETE;
+  for(int i {app_status_byte_length + 1}; i < FCGI_HEADER_LEN; ++i)
     header_and_end_content[3][i] = 0;
 
   // Fill iovec structure for a call to ScatterGatherWriteHelper.
-  constexpr std::size_t number_to_write {seq_num*fcgi_si::FCGI_HEADER_LEN};
+  constexpr std::size_t number_to_write {seq_num*FCGI_HEADER_LEN};
   struct iovec iovec_wrapper[1] = {{header_and_end_content, number_to_write}};
 
   // ACQUIRE interface_state_mutex_ to allow interface request_map_

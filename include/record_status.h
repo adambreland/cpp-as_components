@@ -57,14 +57,12 @@ private:
            + FCGI_HEADER_LEN;
   }
 
-  inline bool
-  IsHeaderComplete() const noexcept
+  inline bool IsHeaderComplete() const noexcept
   {
     return bytes_received_ >= FCGI_HEADER_LEN;
   }
 
-  inline bool
-  IsRecordComplete() const noexcept
+  inline bool IsRecordComplete() const noexcept
   {
     return ExpectedBytes() == bytes_received_;
   }

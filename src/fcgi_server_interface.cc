@@ -258,28 +258,23 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
   // Any exception results in program termination.
   try
   {
-    for(auto dds_iter {dummy_descriptor_set_.begin(); 
-      dds_iter != dummy_descriptor_set_.end(); ++dds_iter})
+    for(auto dds_iter {dummy_descriptor_set_.begin()}; 
+      dds_iter != dummy_descriptor_set_.end(); ++dds_iter)
       close(*dds_iter);
 
     // ACQUIRE interface_state_mutex_.
-    std::lock_guard<std::mutex> interface_state_lock
+    std::unique_lock<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
     // FCGIRequest objects for write mutexes ensures that no write mutex will
     // be held when the loop completes until the interface mutex is released.
+    // Close all file descriptors for active sockets.
     for(auto write_mutex_iter {write_mutex_map_.begin()};
         write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
     {
       write_mutex_iter->second.first->lock();
       write_mutex_iter->second.first->unlock();
-    }
-
-    // Close all file descriptors for active sockets.
-    for(auto write_mutex_iter {write_mutex_map_.begin()};
-        write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
-    {
       close(write_mutex_iter->first);
     }
 
@@ -461,9 +456,8 @@ AcceptConnection()
   return new_socket_descriptor;
 } // RELEASE interface_state_mutex_.
 
-std::vector<fcgi_si::FCGIRequest>
-::fcgi_si::FCGIServerInterface::
-AcceptRequests()
+std::vector<fcgi_si::FCGIRequest> 
+fcgi_si::FCGIServerInterface::AcceptRequests()
 {
   std::vector<FCGIRequest> requests {};
 
