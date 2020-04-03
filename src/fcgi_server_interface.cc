@@ -263,7 +263,7 @@ FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
       close(*dds_iter);
 
     // ACQUIRE interface_state_mutex_.
-    std::unique_lock<std::mutex> interface_state_lock
+    std::lock_guard<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
