@@ -211,7 +211,7 @@ class FCGIRequest {
   //                   over which the request was sent. The descriptor of this
   //                   connection is equal to request_id.descriptor().
   //
-  // Requires:
+  // Preconditions:
   // 1) request_id_ is a key of request_map_.
   // 2) All pointers are associated with the FCGIServerInterface object
   //    of request_map_. The correct RequestData object and write mutex pair

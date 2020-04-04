@@ -101,12 +101,29 @@ class FCGIServerInterface {
   //    descriptors as keys is found, a std::logic_error object is thrown.
   int AcceptConnection();
 
-  inline void AddRequest(fcgi_si::RequestIdentifier request_id, uint16_t role,
-    bool close_connection)
-  {
-    request_map_[request_id] = RequestData(role, close_connection);
-    request_count_map_[request_id.descriptor()]++;
-  }
+  // Attempts to add a new RequestData object to request_map_ while
+  // maintaining the invariant between request_map_ and request_count_map_.
+  //
+  // Parameters:
+  // request_id:       The RequestIdentifier value of the new element.
+  // role:             The FastCGI role needed to service the new request.
+  // close_connection: A flag which indicates if the connection should be
+  //                   closed after the request is serviced.
+  //
+  // Preconditions:
+  // 1) interface_state_mutex_ must be held prior to a call.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) Ater a throw, local_bad_interface_state_detected_ == true.
+  //
+  // Effects:
+  // 1) A RequestData object with the given role and close_connection values
+  //    was added to request_map_ with a key of request_id. The number of
+  //    requests associated with request_id.descriptor() in request_count_map_
+  //    was incremented.
+  void AddRequest(RequestIdentifier request_id, uint16_t role,
+    bool close_connection);
 
   // Iterates over the referenced containers of descriptors. These descriptors
   // are scheduled for closure. Attempts to close the descriptors. This 
@@ -163,16 +180,17 @@ class FCGIServerInterface {
   // Parameters:
   // connection: A connected socket descriptor.
   //
-  // Requires:
+  // Preconditions:
   // 1) The record represented by the RecordStatus object associated
   //    with connection must be complete.
+  // 
   //
   // Caller Responsibilities:
   // 1) If a non-null RequestIdentifier object is returned, the list of
   //    RequestIdentifier objects returned by Read() must contain a
   //    RequestIdentifier object equivalent to this object.
   //
-  // Effects:
+  // Effects, in general:
   // 1) Either the null RecordIdentifier object is returned or a non-null
   //    RequestIdentifier object is returned.
   //    a) A non-null RequestIdentifier indicates that the request
@@ -183,9 +201,8 @@ class FCGIServerInterface {
   // Effects for record types:
   // 1) Management record:
   //    A null RequestIdentifier object is returned. In addition:
-  //    An appropriate response is sent to the peer.
-  //    The write mutex associated with connection is obtained before writing
-  //    and released after writing. Also:
+  //    An appropriate response is sent over connection.
+  //    Also:
   //    a) For FCGI_GET_VALUES, an FCGI_GET_VALUES_RESULT record is sent.
   //    b) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
   // 2) Begin request record:
@@ -400,7 +417,38 @@ class FCGIServerInterface {
 
   bool SendGetValuesResult(int connection, const RecordStatus& record_status);
 
-  bool SendRecord(int connection, const std::vector<uint8_t>& result);
+  // Attempts to send the byte sequence given by 
+  // [buffer_ptr, buffer_ptr + count) to a client over connection.
+  //
+  // Parameters:
+  // connection: The file descriptor of the connection over which data will be
+  //             sent.
+  // buffer_ptr: A pointer to a byte buffer that contains the byte sequence
+  //             to be sent.
+  // count:      The number of bytes to send.
+  //
+  // Preconditions:
+  // 1) The byte sequence must be a single, well-formed FastCGI record.
+  // 2) SIGPIPE must be handled by the application before calling.
+  //
+  // Synchronization:
+  // 1) Implicitly acquires and releases the write mutex associated with
+  //    connection.
+  //
+  // Excceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) After a throw, several changes in interface state may have occurred:
+  //    a) The connection could have been added to connections_to_close_set_.
+  //    b) The connection could have been corrupted. The corruption flag is
+  //       set in this case.
+  //    c) The interface may be in a bad state.
+  //    No other changes will have occurred.
+  //
+  // Effects:
+  // 1) If true was returned, the byte sequence was sent.
+  // 2) If false was returned, the connection was found to be closed. The
+  //    descriptor given by connection was added to connections_to_close_set_.
+  bool SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count);
 
   // DATA MEMBERS
 

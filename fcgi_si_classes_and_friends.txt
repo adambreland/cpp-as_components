@@ -1,4 +1,4 @@
-fcgi_si classes and friend diagram.
+fcgi_si classes and friend relationships.
 
 Classes:
   Classes with a friend or which are a friend:
@@ -12,6 +12,7 @@ Classes:
 
 Enum classes:
   FCGIType
+  RequestStatus
 
 Friends: A -> B means A is a friend of B.
   FCGIRequest   -> RequestData

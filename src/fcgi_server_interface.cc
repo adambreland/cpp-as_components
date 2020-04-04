@@ -621,18 +621,49 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
   return requests;
 }
 
+void FCGIServerInterface::AddRequest(RequestIdentifier request_id, 
+  std::uint16_t role, bool close_connection)
+{
+  try
+  {
+    std::map<int, int>::iterator request_count_iter 
+      {request_count_map_.find(request_id.descriptor())};
+    if(request_count_iter == request_count_map_.end())
+    {
+      throw std::logic_error {"request_count_map_ did not possess an "
+        "expected file descriptor key."};
+    }
+
+    std::map<RequestIdentifier, RequestData>::iterator request_map_iter
+      {request_map_.find(request_id)};
+    if(request_map_iter != request_map_.end())
+    {
+      throw std::logic_error {"An attempt was made to add an element to "
+        "request_map_ with a key which was already present."};
+    }
+
+    request_map_[request_id] = RequestData(role, close_connection);
+    request_count_iter->second++;
+  }
+  catch(...)
+  {
+    local_bad_interface_state_detected_ = true;
+    throw;
+  }
+}
+
 RequestIdentifier FCGIServerInterface::
 ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
 {
   RequestIdentifier result {};
   RecordStatus& record_status {*record_status_ptr};
 
-  // Check if it is a management record.
+  // Check if it is a management record (every management record is valid).
   if(record_status.get_request_id().FCGI_id() == 0)
   {
     if(record_status.get_type() == FCGIType::kFCGI_GET_VALUES)
       SendGetValuesResult(connection, record_status);
-    else // Unknown type,
+    else // Unknown type.
       SendFCGIUnknownType(connection, record_status.get_type());
   }
   // Check if the record is valid. Ignore record if it is not.
@@ -646,51 +677,52 @@ ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
     {
       case FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
-        uint16_t role {record_status.get_local_content()[
-          kBeginRequestRoleB1Index]};
+        uint16_t role 
+          {record_status.get_local_content()[kBeginRequestRoleB1Index]};
         role <<= 8;
-        role += record_status.get_local_content()[
-          kBeginRequestRoleB0Index];
+        role += record_status.get_local_content()[kBeginRequestRoleB0Index];
 
-        // Check for rejection based on role, maximum request count,
-        // and application-set overload.
-        if(role != role_)
-          SendFCGIEndRequest(connection, request_id,
-            FCGI_UNKNOWN_ROLE, EXIT_FAILURE);
-        else
-        {
-          bool at_maximum_request_limit {false};
+        // Determine if the request limit was reached for the connection.
+        bool limit_reached {false};
+        { // Start lock handling block.
+          // ACQUIRE interface_state_mutex_.
+          std::lock_guard<std::mutex> interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_};
+          std::map<int, int>::iterator request_count_it
+            {request_count_map_.find(connection)};
+          // Logic error check.
+          if(request_count_it == request_count_map_.end())
+          {
+            local_bad_interface_state_detected_ = true;
+            throw std::logic_error {"request_count_map_ did not have an "
+              "an expected socket descriptor."};
+          }
+          limit_reached = (request_count_it->second
+            >= maximum_request_count_per_connection_);
+        } // RELEASE interface_state_mutex_.
 
-          { // Start lock handling block.
-            // ACQUIRE interface_state_mutex_.
-            std::lock_guard<std::mutex> interface_state_lock
-              {FCGIServerInterface::interface_state_mutex_};
-            auto request_count_it = request_count_map_.find(connection);
-            at_maximum_request_limit = (request_count_it->second
-              == maximum_request_count_per_connection_);
-          } // RELEASE interface_state_mutex_.
-          if(at_maximum_request_limit)
-            (maximum_request_count_per_connection_ == 1) ?
-              SendFCGIEndRequest(connection, request_id,
-                FCGI_CANT_MPX_CONN, EXIT_FAILURE) :
-              SendFCGIEndRequest(connection, request_id,
-                FCGI_OVERLOADED, EXIT_FAILURE);
-          else if(application_overload_)
+        // Reject or accept a new request based on the request limit and the
+        // application_set overload flag.
+        if(limit_reached)
+          (maximum_request_count_per_connection_ == 1) ?
+            SendFCGIEndRequest(connection, request_id,
+              FCGI_CANT_MPX_CONN, EXIT_FAILURE) :
             SendFCGIEndRequest(connection, request_id,
               FCGI_OVERLOADED, EXIT_FAILURE);
-          else // We can accept the request.
-          {
-            // Extract close_connection value.
-            bool close_connection =
-              !(record_status.get_local_content()[
-                  kBeginRequestFlagsIndex]
-                & FCGI_KEEP_CONN);
-            // ACQUIRE interface_state_mutex_.
-            std::lock_guard<std::mutex> interface_state_lock
-              {FCGIServerInterface::interface_state_mutex_};
-            AddRequest(request_id, role, close_connection);
-          } // RELEASE interface_state_mutex_.
-        }
+        else if(application_overload_)
+          SendFCGIEndRequest(connection, request_id,
+            FCGI_OVERLOADED, EXIT_FAILURE);
+        else // We can accept the request.
+        {
+          // Extract close_connection value.
+          bool close_connection =
+            !(record_status.get_local_content()[kBeginRequestFlagsIndex]
+              & FCGI_KEEP_CONN);
+          // ACQUIRE interface_state_mutex_.
+          std::lock_guard<std::mutex> interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_};
+          AddRequest(request_id, role, close_connection);
+        } // RELEASE interface_state_mutex_.
         break;
       }
       case FCGIType::kFCGI_ABORT_REQUEST: {
@@ -957,7 +989,7 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
     protocol_status;
   // Remaining bytes were set to zero during string initialization.
 
-  return SendRecord(connection, result);
+  return SendRecord(connection, result.data(), result.size());
 }
 
 bool FCGIServerInterface::
@@ -973,7 +1005,7 @@ SendFCGIUnknownType(int connection, FCGIType type)
     static_cast<uint8_t>(type);
   // Remaining bytes were set to zero during string initialization.
 
-  return SendRecord(connection, result);
+  return SendRecord(connection, result.data(), result.size());
 }
 
 bool FCGIServerInterface::
@@ -1063,55 +1095,60 @@ SendGetValuesResult(int connection, const RecordStatus& record_status)
     FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
     content_length, pad_length);
 
-  return SendRecord(connection, result);
+  return SendRecord(connection, result.data(), result.size());
 }
 
 bool FCGIServerInterface::
-SendRecord(int connection, const std::vector<uint8_t>& result)
+SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
 {
-  std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator it
-    {write_mutex_map_.find(connection)};
+  std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
+    mutex_map_iter {write_mutex_map_.find(connection)};
+  // Logic error check.
+  if(mutex_map_iter == write_mutex_map_.end())
+  {
+    local_bad_interface_state_detected_ = true;
+    throw std::logic_error {"An expected connection was missing from "
+      "write mutex_map_."};
+  }
   // ACQUIRE the write mutex for the connection.
   std::unique_lock<std::mutex> write_lock
-    {*(it->second.first)};
-
-  // Check if the connection is corrupt.
-  // Conditionally RELEASE the write mutex.
-  if(it->second.second)
+    {*(mutex_map_iter->second.first)};
+  // Check if the connection is corrupt. In this case, RELEASE the write mutex.
+  if(mutex_map_iter->second.second)
   {
-    write_lock.unlock();
-    // ACQUIRE interface_state_mutex_
     try
     {
-      std::lock_guard<std::mutex> interface_state_lock
-        {FCGIServerInterface::interface_state_mutex_};
-    }
-    catch(...)
-    {
-      std::terminate();
-    }
-    try
-    {
+      write_lock.unlock();
       connections_to_close_set_.insert(connection);
     }
     catch(...)
     {
-      bad_interface_state_detected_ = true;
+      local_bad_interface_state_detected_ = true;
       throw;
     }
     throw std::runtime_error {ERROR_STRING("A connection from the "
       "interface to the client was found which had a corrupted state.")};
-  } // If the above block executes, the function has exited by this point.
+  }
 
   // Send record.
-  size_t number_written =
-    socket_functions::NonblockingPollingSocketWrite(connection, result.data(),
-      result.size());
-  if(number_written < result.size())
+  std::size_t number_written {socket_functions::WriteOnSelect(connection, 
+    buffer_ptr, count)};
+  
+  // Check for errors which prevented a full write.
+  if(number_written < count)
   {
+    // The application must handle SIGPIPE.
     if(errno == EPIPE)
     {
-      connections_to_close_set_.insert(connection);
+      try
+      {
+        connections_to_close_set_.insert(connection);
+      }
+      catch(...)
+      {
+        local_bad_interface_state_detected_ = true;
+        throw;
+      }
       return false;
     }
     else 
@@ -1119,11 +1156,20 @@ SendRecord(int connection, const std::vector<uint8_t>& result)
       if(number_written != 0)
       {
         // The connection to the client was just corrupted.
-        write_mutex_map_[connection].second = true;
-        connections_to_close_set_.insert(connection);
+        mutex_map_iter->second.second = true;
+        try
+        {
+          connections_to_close_set_.insert(connection);
+        }
+        catch(...)
+        {
+          local_bad_interface_state_detected_ = true;
+          throw;
+        }
       }
-      throw std::runtime_error {ERRNO_ERROR_STRING(
-        "write from a call to NonblockingPollingSocketWrite")};
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "write from a call to "
+        "::socket_functions::WriteOnSelect."};
     }
   }
   return true;

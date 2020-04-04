@@ -626,17 +626,19 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           {
             if(errno != EINTR)
             {
-              // If some data was written and a throw will occur, the interface
-              // must be set to a bad state. However, this must be done under
-              // the protection of interface_state_mutex_. But, the mutex
-              // cannot be acquired if the write mutex is held. And, the write
-              // mutex cannot be released without indicating some error as
-              // another thread may hold interface_state_mutex_ to acquire the
-              // write mutex. If the write mutex was immediately acquired and
-              // data was written, that data would most likely be corrupt as a
-              // partial record was likely written here .The solution is to set
-              // the bad_connection_state flag of the write mutex pair before
-              // releasing the write mutex.
+              // If some data was written and a throw will occur, the
+              // connection must be closed. This is becasue, if the write mutex
+              // was immediately acquired by another request and data was 
+              // written, that data would be corrupt as a partial record was
+              // written here. However, indicating that the connection should
+              // be closed requires an update that must be done under the
+              // protection of interface_state_mutex_. But, this mutex cannot 
+              // be acquired if the write mutex is held. And, the write mutex
+              // cannot be released without indicating some error as another
+              // thread may hold interface_state_mutex_ to acquire the write
+              // mutex. The solution is to set the flag 
+              // *bad_connection_state_ptr_ of the write mutex before releasing
+              // the write mutex.
 
               // Conditionally RELEASE *write_mutex_ptr_.
               // write_lock.owns_lock() is equivalent to a partial write and,

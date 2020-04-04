@@ -13,16 +13,14 @@
 #include "include/record_status.h"
 #include "include/request_identifier.h"
 
+namespace fcgi_si {
+
 // Implementation note:
 // The value zero is used for type_ as no FastCGI record has this value as a
 // type. This is appropriate as no record identity has yet been assigned to the
 // RecordStatus object.
-namespace fcgi_si {
-
 RecordStatus::RecordStatus(FCGIServerInterface* interface_ptr) noexcept
-: header_ {}, bytes_received_ {0}, content_bytes_expected_ {0},
-  padding_bytes_expected_ {0}, type_ {static_cast<fcgi_si::FCGIType>(0)},
-  request_id_ {}, invalid_record_ {false}, i_ptr_ {interface_ptr}
+: i_ptr_ {interface_ptr}
 {}
 
 RecordStatus::RecordStatus(RecordStatus&& record_status) noexcept
@@ -62,112 +60,168 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
 {
   // Number of bytes read at a time from connected sockets.
   constexpr int kBufferSize {512};
-  uint8_t read_buffer[kBufferSize];
+  std::uint8_t read_buffer[kBufferSize];
 
   // Return value to be modified during processing.
   std::vector<RequestIdentifier> request_identifiers {};
 
   // Read from the connection until it would block (no more data),
   // it is found to be disconnected, or an unrecoverable error occurs.
-  try
+  while(true)
   {
-    while(true)
-    {
-      // Read from socket.
-      uint32_t number_bytes_processed = 0;
-      uint32_t number_bytes_received =
-        ::socket_functions::SocketRead(connection, read_buffer, kBufferSize);
+    // Read from socket.
+    std::uint32_t number_bytes_processed = 0;
+    std::uint32_t number_bytes_received =
+      socket_functions::SocketRead(connection, read_buffer, kBufferSize);
 
-      // Check for a disconnected socket or an unrecoverable error.
-      if(number_bytes_received < kBufferSize)
+    // Check for a disconnected socket or an unrecoverable error.
+    if(number_bytes_received < kBufferSize)
+    {
+      if(errno == 0)
       {
-        if(errno == 0)
+        // Connection was closed. Discard any read data and update interface
+        // state.
+        try
         {
-          // Connection was closed. Discard any read data and update interface
-          // state.
           i_ptr_->connections_to_close_set_.insert(connection);
           return {};
         }
-        if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
+        catch(...)
         {
-          std::error_code ec {errno, std::system_category()};
-          throw std::system_error {ec, ERRNO_ERROR_STRING("read from a call to "
-            "NonblockingSocketRead")};
+          i_ptr_->local_bad_interface_state_detected_ = true;
+          throw;
         }
       }
-
-      // Process bytes received, if any. The check is needed as blocking
-      // errors may return zero bytes if nothing was read.
-      if(number_bytes_received > 0)
-        break;
-      while(number_bytes_processed < number_bytes_received)
+      if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
       {
-        uint32_t number_bytes_remaining =
-          number_bytes_received - number_bytes_processed;
-
-        // Process received bytes according to header and content/padding
-        // completion. Record completion is checked after header addition.
-
-        // Is the header complete?
-        if(!IsHeaderComplete())
+        try
         {
-          uint32_t remaining_header {FCGI_HEADER_LEN - bytes_received_};
-          bool header_can_be_completed 
-            {remaining_header <= number_bytes_remaining};
-          uint32_t number_to_write {(header_can_be_completed) ?
-            remaining_header : number_bytes_remaining};
-          std::memcpy(&header_[bytes_received_], 
-              &read_buffer[number_bytes_processed], number_to_write);
-          number_bytes_processed += number_to_write;
-          // Follow usage discipline for RecordStatus.
-          bytes_received_ += number_to_write;
-          // Update the RecordStatus object if the header has been completed.
-          // Part of this update is conditionally setting the rejected flag.
-          if(header_can_be_completed)
-            UpdateAfterHeaderCompletion(connection);
-        } // Loop whether the header is complete or not.
-
-        // Header is complete, but the record may not be.
-        // Either the content is complete or it isn't.
-        else
+          i_ptr_->connections_to_close_set_.insert(connection);
+        }
+        catch(...)
         {
-          uint32_t header_and_content 
-            {uint32_t(FCGI_HEADER_LEN) + content_bytes_expected_};
-          uint32_t remaining_content {(bytes_received_ < header_and_content) ?
-            header_and_content - bytes_received_ : 0};
+          i_ptr_->local_bad_interface_state_detected_ = true;
+          throw;
+        }
+        std::error_code ec {errno, std::system_category()};
+        throw std::system_error {ec, ERRNO_ERROR_STRING("read from a call to "
+          "NonblockingSocketRead")};
+      }
+    }
 
-          if(remaining_content > 0) // Content incomplete.
+    // Process bytes received, if any. The check is needed as blocking
+    // errors may return zero bytes if nothing was read.
+    if(number_bytes_received > 0)
+      break;
+    while(number_bytes_processed < number_bytes_received)
+    {
+      std::uint32_t number_bytes_remaining =
+        number_bytes_received - number_bytes_processed;
+
+      // Process received bytes according to header and content/padding
+      // completion. Record completion is checked after header addition.
+
+      // Is the header complete?
+      if(!IsHeaderComplete())
+      {
+        std::uint32_t remaining_header {FCGI_HEADER_LEN - bytes_received_};
+        bool header_can_be_completed 
+          {remaining_header <= number_bytes_remaining};
+        std::uint32_t number_to_write {(header_can_be_completed) ?
+          remaining_header : number_bytes_remaining};
+        std::memcpy(&header_[bytes_received_], 
+            &read_buffer[number_bytes_processed], number_to_write);
+        number_bytes_processed += number_to_write;
+        // Follow usage discipline for RecordStatus.
+        bytes_received_ += number_to_write;
+        // Update the RecordStatus object if the header has been completed.
+        // Part of this update is conditionally setting the rejected flag.
+        if(header_can_be_completed)
+        {
+          try
           {
-            uint32_t number_to_write
-              {(remaining_content <= number_bytes_remaining) ?
-                remaining_content : number_bytes_remaining};
-            // Determine what we should do with the bytes based on rejection
-            // and type. Every record is rejected if it is not one of the
-            // six types below. Accordingly, we only need to check for those
-            // types.
-            if(!invalid_record_)
+            UpdateAfterHeaderCompletion(connection);
+          }
+          catch(...)
+          {
+            try
             {
-              if(request_id_.FCGI_id() == 0
-                  || type_ == FCGIType::kFCGI_BEGIN_REQUEST
-                  || type_ == FCGIType::kFCGI_ABORT_REQUEST)
-              {
-                // Append to local buffer.
+              i_ptr_->connections_to_close_set_.insert(connection);
+            }
+            catch(...)
+            {
+              i_ptr_->local_bad_interface_state_detected_ = true;
+              throw;
+            }
+            throw;
+          }
+        }
+      }
+      // Header is complete, but the record may not be.
+      // Either the content is complete or it isn't.
+      else
+      {
+        std::uint32_t header_and_content
+          {std::uint32_t(FCGI_HEADER_LEN) + content_bytes_expected_};
+        std::uint32_t remaining_content {(bytes_received_ < header_and_content) ?
+          header_and_content - bytes_received_ : 0};
 
-                  local_record_content_buffer_.insert(
-                    local_record_content_buffer_.end(), 
-                    &read_buffer[number_bytes_processed],
-                    &read_buffer[number_bytes_processed] + number_to_write);
-                  // Defer tracking variable updates to cover all cases.
+        if(remaining_content > 0) // Content incomplete.
+        {
+          std::uint32_t number_to_write
+            {(remaining_content <= number_bytes_remaining) ?
+              remaining_content : number_bytes_remaining};
+          // Determine what we should do with the bytes based on rejection
+          // and type. Every record is rejected if it is not one of the
+          // six types below. Accordingly, we only need to check for those
+          // types.
+          if(!invalid_record_)
+          {
+            if(request_id_.FCGI_id() == 0
+                || type_ == FCGIType::kFCGI_BEGIN_REQUEST
+                || type_ == FCGIType::kFCGI_ABORT_REQUEST)
+            {
+              // Append to local buffer.
+              try
+              {
+                local_record_content_buffer_.insert(
+                  local_record_content_buffer_.end(), 
+                  &read_buffer[number_bytes_processed],
+                  &read_buffer[number_bytes_processed] + number_to_write);
+                // Defer tracking variable updates to cover all cases.
               }
-              else // Append to non-local buffer.
+              catch(...)
+              {
+                try
+                {
+                  i_ptr_->connections_to_close_set_.insert(connection);
+                }
+                catch(...)
+                {
+                  i_ptr_->local_bad_interface_state_detected_ = true;
+                  throw;
+                }
+                throw;
+              }
+            }
+            else // Append to non-local buffer.
+            {
+              try
               {
                 // ACQUIRE interface_state_mutex_ to locate append location.
                 // The key request_id_ must be present as the record is valid
                 // and it is not a begin request record.
                 std::lock_guard<std::mutex> interface_state_lock
                   {FCGIServerInterface::interface_state_mutex_};
-                auto request_map_iter =
-                  i_ptr_->request_map_.find(request_id_);
+
+                std::map<RequestIdentifier, RequestData>::iterator
+                  request_map_iter {i_ptr_->request_map_.find(request_id_)};
+                if(request_map_iter == i_ptr_->request_map_.end())
+                {
+                  i_ptr_->local_bad_interface_state_detected_ = true;
+                  throw std::logic_error {"request_map_ did not have an "
+                    "expected RequestData object."};
+                }
                 switch(type_) {
                   case FCGIType::kFCGI_PARAMS : {
                     request_map_iter->second.AppendToPARAMS(
@@ -185,62 +239,82 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
                     break;
                   }
                   default : {
+                    i_ptr_->local_bad_interface_state_detected_ = true;
                     throw std::logic_error {"An invalid type was encountered "
                       "in a call to Read."};
                   }
                 }
               } // RELEASE interface_state_mutex_.
-            }
-            // Whether the record was valid or not and whether the data is added
-            // to RecordStatus or not, the tracking variables must be updated.
-            number_bytes_processed += number_to_write;
-            // Follow usage discipline for RecordStatus.
-            bytes_received_ += number_to_write;
+              catch(...)
+              {
+                if(i_ptr_->local_bad_interface_state_detected_ != true)
+                {
+                  try
+                  {
+                    i_ptr_->connections_to_close_set_.insert(connection);
+                  }
+                  catch(...)
+                  {
+                    i_ptr_->local_bad_interface_state_detected_ = true;
+                    throw;
+                  }
+                }
+                throw;
+              }
+            } 
           }
-          else // Padding incomplete.
-          {
-            std::uint32_t remaining_padding 
-              {(header_and_content + padding_bytes_expected_) - bytes_received_};
-            std::uint32_t number_to_write = 
-              {(remaining_padding <= number_bytes_remaining) ?
-                remaining_padding : number_bytes_remaining};
-            // Ignore padding. Skip ahead without processing.
-            bytes_received_ += number_to_write;
-            number_bytes_processed += number_to_write;
-          }
+          // Whether the record was valid or not and whether the data is added
+          // to RecordStatus or not, the tracking variables must be updated.
+          number_bytes_processed += number_to_write;
+          // Follow usage discipline for RecordStatus.
+          bytes_received_ += number_to_write;
         }
-        // Potentially completed a record.
-        if(IsRecordComplete())
+        else // Padding incomplete.
+        {
+          std::uint32_t remaining_padding 
+            {(header_and_content + padding_bytes_expected_) - bytes_received_};
+          std::uint32_t number_to_write = 
+            {(remaining_padding <= number_bytes_remaining) ?
+              remaining_padding : number_bytes_remaining};
+          // Ignore padding. Skip ahead without processing.
+          bytes_received_ += number_to_write;
+          number_bytes_processed += number_to_write;
+        }
+      }
+      // Potentially completed a record.
+      if(IsRecordComplete())
+      {
+        try
         {
           RequestIdentifier request_id
             {i_ptr_->ProcessCompleteRecord(connection, this)};
           *this = RecordStatus {i_ptr_}; // (Clear the RecordStatus object.)
           if(request_id != RequestIdentifier {})
             request_identifiers.push_back(request_id);
-        } // Loop to check if more received bytes need to be processed.
-      } // On exit, looped through all received data as partitioned by record
-        // segments.
+        }
+        catch(...)
+        {
+          try
+          {
+            i_ptr_->connections_to_close_set_.insert(connection);
+          }
+          catch(...)
+          {
+            i_ptr_->local_bad_interface_state_detected_ = true;
+            throw;
+          }
+          throw;
+        }
+      } // Loop to check if more received bytes need to be processed.
+    } // On exit, looped through all received data as partitioned by record
+      // segments.
 
-      // Check if an additional read should be made on the socket. A short count
-      // can only mean that a call to read() blocked as EOF and other errors
-      // were handled above.
-      if(number_bytes_received < kBufferSize)
-        break;
-    } // End the while loop which keeps reading from the socket.
-  }
-  catch(...)
-  {
-    try
-    {
-      i_ptr_->connections_to_close_set_.insert(connection);
-    }
-    catch(...)
-    {
-      i_ptr_->local_bad_interface_state_detected_ = true;
-      throw;
-    }
-    throw;
-  }
+    // Check if an additional read should be made on the socket. A short count
+    // can only mean that a call to read() blocked as EOF and other errors
+    // were handled above.
+    if(number_bytes_received < kBufferSize)
+      break;
+  } // End the while loop which keeps reading from the socket.
 
   return request_identifiers;
 }
@@ -257,7 +331,7 @@ void RecordStatus::UpdateAfterHeaderCompletion(int connection)
 
   // Extract type and request_id.
   type_ = static_cast<FCGIType>(header_[kHeaderTypeIndex]);
-  uint16_t FCGI_request_id = header_[kHeaderRequestIDB1Index];
+  std::uint16_t FCGI_request_id = header_[kHeaderRequestIDB1Index];
   FCGI_request_id <<= 8; // one byte
   FCGI_request_id += header_[kHeaderRequestIDB0Index];
   request_id_ = RequestIdentifier(connection, FCGI_request_id);
@@ -270,32 +344,36 @@ void RecordStatus::UpdateAfterHeaderCompletion(int connection)
     return;
 
   // Not a management record. Use type to determine rejection.
-  // ACQUIRE the interface state mutex to access current RequestIdentifiers.
+  // ACQUIRE the interface state mutex to access current RequestIdentifiers
+  // through request_map_.
   std::lock_guard<std::mutex> interface_state_lock
-    {i_ptr_->interface_state_mutex_};
-  auto request_map_iter = i_ptr_->request_map_.find(request_id_);
+    {FCGIServerInterface::interface_state_mutex_};
+  // Note that is expected that find may sometimes return the past-the-end
+  // iterator.
+  std::map<RequestIdentifier, RequestData>::iterator request_map_iter 
+    {i_ptr_->request_map_.find(request_id_)};
   switch(type_)
   {
-    case fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST : {
+    case FCGIType::kFCGI_BEGIN_REQUEST : {
       invalid_record_ = (request_map_iter != i_ptr_->request_map_.end());
       break;
     }
-    case fcgi_si::FCGIType::kFCGI_ABORT_REQUEST : {
+    case FCGIType::kFCGI_ABORT_REQUEST : {
       invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
         || request_map_iter->second.get_abort());
       break;
     }
-    case fcgi_si::FCGIType::kFCGI_PARAMS : {
+    case FCGIType::kFCGI_PARAMS : {
       invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
         || request_map_iter->second.get_PARAMS_completion());
       break;
     }
-    case fcgi_si::FCGIType::kFCGI_STDIN : {
+    case FCGIType::kFCGI_STDIN : {
       invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
         || request_map_iter->second.get_STDIN_completion());
       break;
     }
-    case fcgi_si::FCGIType::kFCGI_DATA : {
+    case FCGIType::kFCGI_DATA : {
       invalid_record_ = (request_map_iter == i_ptr_->request_map_.end()
         || request_map_iter->second.get_DATA_completion());
       break;
