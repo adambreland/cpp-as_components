@@ -40,7 +40,7 @@ public:
   // 
   // Effects:
   //
-  std::vector<RequestIdentifier> Read(int connection);
+  std::vector<RequestIdentifier> Read();
 
   RecordStatus() = default;
   RecordStatus(int connection, FCGIServerInterface* interface_ptr) noexcept;

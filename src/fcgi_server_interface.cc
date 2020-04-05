@@ -586,7 +586,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     {
       connections_read++;
       std::vector<RequestIdentifier> request_identifiers
-        {it->second.Read(fd)};
+        {it->second.Read()};
       if(request_identifiers.size())
       {
         // ACQUIRE interface_state_mutex_.

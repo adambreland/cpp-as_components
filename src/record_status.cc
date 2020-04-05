@@ -227,7 +227,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
-std::vector<RequestIdentifier> RecordStatus::Read(int connection)
+std::vector<RequestIdentifier> RecordStatus::Read()
 {
   // Number of bytes read at a time from connected sockets.
   constexpr int kBufferSize {512};
@@ -243,7 +243,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
     // Read from socket.
     std::uint32_t number_bytes_processed = 0;
     std::uint32_t number_bytes_received =
-      socket_functions::SocketRead(connection, read_buffer, kBufferSize);
+      socket_functions::SocketRead(connection_, read_buffer, kBufferSize);
 
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
@@ -254,7 +254,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
         // state.
         try
         {
-          i_ptr_->connections_to_close_set_.insert(connection);
+          i_ptr_->connections_to_close_set_.insert(connection_);
           return {};
         }
         catch(...)
@@ -267,7 +267,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
       {
         try
         {
-          i_ptr_->connections_to_close_set_.insert(connection);
+          i_ptr_->connections_to_close_set_.insert(connection_);
         }
         catch(...)
         {
@@ -317,7 +317,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
           {
             try
             {
-              i_ptr_->connections_to_close_set_.insert(connection);
+              i_ptr_->connections_to_close_set_.insert(connection_);
             }
             catch(...)
             {
@@ -365,7 +365,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
               {
                 try
                 {
-                  i_ptr_->connections_to_close_set_.insert(connection);
+                  i_ptr_->connections_to_close_set_.insert(connection_);
                 }
                 catch(...)
                 {
@@ -422,7 +422,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
                 {
                   try
                   {
-                    i_ptr_->connections_to_close_set_.insert(connection);
+                    i_ptr_->connections_to_close_set_.insert(connection_);
                   }
                   catch(...)
                   {
@@ -467,7 +467,7 @@ std::vector<RequestIdentifier> RecordStatus::Read(int connection)
         {
           try
           {
-            i_ptr_->connections_to_close_set_.insert(connection);
+            i_ptr_->connections_to_close_set_.insert(connection_);
           }
           catch(...)
           {
@@ -530,7 +530,7 @@ void RecordStatus::UpdateAfterHeaderCompletion()
       break;
     }
     // These cases cannot be validated with local information alone.
-    // Fall through to the next check which accesses the interface/
+    // Fall through to the next check which accesses the interface.
     case FCGIType::kFCGI_PARAMS :
     case FCGIType::kFCGI_STDIN :
     case FCGIType::kFCGI_DATA :
@@ -548,7 +548,7 @@ void RecordStatus::UpdateAfterHeaderCompletion()
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
-  // Note that is expected that find may sometimes return the past-the-end
+  // Note that it is expected that find may sometimes return the past-the-end
   // iterator.
   std::map<RequestIdentifier, RequestData>::iterator request_map_iter 
     {i_ptr_->request_map_.find(request_id_)};
