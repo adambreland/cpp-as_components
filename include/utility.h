@@ -255,7 +255,8 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 // 2) If content_length was not long enough for the extracted sequence of
 //    name-value pairs, an empty vector is returned.
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr);
+ProcessBinaryNameValuePairs(const uint8_t* content_ptr, 
+  uint32_t content_length);
 
 // Returns a vector of bytes which represents the 32-bit unsigned integer
 // argument in decimal as a sequence of encoded characters. For example, the

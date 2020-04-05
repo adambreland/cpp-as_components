@@ -170,73 +170,6 @@ class FCGIServerInterface {
     first_iter, typename C ::iterator first_end_iter, C* second_ptr, 
     typename C ::iterator second_iter, typename C ::iterator second_end_iter);
 
-  // Examines the completed record associated with the connected socket
-  // represented by connection and performs various actions according to
-  // the type of the record. The state of the FCGIServerInterface
-  // object may be changed by the call.
-  //
-  // Intended to be called from within the implementation of Read().
-  //
-  // Parameters:
-  // connection: A connected socket descriptor.
-  //
-  // Preconditions:
-  // 1) The record represented by the RecordStatus object associated
-  //    with connection must be complete.
-  // 
-  //
-  // Caller Responsibilities:
-  // 1) If a non-null RequestIdentifier object is returned, the list of
-  //    RequestIdentifier objects returned by Read() must contain a
-  //    RequestIdentifier object equivalent to this object.
-  //
-  // Effects, in general:
-  // 1) Either the null RecordIdentifier object is returned or a non-null
-  //    RequestIdentifier object is returned.
-  //    a) A non-null RequestIdentifier indicates that the request
-  //       is complete. See Caller Responsibilities above.
-  //    b) If the returned RequestIdentifier object is null, no action is
-  //       required by the caller. Interface state may have been changed.
-  //
-  // Effects for record types:
-  // 1) Management record:
-  //    A null RequestIdentifier object is returned. In addition:
-  //    An appropriate response is sent over connection.
-  //    Also:
-  //    a) For FCGI_GET_VALUES, an FCGI_GET_VALUES_RESULT record is sent.
-  //    b) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
-  // 2) Begin request record:
-  //    A null RequestIdentifier object is returned. In addition:
-  //    a) A begin request record for a request which already exists is ignored.
-  //    b) Otherwise, the FCGI_request_ID is made active.
-  // 3) Abort record:
-  //    A null RequestIdentifier object is returned. In addition:
-  //    a) Aborts to inactive requests and requests which have already been
-  //       aborted are ignored.
-  //    b) If the request of the record has not been assigned, the request is
-  //       deleted, an FCGI_END_REQUEST record is sent to the peer, and the
-  //       FCGI_request_ID is made inactive. The protocolStatus field of the
-  //       record is set to FCGI_REQUEST_COMPLETE (0). The appStatus field of
-  //       the record is equal to -1 (in two's complement).
-  //    c) If the request of the record has been assigned, the abort variable
-  //       of the associated RequestData object is set.
-  // 4) Params, stdin, and data stream records:
-  //    A null or non-null request identifier may be returned.
-  //    a) Stream records of these types which do not apply to an active
-  //       request or which apply to a request whose corresponding stream has
-  //       already been completed are ignored. A null RequestIdentifier
-  //       object is returned.
-  //    b) Otherwise, if the size of the content section of the record is
-  //       nonzero, the content is appended to the corresponding stream content
-  //       buffer in the RequestData object associated with the identifier.
-  //       A null RequestIdentifier object is returned.
-  //    c) If the size of the content section of the record is zero, the
-  //       corresponding stream is completed. The RequestData object is
-  //       checked for completion. If complete, the identifier is returned.
-  //       If not complete, a null RequestIdentifier object is returned.
-  RequestIdentifier ProcessCompleteRecord(int connection,
-    RecordStatus* record_status_ptr);
-
   // Attempts to remove the descriptor given by connection from
   // record_status_map_ and write_mutex_map_ while conditionally updating
   // dummy_descriptor_set_.
@@ -415,7 +348,8 @@ class FCGIServerInterface {
 
   bool SendFCGIUnknownType(int connection, fcgi_si::FCGIType type);
 
-  bool SendGetValuesResult(int connection, const RecordStatus& record_status);
+  bool SendGetValuesResult(int connection, const uint8_t* buffer_ptr, 
+    std::size_t count);
 
   // Attempts to send the byte sequence given by 
   // [buffer_ptr, buffer_ptr + count) to a client over connection.

@@ -408,7 +408,7 @@ int FCGIServerInterface::AcceptConnection()
   try
   {
     record_status_map_emplace_return = record_status_map_.emplace(
-      new_socket_descriptor, RecordStatus {this});
+      new_socket_descriptor, RecordStatus {new_socket_descriptor, this});
 
     std::unique_ptr<std::mutex> new_mutex_manager {new std::mutex {}};
     write_mutex_map_insert_return = write_mutex_map_.insert(
@@ -652,160 +652,6 @@ void FCGIServerInterface::AddRequest(RequestIdentifier request_id,
   }
 }
 
-RequestIdentifier FCGIServerInterface::
-ProcessCompleteRecord(int connection, RecordStatus* record_status_ptr)
-{
-  RequestIdentifier result {};
-  RecordStatus& record_status {*record_status_ptr};
-
-  // Check if it is a management record (every management record is valid).
-  if(record_status.get_request_id().FCGI_id() == 0)
-  {
-    if(record_status.get_type() == FCGIType::kFCGI_GET_VALUES)
-      SendGetValuesResult(connection, record_status);
-    else // Unknown type.
-      SendFCGIUnknownType(connection, record_status.get_type());
-  }
-  // Check if the record is valid. Ignore record if it is not.
-  else if(record_status.get_invalid_status())
-  {}
-  else // The record must be a valid application record. Process it.
-  {
-    RequestIdentifier request_id {record_status.get_request_id()};
-
-    switch(record_status.get_type())
-    {
-      case FCGIType::kFCGI_BEGIN_REQUEST: {
-        // Extract role
-        uint16_t role 
-          {record_status.get_local_content()[kBeginRequestRoleB1Index]};
-        role <<= 8;
-        role += record_status.get_local_content()[kBeginRequestRoleB0Index];
-
-        // Determine if the request limit was reached for the connection.
-        bool limit_reached {false};
-        { // Start lock handling block.
-          // ACQUIRE interface_state_mutex_.
-          std::lock_guard<std::mutex> interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
-          std::map<int, int>::iterator request_count_it
-            {request_count_map_.find(connection)};
-          // Logic error check.
-          if(request_count_it == request_count_map_.end())
-          {
-            local_bad_interface_state_detected_ = true;
-            throw std::logic_error {"request_count_map_ did not have an "
-              "an expected socket descriptor."};
-          }
-          limit_reached = (request_count_it->second
-            >= maximum_request_count_per_connection_);
-        } // RELEASE interface_state_mutex_.
-
-        // Reject or accept a new request based on the request limit and the
-        // application_set overload flag.
-        if(limit_reached)
-          (maximum_request_count_per_connection_ == 1) ?
-            SendFCGIEndRequest(connection, request_id,
-              FCGI_CANT_MPX_CONN, EXIT_FAILURE) :
-            SendFCGIEndRequest(connection, request_id,
-              FCGI_OVERLOADED, EXIT_FAILURE);
-        else if(application_overload_)
-          SendFCGIEndRequest(connection, request_id,
-            FCGI_OVERLOADED, EXIT_FAILURE);
-        else // We can accept the request.
-        {
-          // Extract close_connection value.
-          bool close_connection =
-            !(record_status.get_local_content()[kBeginRequestFlagsIndex]
-              & FCGI_KEEP_CONN);
-          // ACQUIRE interface_state_mutex_.
-          std::lock_guard<std::mutex> interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
-          AddRequest(request_id, role, close_connection);
-        } // RELEASE interface_state_mutex_.
-        break;
-      }
-      case FCGIType::kFCGI_ABORT_REQUEST: {
-        // Has the request already been assigned?
-        bool send_end_request {false};
-        { // Start lock handling block.
-          // ACQUIRE interface_state_mutex_.
-          std::lock_guard<std::mutex> interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
-          auto request_data_it {request_map_.find(request_id)};
-
-          if(request_data_it->second.get_status()
-             == RequestStatus::kRequestAssigned)
-            request_data_it->second.set_abort();
-          else // Not assigned. We can erase the request and update state.
-          {
-            // Check if we should indicate that a request was made by the
-            // client web sever to close the connection.
-            if(request_data_it->second.get_close_connection())
-              application_closure_request_set_.insert(connection);
-            RemoveRequest(request_data_it);
-            send_end_request = true;
-          }
-        } // RELEASE interface_state_mutex_.
-        if(send_end_request)
-          SendFCGIEndRequest(connection, request_id,
-            FCGI_REQUEST_COMPLETE, app_status_on_abort_);
-          // Don't bother checking if the connection was closed by the
-          // peer by inspecting the return value of the call to
-          // SendFCGIEndRequest() as it would be difficult to act on
-          // this information in the middle of the call to read.
-        break;
-      }
-      case FCGIType::kFCGI_PARAMS:
-      case FCGIType::kFCGI_STDIN:
-      case FCGIType::kFCGI_DATA: {
-        bool send_end_request {false};
-        // Should we complete the stream?
-        if(record_status.EmptyRecord())
-        {
-          // ACQUIRE interface_state_mutex_.
-          std::lock_guard<std::mutex> interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
-          auto request_data_it {request_map_.find(request_id)};
-
-          (record_status.get_type() == FCGIType::kFCGI_PARAMS) ?
-            request_data_it->second.CompletePARAMS() :
-          (record_status.get_type() == FCGIType::kFCGI_STDIN)  ?
-            request_data_it->second.CompleteSTDIN() :
-            request_data_it->second.CompleteDATA();
-
-          // Check if the request is complete. If it is, validate the
-          // FCGI_PARAMS stream. This also puts the RequestData object into a
-          // valid state to be used for construction of an FCGIRequest object.
-          if(request_data_it->second.IsRequestComplete())
-          {
-            if(request_data_it->second.ProcessFCGI_PARAMS())
-              result = request_id;
-            else // The request has a malformed FCGI_PARAMS stream. Reject.
-            {
-              // Check if we should indicate that a request was made by the
-              // client web sever to close the connection.
-              if(request_data_it->second.get_close_connection())
-                application_closure_request_set_.insert(connection);
-              RemoveRequest(request_data_it);
-              send_end_request = true;
-            }
-          }
-        } /* RELEASE interface_state_mutex_. */ /*
-        else
-          The record had content which was appended to the proper
-          stream when the content was received. No action need be taken now. */
-
-        if(send_end_request) // (Because of a malformed FCGI_PARAMS stream.)
-          SendFCGIEndRequest(connection, request_id,
-            FCGI_REQUEST_COMPLETE, EXIT_FAILURE);
-        break;
-      }
-    }
-  }
-  return result; // Default (null) RequestIdentifier if not assinged to.
-}
-
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
 void FCGIServerInterface::RemoveConnection(int connection)
@@ -1009,14 +855,13 @@ SendFCGIUnknownType(int connection, FCGIType type)
 }
 
 bool FCGIServerInterface::
-SendGetValuesResult(int connection, const RecordStatus& record_status)
+SendGetValuesResult(int connection, const uint8_t* buffer_ptr, 
+  std::size_t count)
 {
   using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
   std::vector<byte_seq_pair> get_value_pairs {};
-  if(record_status.get_local_content().size())
-    get_value_pairs = ProcessBinaryNameValuePairs(
-      record_status.get_local_content().size(),
-      record_status.get_local_content().data());
+  if(count)
+    get_value_pairs = ProcessBinaryNameValuePairs(buffer_ptr, count);
 
   std::vector<byte_seq_pair> result_pairs {};
 

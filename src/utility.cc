@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -27,9 +28,9 @@ void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
 }
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(uint32_t content_length, const uint8_t* content_ptr)
+ProcessBinaryNameValuePairs(std::size_t content_length, const uint8_t* content_ptr)
 {
-  uint32_t bytes_processed {0};
+  std::size_t bytes_processed {0};
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
   result {};
   std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
