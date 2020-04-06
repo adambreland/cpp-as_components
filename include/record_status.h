@@ -13,8 +13,10 @@ namespace fcgi_si {
 
 // RecordStatus objects are used as internal components of an
 // FCGIServerInterface object. They represent the status of a FastCGI record as
-// it received over a socket connection. The method Read 
-//
+// it received over a socket connection. The method Read updates interface
+// state as records are received over the connection. It produces a list of
+// requests which are complete and ready to be used to create an FCGIRequest
+// object.
 class RecordStatus {
 public:
 
@@ -24,19 +26,19 @@ public:
   // normal exit, a list is returned of request identifiers for the requests 
   // which are ready to be used to create an FCGIRequest object.
   //
-  // Parameters:
-  // connection: The file descriptor of a connected socket.
+  // Parameters: none.
   //
   // Preconditions:
-  // 1) connection must refer to a connected socket which was previously
-  //    opened by the interface by a call to AcceptConnection and has not yet
-  //    been removed from the interface by a call to RemoveConnection.
+  // 1) connection must refer to a connected socket which:
+  //    a) Was previously opened by the interface by a call to AcceptConnection.
+  //    b) Has not yet been removed from the interface by a call to 
+  //       RemoveConnection.
   //
   // Synchronization:
-  // 1) mplicitly acquires and
+  // 1) Implicitly acquires and
   //
   // Exceptions:
-  // 1) May thro exceptions derived from 
+  // 1) May throw exceptions derived from std::exception.
   // 
   // Effects:
   //

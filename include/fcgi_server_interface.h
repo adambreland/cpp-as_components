@@ -41,7 +41,7 @@ class FCGIServerInterface {
 
   // No copy, move, or default construction.
   FCGIServerInterface() = delete;
-  FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
+  FCGIServerInterface(int max_connections, int max_requests,
     uint16_t role, int32_t app_status_on_abort = EXIT_FAILURE);
   FCGIServerInterface(const FCGIServerInterface&) = delete;
   FCGIServerInterface(FCGIServerInterface&&) = delete;
@@ -390,8 +390,8 @@ class FCGIServerInterface {
     // The default application exit status that will be sent when requests
     // are rejected by the interface without involvement of the application.
   int32_t app_status_on_abort_;
-  uint32_t maximum_connection_count_;
-  uint32_t maximum_request_count_per_connection_;
+  int maximum_connection_count_;
+  int maximum_request_count_per_connection_;
   uint16_t role_;
   int socket_domain_;
     // A list of IP addresses from which the interface will accept connections.

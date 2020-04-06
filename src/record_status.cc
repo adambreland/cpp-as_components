@@ -91,7 +91,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
   }
   // Check if the record is valid. Ignore record if it is not.
   else if(invalidated_by_header_)
-  {}
+  {/*no-op*/}
   else // The record must be a valid application record. Process it.
   {
     switch(type_)
@@ -230,7 +230,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
 std::vector<RequestIdentifier> RecordStatus::Read()
 {
   // Number of bytes read at a time from connected sockets.
-  constexpr int kBufferSize {512};
+  constexpr uint32_t kBufferSize {512};
   std::uint8_t read_buffer[kBufferSize];
 
   // Return value to be modified during processing.
@@ -279,11 +279,7 @@ std::vector<RequestIdentifier> RecordStatus::Read()
           "NonblockingSocketRead")};
       }
     }
-
-    // Process bytes received, if any. The check is needed as blocking
-    // errors may return zero bytes if nothing was read.
-    if(number_bytes_received > 0)
-      break;
+    // Processed received bytes.
     while(number_bytes_processed < number_bytes_received)
     {
       std::uint32_t number_bytes_remaining =
@@ -332,12 +328,15 @@ std::vector<RequestIdentifier> RecordStatus::Read()
       // Either the content is complete or it isn't.
       else
       {
-        std::uint32_t header_and_content
-          {std::uint32_t(FCGI_HEADER_LEN) + content_bytes_expected_};
-        std::uint32_t remaining_content {(bytes_received_ < header_and_content) ?
-          header_and_content - bytes_received_ : 0};
+        std::uint32_t header_and_content {content_bytes_expected_};
+        header_and_content += FCGI_HEADER_LEN;
+        std::uint32_t remaining_content {};
+        if(bytes_received_ < header_and_content)
+          remaining_content = header_and_content - bytes_received_;
+        else
+          remaining_content = 0U;
 
-        if(remaining_content > 0) // Content incomplete.
+        if(remaining_content > 0U) // Content incomplete.
         {
           std::uint32_t number_to_write
             {(remaining_content <= number_bytes_remaining) ?
@@ -348,7 +347,7 @@ std::vector<RequestIdentifier> RecordStatus::Read()
           // types.
           if(!invalidated_by_header_)
           {
-            if(request_id_.FCGI_id() == 0
+            if(request_id_.FCGI_id() == 0U
                 || type_ == FCGIType::kFCGI_BEGIN_REQUEST
                 || type_ == FCGIType::kFCGI_ABORT_REQUEST)
             {

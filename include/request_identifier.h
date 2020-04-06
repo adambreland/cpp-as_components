@@ -9,26 +9,81 @@ namespace fcgi_si {
 
 class RequestIdentifier {
 public:
-  int descriptor() const noexcept;
-  uint16_t FCGI_id() const noexcept;
+  inline int descriptor() const noexcept
+  {
+    return pair_.first;
+  }
 
-  RequestIdentifier() noexcept;
-  RequestIdentifier(int descriptor, uint16_t FCGI_id) noexcept;
-  RequestIdentifier(const RequestIdentifier& request_id) noexcept;
-  RequestIdentifier(RequestIdentifier&& request_id) noexcept;
+  inline uint16_t FCGI_id() const noexcept
+  {
+    return pair_.second;
+  }
 
-  RequestIdentifier& operator=(const RequestIdentifier& request_id) noexcept;
-  RequestIdentifier& operator=(RequestIdentifier&& request_id) noexcept;
+  inline RequestIdentifier() noexcept
+  : pair_ {0, 0U}
+  {}
 
-  bool operator== (const RequestIdentifier& rhs) const noexcept;
-  bool operator!= (const RequestIdentifier& rhs) const noexcept;
+  inline RequestIdentifier(int descriptor, uint16_t FCGI_id) noexcept
+  : pair_ {descriptor, FCGI_id}
+  {}
 
-  bool operator<  (const RequestIdentifier& rhs) const noexcept;
-  bool operator<= (const RequestIdentifier& rhs) const noexcept;
-  bool operator>  (const RequestIdentifier& rhs) const noexcept;
-  bool operator>= (const RequestIdentifier& rhs) const noexcept;
+  inline RequestIdentifier(const RequestIdentifier& request_id) noexcept
+  {
+    pair_ = request_id.pair_;
+  }
 
-  explicit operator bool() const noexcept;
+  inline RequestIdentifier(RequestIdentifier&& request_id) noexcept
+  {
+    pair_ = std::move(request_id.pair_);
+  }
+
+  inline RequestIdentifier& operator=(const RequestIdentifier& request_id) 
+    noexcept
+  {
+    pair_ = request_id.pair_;
+    return *this;
+  }
+
+  inline RequestIdentifier& operator=(RequestIdentifier&& request_id) noexcept
+  {
+    pair_ = std::move(request_id.pair_);
+    return *this;
+  }
+
+  inline bool operator==(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ == rhs.pair_;
+  }
+
+  inline bool operator!=(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ != rhs.pair_;
+  }
+
+  inline bool operator<(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ < rhs.pair_;
+  }
+
+  inline bool operator<=(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ <= rhs.pair_;
+  }
+
+  inline bool operator>(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ > rhs.pair_;
+  }
+
+  inline bool operator>=(const RequestIdentifier& rhs) const noexcept
+  {
+    return pair_ >= rhs.pair_;
+  }
+
+  inline explicit operator bool() const noexcept
+  {
+    return (pair_.first || pair_.second) ? true : false;
+  }
 
   ~RequestIdentifier() = default;
 

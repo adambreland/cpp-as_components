@@ -88,7 +88,7 @@ unsigned long FCGIServerInterface::interface_identifier_ {0};
 unsigned long FCGIServerInterface::previous_interface_identifier_ {0};
 
 FCGIServerInterface::
-FCGIServerInterface(uint32_t max_connections, uint32_t max_requests,
+FCGIServerInterface(int max_connections, int max_requests,
   uint16_t role, int32_t app_status_on_abort)
 : app_status_on_abort_ {app_status_on_abort},
   maximum_connection_count_ {max_connections},
@@ -807,17 +807,10 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
 {
   std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
 
-  // Encode the record FCGI request ID from the RequestID object.
-  uint8_t request_id_byte_array[2];
-  for(char i {0}; i < 2; i++)
-  {
-    request_id_byte_array[i] = request_id.FCGI_id() >> (8 - (8*i));
-  }
-
   // Encode app_status.
   uint8_t app_status_byte_array[4];
   uint32_t unsigned_app_status {static_cast<uint32_t>(app_status)};
-  for(char i {0}; i < 4; i++)
+  for(int i {0}; i < 4; i++)
   {
     app_status_byte_array[i] = unsigned_app_status >> (24 - (8*i));
   }
@@ -826,7 +819,7 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   PopulateHeader(result.data(), FCGIType::kFCGI_END_REQUEST,
     request_id.FCGI_id(), FCGI_HEADER_LEN, 0);
   // Set body.
-  for(char i {0}; i < 4; i++)
+  for(int i {0}; i < 4; i++)
   {
     result[(i + 1) + kHeaderReservedByteIndex] =
       app_status_byte_array[i];
@@ -927,15 +920,17 @@ SendGetValuesResult(int connection, const uint8_t* buffer_ptr,
   // Note that it is not currently possible to exceed the limit for the
   // content size of a singe record (2^16-1 bytes).
   // Pad the record to a multiple of FCGI_HEADER_LEN.
-  uint64_t header_and_content_length(result.size());
-  uint64_t content_length {header_and_content_length
+  uint32_t header_and_content_length(result.size());
+  uint32_t content_length {header_and_content_length
     - FCGI_HEADER_LEN};
     // A safe narrowing conversion.
   uint8_t remainder(header_and_content_length % FCGI_HEADER_LEN);
-  uint8_t pad_length {
-    (remainder) ? FCGI_HEADER_LEN - remainder
-                : 0};
-  result.insert(result.end(), pad_length, 0);
+  uint8_t pad_length {};
+  if(remainder != 0)
+    pad_length = FCGI_HEADER_LEN - remainder;
+  else
+    pad_length = 0U;
+  result.insert(result.end(), pad_length, 0U);
   PopulateHeader(result.data(),
     FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
     content_length, pad_length);

@@ -14,7 +14,7 @@ namespace fcgi_si {
 // Protocol Constants
   // General
 constexpr int                          FCGI_LISTENSOCK_FILENO         {0};
-constexpr int                          FCGI_HEADER_LEN                {8};
+constexpr uint8_t                      FCGI_HEADER_LEN                {8};
 constexpr uint8_t                      FCGI_VERSION_1                 {1};
 constexpr uint16_t                     FCGI_NULL_REQUEST_ID           {0};
   // Flags
