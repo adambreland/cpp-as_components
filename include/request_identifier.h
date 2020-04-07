@@ -14,11 +14,14 @@ public:
     return pair_.first;
   }
 
-  inline uint16_t FCGI_id() const noexcept
+  inline std::uint16_t FCGI_id() const noexcept
   {
     return pair_.second;
   }
 
+  // Default-constructed RequestIdentifier objects are interpreted as null
+  // objects and are false when converted to boolean type. Any object which
+  // does not compare equal to a default-constructed object converts to true.
   inline RequestIdentifier() noexcept
   : pair_ {0, 0U}
   {}
@@ -88,7 +91,7 @@ public:
   ~RequestIdentifier() = default;
 
 private:
-  std::pair<int, uint16_t> pair_;
+  std::pair<int, std::uint16_t> pair_;
 };
 
 } // namespace fcgi_si

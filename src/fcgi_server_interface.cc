@@ -89,7 +89,7 @@ unsigned long FCGIServerInterface::previous_interface_identifier_ {0};
 
 FCGIServerInterface::
 FCGIServerInterface(int max_connections, int max_requests,
-  uint16_t role, int32_t app_status_on_abort)
+  std::uint16_t role, std::int32_t app_status_on_abort)
 : app_status_on_abort_ {app_status_on_abort},
   maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
@@ -190,7 +190,7 @@ FCGIServerInterface(int max_connections, int max_requests,
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
     std::string ip_address_list {(ip_address_list_ptr) ?
       std::string(ip_address_list_ptr) : ""};
-    if(ip_address_list.size() != 0) // A non-empty address list was bound.
+    if(ip_address_list.size() != 0U) // A non-empty address list was bound.
     {
       // Declare appropriate variables to use with inet_pton() and inet_ntop().
       // These structs are internal to struct sockaddr_in and
@@ -247,9 +247,9 @@ FCGIServerInterface(int max_connections, int max_requests,
   // Prevent interface_identifier_ == 0 when a valid interface is present in
   // the unlikely event of integer overflow.
   if(previous_interface_identifier_ < std::numeric_limits<unsigned long>::max())
-    previous_interface_identifier_ += 1;
+    previous_interface_identifier_ += 1U;
   else
-    previous_interface_identifier_ = 1;
+    previous_interface_identifier_ = 1U;
   interface_identifier_ = previous_interface_identifier_;
 } // RELEASE interface_state_mutex_.
 
@@ -279,7 +279,7 @@ FCGIServerInterface::~FCGIServerInterface()
     }
 
     // Kill interface.
-    FCGIServerInterface::interface_identifier_ = 0;
+    FCGIServerInterface::interface_identifier_ = 0U;
   } // RELEASE interface_state_mutex_.
   catch(...)
   {
@@ -361,7 +361,7 @@ int FCGIServerInterface::AcceptConnection()
 
   // Validate the new connected socket against the gathered information.
   if(new_socket_domain != socket_domain_ || new_socket_type != SOCK_STREAM
-     || (valid_ip_address_set_.size() > 0
+     || (valid_ip_address_set_.size() > 0U
          && (valid_ip_address_set_.find(new_address) ==
              valid_ip_address_set_.end())))
   {
@@ -486,7 +486,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         dds_iter != dummy_descriptor_set_.end(); /*no-op*/)
     {
       std::map<RequestIdentifier, RequestData>::iterator request_map_iter
-        {request_map_.lower_bound(RequestIdentifier {*dds_iter, 0})};
+        {request_map_.lower_bound(RequestIdentifier {*dds_iter, 0U})};
 
       // The absence of requests allows closure of the descriptor.
       // Remember that RequestIdentifier is lexically ordered and that a
@@ -586,7 +586,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     {
       connections_read++;
       std::vector<RequestIdentifier> request_identifiers
-        {it->second.Read()};
+        {it->second.ReadRecords()};
       if(request_identifiers.size())
       {
         // ACQUIRE interface_state_mutex_.
@@ -771,7 +771,7 @@ bool FCGIServerInterface::RequestCleanupDuringConnectionClosure(int connection)
   {
     bool assigned_requests_present {false};
     for(auto request_map_iter =
-          request_map_.lower_bound(RequestIdentifier {connection, 0});
+          request_map_.lower_bound(RequestIdentifier {connection, 0U});
         !(request_map_iter == request_map_.end()
           || request_map_iter->first.descriptor() > connection);
         /*no-op*/)
@@ -805,7 +805,7 @@ bool FCGIServerInterface::
 SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   uint8_t protocol_status, int32_t app_status)
 {
-  std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
+  std::vector<uint8_t> result(16, 0U); // Allocate space for two bytes.
 
   // Encode app_status.
   uint8_t app_status_byte_array[4];
@@ -834,11 +834,11 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
 bool FCGIServerInterface::
 SendFCGIUnknownType(int connection, FCGIType type)
 {
-  std::vector<uint8_t> result(16, 0); // Allocate space for two bytes.
+  std::vector<uint8_t> result(16, 0U); // Allocate space for two bytes.
 
   // Set header.
   PopulateHeader(result.data(), FCGIType::kFCGI_UNKNOWN_TYPE,
-    FCGI_NULL_REQUEST_ID, FCGI_HEADER_LEN, 0);
+    FCGI_NULL_REQUEST_ID, FCGI_HEADER_LEN, 0U);
   // Set body. (Only the first byte in the body is used.)
   result[1 + kHeaderReservedByteIndex]   =
     static_cast<uint8_t>(type);
@@ -848,50 +848,67 @@ SendFCGIUnknownType(int connection, FCGIType type)
 }
 
 bool FCGIServerInterface::
-SendGetValuesResult(int connection, const uint8_t* buffer_ptr, 
+SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
   std::size_t count)
 {
-  using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
-  std::vector<byte_seq_pair> get_value_pairs {};
-  if(count)
-    get_value_pairs = ProcessBinaryNameValuePairs(buffer_ptr, count);
-
+  using byte_seq_pair = std::pair<std::vector<std::uint8_t>, 
+    std::vector<std::uint8_t>>;
+  // If count is zero or if the sequence of bytes given by the range
+  // [buffer_ptr, buffer_ptr + count) contains an error, the vector returned
+  // by ProcessBinaryNameValuePairs is empty. In either case, an empty
+  // FCGI_GET_VALUES_RESULT record will be sent to the client. If the client
+  // included requests, the absence of those variables in the response will 
+  // correctly indicate that the request was not understood (as, in this case,
+  // an error will have been present).
+  std::vector<byte_seq_pair> get_value_pairs
+    {ProcessBinaryNameValuePairs(buffer_ptr, count)};
+  
   std::vector<byte_seq_pair> result_pairs {};
 
-  // Construct result pairs disregarding any name that is not understood and
-  // omitting duplicates. Enumerate the cases for the switch.
-  std::map<std::vector<uint8_t>, char> value_present_map
-    {{FCGI_MAX_CONNS, 0}, {FCGI_MAX_REQS, 1},
-    {FCGI_MPXS_CONNS, 2}};
-  for(auto iter {get_value_pairs.begin()};
-      (iter != get_value_pairs.end()) && value_present_map.size(); ++iter)
+  // Constructs result pairs. Disregards any name that is not understood and
+  // omit duplicates. The map is used to track which FCGI_GET_VALUES
+  // requests are understood (three are specified in the standard) and which
+  // requests have already occurred. Once a request type is seen, it is
+  // removed from the map. Processing stops once all types have been seen or
+  // the list of understood FCGI_GET_VALUES requests is exhausted.
+
+  // The integer values in the key-value pairs are used for the switch only. 
+  std::map<std::vector<std::uint8_t>, int> get_values_result_request_map
+      {{FCGI_MAX_CONNS, 0}, {FCGI_MAX_REQS, 1}, {FCGI_MPXS_CONNS, 2}};
+  std::vector<uint8_t> local_result {};
+  for(std::vector<byte_seq_pair>::iterator pairs_iter {get_value_pairs.begin()};
+    (pairs_iter != get_value_pairs.end()) && get_values_result_request_map.size(); 
+     ++pairs_iter)
   {
-    auto vpm_it {value_present_map.find(iter->first)};
-    if(vpm_it != value_present_map.end())
+    std::map<std::vector<std::uint8_t>, int>::iterator vpm_iter 
+      {get_values_result_request_map.find(pairs_iter->first)};
+    if(vpm_iter != get_values_result_request_map.end())
     {
-      std::vector<uint8_t> result {};
-      switch(vpm_it->second)
+      local_result.clear();
+      switch(vpm_iter->second)
       {
         case 0:
-          result = uint32_tToUnsignedCharacterVector(
-            maximum_connection_count_);
+          local_result = 
+            ToUnsignedCharacterVector(maximum_connection_count_);
           break;
         case 1:
-          result = uint32_tToUnsignedCharacterVector(
-            maximum_request_count_per_connection_);
+          local_result = 
+            ToUnsignedCharacterVector(maximum_request_count_per_connection_);
           break;
         case 2:
-          result.push_back((maximum_request_count_per_connection_ > 1) ?
-            static_cast<uint8_t>('1') : static_cast<uint8_t>('0'));
+          local_result.push_back((maximum_request_count_per_connection_ > 1) ?
+            static_cast<std::uint8_t>('1') : static_cast<std::uint8_t>('0'));
+          break;
       }
-      result_pairs.emplace_back(std::move(iter->first), std::move(result));
-      value_present_map.erase(vpm_it);
+      result_pairs.emplace_back(std::move(pairs_iter->first), 
+        std::move(local_result));
+      get_values_result_request_map.erase(vpm_iter);
     }
   }
   // Process result pairs to generate the response string.
 
   // Allocate space for header.
-  std::vector<uint8_t> result(FCGI_HEADER_LEN, 0);
+  std::vector<std::uint8_t> result(FCGI_HEADER_LEN, 0U);
 
   // Since only known names are accepted, assume that the lengths of
   // the names and values can fit in either 7 or 31 bits, i.e. 1 or 4 bytes.
@@ -900,7 +917,7 @@ SendGetValuesResult(int connection, const uint8_t* buffer_ptr,
     ++pair_iter)
   {
     // Encode name length.
-    uint32_t item_size(pair_iter->first.size());
+    std::int_fast32_t item_size(pair_iter->first.size());
     (item_size <= kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
       EncodeFourByteLength(item_size, std::back_inserter(result));
@@ -918,19 +935,19 @@ SendGetValuesResult(int connection, const uint8_t* buffer_ptr,
 
   // Prepare to write the response.
   // Note that it is not currently possible to exceed the limit for the
-  // content size of a singe record (2^16-1 bytes).
+  // content size of a singe record (2^16 - 1 bytes).
   // Pad the record to a multiple of FCGI_HEADER_LEN.
-  uint32_t header_and_content_length(result.size());
-  uint32_t content_length {header_and_content_length
+  std::int_fast32_t header_and_content_length(result.size());
+  std::int_fast32_t content_length {header_and_content_length
     - FCGI_HEADER_LEN};
     // A safe narrowing conversion.
-  uint8_t remainder(header_and_content_length % FCGI_HEADER_LEN);
-  uint8_t pad_length {};
+  std::int_fast32_t remainder(header_and_content_length % FCGI_HEADER_LEN);
+  std::int_fast32_t pad_length {};
   if(remainder != 0)
     pad_length = FCGI_HEADER_LEN - remainder;
   else
-    pad_length = 0U;
-  result.insert(result.end(), pad_length, 0U);
+    pad_length = 0;
+  result.insert(result.end(), pad_length, 0);
   PopulateHeader(result.data(),
     FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
     content_length, pad_length);
@@ -993,7 +1010,7 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
     }
     else 
     {
-      if(number_written != 0)
+      if(number_written != 0U)
       {
         // The connection to the client was just corrupted.
         mutex_map_iter->second.second = true;

@@ -38,7 +38,7 @@ namespace fcgi_si {
 // 1) Four bytes are written to the buffer pointed to by byte_iter. The
 //    byte sequence encodes length in the FastCGI name-value pair format.
 template<typename ByteIter>
-void EncodeFourByteLength(uint32_t length, ByteIter byte_iter);
+void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 
 // Processes name-value pairs and returns a tuple containing information which
 // allows a byte sequence to be written via a scatter-gather I/O system call.
@@ -47,6 +47,8 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter);
 //
 // Parameters:
 // pair_iter: An iterator to a std::pair object.
+//            pair_iter->first is a container for the name byte sequence.
+//            pair_iter->second is a container for the value byte sequence.
 // end:       An iterator to one-past-the-last element in the range of
 //            std::pair objects whose name and value sequences are to be
 //            encoded.
@@ -59,7 +61,7 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter);
 //            The first offset bytes of the byte sequence generated from this
 //            name value pair will be omitted from the total byte sequence.
 //
-// Requires:
+// Preconditions:
 // 1) [pair_iter, end) is a valid range.
 // 2) When the range [pair_iter, end) is non-empty:
 //    a) Each std::pair object of the range holds containers for sequences of
@@ -132,27 +134,28 @@ void EncodeFourByteLength(uint32_t length, ByteIter byte_iter);
 //    header whose length is less than FCGI_HEADER_LEN, also does not occur.
 // 6) All records have a total length which is a multiple of eight bytes.
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
-  std::size_t, ByteSeqPairIter>
+std::tuple<bool, std::size_t, std::vector<iovec>, 
+  const std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
 
-// Determines and returns the length in bytes of a name or value when that
-// length was encoded using four bytes in the FastCGI name-value pair format.
+// Returns the length in bytes of a name or value when that length was encoded
+// using four bytes in the FastCGI name-value pair format.
 //
 // Parameters:
 // byte_iter: An iterator to the first byte of a four-byte sequence.
 //
-// Requires:
-// The four-byte sequence pointed to by byte_iter is the encoding
-// in the FastCGI name-value pair format of the length of another
-// byte sequence that requires a four-byte length encoding.
+// Preconditions:
+// 1) The byte sequence given by the range [byte_iter, byte_iter + 4) is the
+//    correct encoding in the FastCGI name-value pair format of a length which
+//    requires four bytes to be encoded.
+// 2) The type of *byte_iter must be able to be safely cast through
+//    static_cast<uint8_t>(*byte_iter).
 //
 // Effects:
-// 1) The value returned is the number of bytes encoded in the four-byte
-//    sequence pointed to by byte_iter.
+// 1) The length is extracted from [byte_iter, byte_iter + 4) and returned.
 template <typename ByteIter>
-uint32_t ExtractFourByteLength(ByteIter byte_iter);
+std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 
 // Determines a partition of the byte sequence defined by
 // [begin_iter, end_iter) whose parts can be sent as the content of FastCGI
@@ -234,43 +237,51 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
 
 // Extracts a collection of name-value pairs when they are encoded as a
 // sequence of bytes in the FastCGI name-value pair encoding.
-// Note: Checking if content_length is zero before calling allows for
-// the detection of an empty collection of name-value pairs.
 //
 // Parameters:
+// content_ptr: points to the first byte of the byte sequence.
 // content_length: the total size of the sequence of bytes which constitutes
 // the collection of name-value pairs.
-// content_ptr: points to the first byte of the byte sequence.
 //
-// Requires:
-// 1) The value of content_length is equal to the number of bytes
+// Preconditions:
+// 1) content_ptr may only be null if content_length == 0.
+// 2) The value of content_length is equal to the number of bytes
 //    which represent the collection of name-value pairs. This number does
 //    not include the length of FastCGI record headers.
-// 2) content_ptr may only be null if content_length == 0.
+//
+// Exceptions:
+// 1) May throw exceptions derived from std::exception.
+// 2) Throws std::invalid_argument if content_length was not large enough
+//    given the encoded name and value byte lengths encountered during
+//    processing.
+// 3) In the event of a throw, the byte sequence given by 
+//    [content_ptr, content_ptr + content_length) is not modified.
 //
 // Effects:
-// 1) If a sequential application of the encoding rules to the encountered
-//    length values gives a length which is equal to content_length, a vector
-//    is returned of the name-value pairs extracted from content_length bytes.
-// 2) If content_length was not long enough for the extracted sequence of
-//    name-value pairs, an empty vector is returned.
+// 1) The vector of pairs of name and value byte sequences extracted from
+//    [content_ptr, content_ptr + content_length) is returned.
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
 ProcessBinaryNameValuePairs(const uint8_t* content_ptr, 
-  uint32_t content_length);
+  int_fast32_t content_length);
 
-// Returns a vector of bytes which represents the 32-bit unsigned integer
-// argument in decimal as a sequence of encoded characters. For example, the
-// value 89 is converted to the sequence (0x38, 0x39) = ('8', '9').
-//
+//    Returns a vector of bytes which represents the integer argument in decimal 
+// as a sequence of encoded characters. For example, the value 89 is converted
+// to the sequence (0x38, 0x39) = ('8', '9').
+//    Negative values are not allowed.
+// 
 // Parameters:
 // c: The value to be converted.
 //
 // Preconditions: none.
 //
+// Exceptions:
+// 1) May throw exceptions derived from std::exception.
+// 2) Throws std::invalid_argument if a negative argument is given.
+//
 // Effects:
 // 1) A vector containing a sequence of bytes which represents the decimal
 //    character encoding of the argument is returned.
-std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c);
+std::vector<uint8_t> ToUnsignedCharacterVector(int c);
 
 } // namespace fcgi_si
 

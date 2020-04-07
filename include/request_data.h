@@ -15,14 +15,14 @@ public:
   // TODO Add a member function which is essentially a helper function
   // for FCGIRequest.
 
-  using size = std::allocator_traits<std::allocator<uint8_t>>::size_type;
+  using size = std::allocator_traits<std::allocator<std::uint8_t>>::size_type;
 
   inline void set_connection_closed_by_interface()
   {
     connection_closed_by_interface_ = true;
   }
 
-  inline fcgi_si::RequestStatus get_status() const
+  inline RequestStatus get_status() const
   {
     return request_status_;
   }
@@ -42,7 +42,7 @@ public:
     return close_connection_;
   }
 
-  inline uint16_t get_role() const
+  inline std::uint16_t get_role() const
   {
     return role_;
   }
@@ -64,7 +64,7 @@ public:
     FCGI_PARAMS_complete_ = true;
   }
 
-  inline void AppendToPARAMS(const uint8_t* buffer_ptr, size count)
+  inline void AppendToPARAMS(const std::uint8_t* buffer_ptr, size count)
   {
     FCGI_PARAMS_.insert(FCGI_PARAMS_.end(), buffer_ptr, buffer_ptr + count);
   }
@@ -79,7 +79,7 @@ public:
     FCGI_STDIN_complete_ = true;
   }
 
-  inline void AppendToSTDIN(const uint8_t* buffer_ptr, size count)
+  inline void AppendToSTDIN(const std::uint8_t* buffer_ptr, size count)
   {
     FCGI_STDIN_.insert(FCGI_STDIN_.end(), buffer_ptr, buffer_ptr + count);
   }
@@ -94,14 +94,14 @@ public:
     FCGI_DATA_complete_ = true;
   }
 
-  inline void AppendToDATA(const uint8_t* buffer_ptr, size count)
+  inline void AppendToDATA(const std::uint8_t* buffer_ptr, size count)
   {
     FCGI_DATA_.insert(FCGI_DATA_.end(), buffer_ptr, buffer_ptr + count);
   }
 
   // Move only.
   RequestData() = default;
-  RequestData(uint16_t role, bool close_connection);
+  RequestData(std::uint16_t role, bool close_connection);
   RequestData(const RequestData&) = delete;
   RequestData(RequestData&&) = default;
 
@@ -119,19 +119,19 @@ private:
   bool FCGI_PARAMS_complete_;
   bool FCGI_STDIN_complete_;
   bool FCGI_DATA_complete_;
-  std::vector<uint8_t> FCGI_PARAMS_;
-  std::vector<uint8_t> FCGI_STDIN_;
-  std::vector<uint8_t> FCGI_DATA_;
+  std::vector<std::uint8_t> FCGI_PARAMS_;
+  std::vector<std::uint8_t> FCGI_STDIN_;
+  std::vector<std::uint8_t> FCGI_DATA_;
 
   // Map to hold processed FCGI_PARAMS_ data.
-  std::map<std::vector<uint8_t>, std::vector<uint8_t>>
+  std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
     environment_map_;
 
   // Request metadata
-  uint16_t role_;
+  std::uint16_t role_;
   bool client_set_abort_;
   bool close_connection_;
-  fcgi_si::RequestStatus request_status_;
+  RequestStatus request_status_;
   bool connection_closed_by_interface_;
 };
 

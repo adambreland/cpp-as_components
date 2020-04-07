@@ -42,7 +42,7 @@ class FCGIServerInterface {
   // No copy, move, or default construction.
   FCGIServerInterface() = delete;
   FCGIServerInterface(int max_connections, int max_requests,
-    uint16_t role, int32_t app_status_on_abort = EXIT_FAILURE);
+    std::uint16_t role, std::int32_t app_status_on_abort = EXIT_FAILURE);
   FCGIServerInterface(const FCGIServerInterface&) = delete;
   FCGIServerInterface(FCGIServerInterface&&) = delete;
 
@@ -52,8 +52,8 @@ class FCGIServerInterface {
   ~FCGIServerInterface();
 
  private:
-  friend class fcgi_si::FCGIRequest;
-  friend class fcgi_si::RecordStatus;
+  friend class FCGIRequest;
+  friend class RecordStatus;
 
   // HELPER FUNCTIONS
 
@@ -122,7 +122,7 @@ class FCGIServerInterface {
   //    was added to request_map_ with a key of request_id. The number of
   //    requests associated with request_id.descriptor() in request_count_map_
   //    was incremented.
-  void AddRequest(RequestIdentifier request_id, uint16_t role,
+  void AddRequest(RequestIdentifier request_id, std::uint16_t role,
     bool close_connection);
 
   // Iterates over the referenced containers of descriptors. These descriptors
@@ -148,7 +148,6 @@ class FCGIServerInterface {
   // 4) C::iterator satsifies, at least, the requirements of 
   //    LegacyForwardIterator.
   // 
-  //
   // Exceptions:
   // 1) A call may cause program termination if an exception occurs which could
   //    result in a file descriptor leak or spurious closure by the interface.
@@ -343,12 +342,18 @@ class FCGIServerInterface {
   //    assigned. Returns false otherwise.
   bool RequestCleanupDuringConnectionClosure(int connection);
 
+  //
+  //
   bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
-    uint8_t protocol_status, int32_t app_status);
+    std::uint8_t protocol_status, std::int32_t app_status);
 
-  bool SendFCGIUnknownType(int connection, fcgi_si::FCGIType type);
+  //
+  //
+  bool SendFCGIUnknownType(int connection, FCGIType type);
 
-  bool SendGetValuesResult(int connection, const uint8_t* buffer_ptr, 
+  //
+  //
+  bool SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
     std::size_t count);
 
   // Attempts to send the byte sequence given by 
@@ -382,17 +387,18 @@ class FCGIServerInterface {
   // 1) If true was returned, the byte sequence was sent.
   // 2) If false was returned, the connection was found to be closed. The
   //    descriptor given by connection was added to connections_to_close_set_.
-  bool SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count);
+  bool SendRecord(int connection, const std::uint8_t* buffer_ptr,
+    std::size_t count);
 
   // DATA MEMBERS
 
   // Configuration parameters:
     // The default application exit status that will be sent when requests
     // are rejected by the interface without involvement of the application.
-  int32_t app_status_on_abort_;
+  std::int32_t app_status_on_abort_;
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
-  uint16_t role_;
+  std::uint16_t role_;
   int socket_domain_;
     // A list of IP addresses from which the interface will accept connections.
     // The IP version is given by socket_domain_ (AF_INET or AF_INET6).
@@ -437,6 +443,9 @@ class FCGIServerInterface {
   // synchronization among request objects and between request objects and
   // the interface. interface_identifier_ == 0 if no interface object is
   // currently constructed.
+  //
+  // unsigned long was chosen as a large integer is desired and, conceptually,
+  // modular arithmetic is used when incrementing the identifier.
   static std::mutex interface_state_mutex_;
   static unsigned long interface_identifier_;
   static unsigned long previous_interface_identifier_;

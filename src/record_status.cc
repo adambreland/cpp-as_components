@@ -20,7 +20,7 @@ namespace fcgi_si {
 // type. This is appropriate as no record identity has yet been assigned to the
 // RecordStatus object.
 RecordStatus::
-RecordStatus(int connection, FCGIServerInterface* interface_ptr) noexcept
+RecordStatus(int connection, FCGIServerInterface* interface_ptr)
 : connection_ {connection},
   i_ptr_ {interface_ptr}
 {}
@@ -60,14 +60,14 @@ RecordStatus& RecordStatus::operator=(RecordStatus&& record_status) noexcept
   return *this;
 }
 
-void RecordStatus::ClearRecord()
+void RecordStatus::ClearRecord() noexcept
 {
   // connection_ is unchanged.
   std::memset(header_, 0, FCGI_HEADER_LEN);
   bytes_received_ = 0;
-  content_bytes_expected_ = 0;
-  padding_bytes_expected_ = 0;
-  type_ = static_cast<FCGIType>(0);
+  content_bytes_expected_ = 0U;
+  padding_bytes_expected_ = 0U;
+  type_ = static_cast<FCGIType>(0U);
   request_id_ = RequestIdentifier {};
   invalidated_by_header_ = false;
   local_record_content_buffer_.clear();
@@ -76,14 +76,14 @@ void RecordStatus::ClearRecord()
 
 RequestIdentifier RecordStatus::ProcessCompleteRecord()
 {
+  // Null request identifier.
   RequestIdentifier result {};
 
   // Check if it is a management record (every management record is valid).
-  if(request_id_.FCGI_id() == 0)
+  if(request_id_.FCGI_id() == 0U)
   {
     if(type_ == FCGIType::kFCGI_GET_VALUES)
-      i_ptr_->SendGetValuesResult(
-        connection_, 
+      i_ptr_->SendGetValuesResult(connection_, 
         local_record_content_buffer_.data(), 
         local_record_content_buffer_.size());
     else // Unknown type.
@@ -98,7 +98,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
     {
       case FCGIType::kFCGI_BEGIN_REQUEST: {
         // Extract role
-        uint16_t role 
+        std::uint16_t role 
           {local_record_content_buffer_[kBeginRequestRoleB1Index]};
         role <<= 8;
         role += local_record_content_buffer_[kBeginRequestRoleB0Index];
@@ -182,12 +182,13 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
       case FCGIType::kFCGI_DATA: {
         bool send_end_request {false};
         // Should we complete the stream?
-        if(content_bytes_expected_ == 0)
+        if(content_bytes_expected_ == 0U)
         {
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
             {FCGIServerInterface::interface_state_mutex_};
-          auto request_data_it {i_ptr_->request_map_.find(request_id_)};
+          std::map<RequestIdentifier, RequestData>::iterator request_data_it 
+            {i_ptr_->request_map_.find(request_id_)};
 
           (type_ == FCGIType::kFCGI_PARAMS) ?
             request_data_it->second.CompletePARAMS() :
@@ -227,10 +228,16 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
   return result; // Default (null) RequestIdentifier if not assinged to.
 }
 
-std::vector<RequestIdentifier> RecordStatus::Read()
+// Implementation specification:
+//
+// Synchronization:
+// 1) May implicitly acquire and release interface_state_mutex_.
+// 2) May implicitly acquire and release the write mutex associated with
+//    the connection of the RecordStatus object.
+std::vector<RequestIdentifier> RecordStatus::ReadRecords()
 {
   // Number of bytes read at a time from connected sockets.
-  constexpr uint32_t kBufferSize {512};
+  constexpr int kBufferSize {512};
   std::uint8_t read_buffer[kBufferSize];
 
   // Return value to be modified during processing.
@@ -241,9 +248,11 @@ std::vector<RequestIdentifier> RecordStatus::Read()
   while(true)
   {
     // Read from socket.
-    std::uint32_t number_bytes_processed = 0;
-    std::uint32_t number_bytes_received =
-      socket_functions::SocketRead(connection_, read_buffer, kBufferSize);
+    std::int_fast32_t number_bytes_processed {0};
+    // A safe narrowing conversion as the return value is in the range
+    // [0, kBufferSize] and kBufferSize is fairly small.
+    std::int_fast32_t number_bytes_received(socket_functions::SocketRead(
+      connection_, read_buffer, kBufferSize));
 
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
@@ -282,7 +291,7 @@ std::vector<RequestIdentifier> RecordStatus::Read()
     // Processed received bytes.
     while(number_bytes_processed < number_bytes_received)
     {
-      std::uint32_t number_bytes_remaining =
+      std::int_fast32_t number_bytes_remaining =
         number_bytes_received - number_bytes_processed;
 
       // Process received bytes according to header and content/padding
@@ -291,10 +300,10 @@ std::vector<RequestIdentifier> RecordStatus::Read()
       // Is the header complete?
       if(!IsHeaderComplete())
       {
-        std::uint32_t remaining_header {FCGI_HEADER_LEN - bytes_received_};
+        std::int_fast32_t remaining_header {FCGI_HEADER_LEN - bytes_received_};
         bool header_can_be_completed 
           {remaining_header <= number_bytes_remaining};
-        std::uint32_t number_to_write {(header_can_be_completed) ?
+        std::int_fast32_t number_to_write {(header_can_be_completed) ?
           remaining_header : number_bytes_remaining};
         std::memcpy(&header_[bytes_received_], 
             &read_buffer[number_bytes_processed], number_to_write);
@@ -328,17 +337,17 @@ std::vector<RequestIdentifier> RecordStatus::Read()
       // Either the content is complete or it isn't.
       else
       {
-        std::uint32_t header_and_content {content_bytes_expected_};
+        std::int_fast32_t header_and_content {content_bytes_expected_};
         header_and_content += FCGI_HEADER_LEN;
-        std::uint32_t remaining_content {};
+        std::int_fast32_t remaining_content {};
         if(bytes_received_ < header_and_content)
           remaining_content = header_and_content - bytes_received_;
         else
-          remaining_content = 0U;
+          remaining_content = 0;
 
-        if(remaining_content > 0U) // Content incomplete.
+        if(remaining_content > 0) // Content incomplete.
         {
-          std::uint32_t number_to_write
+          std::int_fast32_t number_to_write
             {(remaining_content <= number_bytes_remaining) ?
               remaining_content : number_bytes_remaining};
           // Determine what we should do with the bytes based on rejection
@@ -441,9 +450,9 @@ std::vector<RequestIdentifier> RecordStatus::Read()
         }
         else // Padding incomplete.
         {
-          std::uint32_t remaining_padding 
+          std::int_fast32_t remaining_padding 
             {(header_and_content + padding_bytes_expected_) - bytes_received_};
-          std::uint32_t number_to_write = 
+          std::int_fast32_t number_to_write = 
             {(remaining_padding <= number_bytes_remaining) ?
               remaining_padding : number_bytes_remaining};
           // Ignore padding. Skip ahead without processing.
@@ -529,6 +538,7 @@ void RecordStatus::UpdateAfterHeaderCompletion()
       break;
     }
     // These cases cannot be validated with local information alone.
+    //
     // Fall through to the next check which accesses the interface.
     case FCGIType::kFCGI_PARAMS :
     case FCGIType::kFCGI_STDIN :

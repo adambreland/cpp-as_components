@@ -12,16 +12,21 @@
 
 #include "include/protocol_constants.h"
 
+namespace fcgi_si {
+
 template<typename ByteIter>
-void fcgi_si::EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
+void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter)
 {
   // TODO Add template type property checking with static asserts.
+
+  if(length < 0)
+    throw std::invalid_argument {"A negative length was given."};
 
   // Set the leading bit to 1 to indicate that a four-byte sequence is
   // present.
   *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
 
-  for(char i {0}; i < 3; i++)
+  for(int i {0}; i < 3; i++)
   {
     ++byte_iter;
 
@@ -30,44 +35,43 @@ void fcgi_si::EncodeFourByteLength(uint32_t length, ByteIter byte_iter)
 }
 
 template <typename ByteIter>
-uint32_t fcgi_si::ExtractFourByteLength(ByteIter byte_iter)
+std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept
 {
   // TODO Add template type property checking with static_asserts.
 
   // Mask out the leading 1 bit which must be present per the FastCGI
   // name-value pair format. This bit does not encode length information.
   // It indicates that the byte sequence has four elements instead of one.
-  uint32_t length {static_cast<uint32_t>(
-    static_cast<uint8_t>(*byte_iter) & 0x7fU)};
+  std::int_fast32_t length 
+    {static_cast<std::int_fast32_t>(static_cast<uint8_t>(*byte_iter) & 0x7fU)};
   // Perform three shifts by 8 bits to extract all four bytes.
-  for(char i {0}; i < 3; i++)
+  for(int i {0}; i < 3; ++i)
   {
     length <<= 8;
     ++byte_iter;
-
     length += static_cast<uint8_t>(*byte_iter);
   }
   return length;
 }
 
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::size_t, std::vector<iovec>, const std::vector<uint8_t>,
-  std::size_t, ByteSeqPairIter>
-fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
+std::tuple<bool, std::size_t, std::vector<iovec>, 
+  const std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
+EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
 {
   if(pair_iter == end)
-    return {true, 0, {}, {}, 0, end};
+    return {true, 0U, {}, {}, 0U, end};
 
   const std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
   const ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
-  const uint16_t aligned_record_MAX {fcgi_si::kMaxRecordContentByteLength - 7};
+  const uint16_t aligned_record_MAX {kMaxRecordContentByteLength - 7U};
   // Reduce by 7 to ensure that the length of a "full" record is a
   // multiple of 8.
 
   // Determine the initial values of the break variables.
 
-  long remaining_iovec_count {fcgi_si::iovec_MAX};
+  long remaining_iovec_count {iovec_MAX};
   // Use the current Linux default if information cannot be obtained.
   if(remaining_iovec_count == -1)
     remaining_iovec_count = 1024;
@@ -78,7 +82,7 @@ fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
  
   // Reduce by FCGI_HEADER_LEN - 1 = 7 to ensure that padding can always be
   // added.
-  std::size_t remaining_byte_count {ssize_t_MAX - 7};
+  std::size_t remaining_byte_count {ssize_t_MAX - 7U};
 
   // Lambda functions to simplify the loops below.
   auto size_iter = [&](int i)->std::size_t
@@ -89,13 +93,13 @@ fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
       return pair_iter->second.size();
   };
 
-  auto data_iter = [&](int i)->const uint8_t*
+  auto data_iter = [&](int i)->const std::uint8_t*
   {
     if(i == 0)
-      return static_cast<const uint8_t*>(static_cast<const void*>(
+      return static_cast<const std::uint8_t*>(static_cast<const void*>(
         pair_iter->first.data()));
     else
-      return static_cast<const uint8_t*>(static_cast<const void*>(
+      return static_cast<const std::uint8_t*>(static_cast<const void*>(
         pair_iter->second.data()));
   };
   // A binary sequence of headers and length information encoded in the
@@ -146,13 +150,13 @@ fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
         data_array[i-1] = data_iter(i-1);
       else
         data_array[i-1] = nullptr;
-      if(size_array[i] <= fcgi_si::kNameValuePairSingleByteLength)
+      if(size_array[i] <= kNameValuePairSingleByteLength)
       {
         // A safe narrowing of size_array[i] from std::size_t to std::uint8_t.
         local_buffers.push_back(size_array[i]);
         size_array[0] += 1;
       }
-      else if(size_array[i] <= fcgi_si::kNameValuePairFourByteLength)
+      else if(size_array[i] <= kNameValuePairFourByteLength)
       {
         // A safe narrowing of size from std::size_t to a representation of
         // a subset of the range of uint32_t.
@@ -205,18 +209,18 @@ fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
         {
           // Need enough iovec structs for a header, data, and padding.
           // Need enough bytes for a header and some data. An iovec struct
-          // and fcgi_si::FCGI_HEADER_LEN - 1 bytes were reserved.
+          // and FCGI_HEADER_LEN - 1 bytes were reserved.
           if((remaining_iovec_count >= 2) &&
-             (remaining_byte_count >= (fcgi_si::FCGI_HEADER_LEN + 1)))
+             (remaining_byte_count >= (FCGI_HEADER_LEN + 1)))
           {
             previous_header_offset = local_buffers.size();
             index_pairs.push_back({iovec_list.size(), previous_header_offset});
-            iovec_list.push_back({nullptr, fcgi_si::FCGI_HEADER_LEN});
-            local_buffers.insert(local_buffers.end(), fcgi_si::FCGI_HEADER_LEN, 0);
-            fcgi_si::PopulateHeader(local_buffers.data() + previous_header_offset,
+            iovec_list.push_back({nullptr, FCGI_HEADER_LEN});
+            local_buffers.insert(local_buffers.end(), FCGI_HEADER_LEN, 0);
+            PopulateHeader(local_buffers.data() + previous_header_offset,
               type, FCGI_id, 0, 0);
-            number_to_write += fcgi_si::FCGI_HEADER_LEN;
-            remaining_byte_count -= fcgi_si::FCGI_HEADER_LEN;
+            number_to_write += FCGI_HEADER_LEN;
+            remaining_byte_count -= FCGI_HEADER_LEN;
             remaining_iovec_count--;
           }
           else
@@ -338,7 +342,7 @@ fcgi_si::EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
-fcgi_si::PartitionByteSequence(ByteIter begin_iter, 
+PartitionByteSequence(ByteIter begin_iter, 
   ByteIter end_iter, FCGIType type, std::uint16_t FCGI_id)
 {
   // Verify that ByteIter iterates over units of data which are the size of
@@ -425,5 +429,7 @@ fcgi_si::PartitionByteSequence(ByteIter begin_iter,
   return std::make_tuple(std::move(noncontent_record_information), 
     std::move(iovec_list), number_to_write, begin_iter);
 }
+
+} // namespace fcgi_si
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_

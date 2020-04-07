@@ -28,72 +28,85 @@ void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
 }
 
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(std::size_t content_length, const uint8_t* content_ptr)
+ProcessBinaryNameValuePairs(const uint8_t* content_ptr, 
+  int_fast32_t content_length)
 {
-  std::size_t bytes_processed {0};
-  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-  result {};
-  std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-  error_result {};
+  using byte_seq_pair = std::pair<std::vector<std::uint8_t>, 
+    std::vector<std::uint8_t>>;
+
+  const char* error_message_ptr {"The allowed content length was not large "
+    "enough given the encoded name and value lengths."};
+  std::invalid_argument length_error {error_message_ptr};
+
+  if(content_length > 0 && content_ptr == nullptr)
+    throw std::invalid_argument {"A nullptr was passed along with a non-zero "
+    "content length."};
+
+  int_fast32_t bytes_processed {0};
+  std::vector<byte_seq_pair> result {};
+  std::vector<uint8_t> name_and_value_array[2] = {{}, {}};
 
   while(bytes_processed < content_length)
   {
-    uint32_t name_length;
-    uint32_t value_length;
-    bool name_length_bit = *content_ptr >> 7;
-    bool value_length_bit;
-
-    // Extract name length.
-    if(name_length_bit)
+    // Extract the name and value lengths while checking that the given
+    // content is not exceeded.
+    int_fast32_t name_value_lengths[2] = {};
+    for(int i {0}; i < 2; ++i)
     {
-      if((bytes_processed + 3) > content_length)
-        return error_result; // Not enough information to continue.
-      name_length = ExtractFourByteLength(content_ptr);
-      bytes_processed += 4;
-      content_ptr += 4;
-    }
-    else
-    {
-      name_length = *content_ptr;
-      bytes_processed += 1;
-      content_ptr += 1;
-    }
-
-    // Extract value length.
-    if((bytes_processed + 1) > content_length)
-      return error_result;
-    value_length_bit = *content_ptr >> 7;
-    if(value_length_bit)
-    {
-      if((bytes_processed + 3) > content_length)
-        return error_result; // Not enough information to continue.
-      value_length = ExtractFourByteLength(content_ptr);
-      bytes_processed += 4;
-      content_ptr += 4;
-    }
-    else
-    {
-      value_length = *content_ptr;
-      bytes_processed += 1;
-      content_ptr += 1;
+      // Checks if a byte is present to continue.
+      if((bytes_processed + 1) > content_length)
+        throw length_error;
+      bool four_byte_bit {*content_ptr & 0x80}; // Check the leading bit.
+      if(four_byte_bit)
+      {
+        // Check that enough bytes were given.
+        if((bytes_processed + 4) > content_length)
+          throw length_error;
+        name_value_lengths[i] = ExtractFourByteLength(content_ptr);
+        bytes_processed += 4;
+        content_ptr += 4;
+      }
+      else
+      {
+        name_value_lengths[i] = *content_ptr;
+        bytes_processed += 1;
+        content_ptr += 1;
+      }
     }
 
-    // Extract name and value as byte strings.
-    if((bytes_processed + name_length + value_length) > content_length)
-      return error_result; // Not enough information to continue.
-    std::vector<uint8_t> name {content_ptr, content_ptr + name_length};
-    content_ptr += name_length;
-    std::vector<uint8_t> value {content_ptr, content_ptr + value_length};
-    content_ptr += value_length;
-    bytes_processed += (name_length + value_length);
-    result.emplace_back(std::move(name), std::move(value));
-  } // End while (no more pairs to process).
+    // Check that the given content will not be exceeded when the name and
+    // value byte sequences are extracted.
+    int_fast32_t length_with_nv {bytes_processed + name_value_lengths[0] 
+      + name_value_lengths[1]};
+    if(length_with_nv > content_length)
+      throw length_error;
+    // Extract name and value as byte sequences.
+    const uint8_t* past_end {content_ptr};
+    for(int i {0}; i < 2; ++i)
+    {
+      past_end += name_value_lengths[i];
+      name_and_value_array[i].insert(name_and_value_array[i].end(), content_ptr, 
+        past_end);
+      content_ptr = past_end;
+    }
+    result.emplace_back(std::move(name_and_value_array[0]), 
+      std::move(name_and_value_array[1]));
+    bytes_processed = length_with_nv;
+
+    for(int i {0}; i < 2; ++i)
+    {
+      name_and_value_array[i].clear();
+    }
+  }
 
   return result;
 }
 
-std::vector<uint8_t> uint32_tToUnsignedCharacterVector(uint32_t c)
+std::vector<uint8_t> ToUnsignedCharacterVector(int c)
 {
+  if(c < 0)
+    throw std::invalid_argument {"A negative value was given."};
+
   // This implementation allows the absolute size of char to be larger than
   // one byte. It is assumed that only ASCII digits are present in c_string.
   std::string c_string {std::to_string(c)};
