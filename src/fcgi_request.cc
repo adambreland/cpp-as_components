@@ -79,10 +79,12 @@
 //          FCGIServerInterface object is used to indicate that the connection
 //          should be closed in this case.
 //    c) Indicating that a connection is corrupt.
-//          When a request corrupts its connection from a partial write, it
-//       must set the flag associated with the connection's write mutex. This
-//       must be performed under the protection of the write mutex as this flag
-//       is shared state.
+//          When a request corrupts its connection from a partial write:
+//       1) It must set the flag associated with the connection's write mutex.
+//          This must be performed under the protection of the write mutex as 
+//          this flag is shared state.
+//       2) It must add the descriptor of the connection to
+//          application_closure_request_set_. This is described in 1.b.2 above.
 //    d) Putting the interface into a bad state.
 //          Anytime interface state should be updated but the update cannot be
 //       made due to an error, the interface should be put into a bad state
@@ -90,6 +92,11 @@
 //       interface has been destroyed, has already been put into a bad state,
 //       or the connection of the request has been closed, then the bad state
 //       flag need not be set.
+//    e) Terminating the program:
+//          If the interface cannot be put into a bad state, regardless of
+//       the whether the desire to put the interface into a bad state was
+//       direct or the result of another error, the program must be terminated.
+//
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
 //       must check if:
@@ -140,6 +147,15 @@
 //      is released.
 //   d) A request may never acquire interface_state_mutex_ while a write mutex
 //      is held. Doing so may lead to deadlock.
+//
+// Other disciplines:
+// 1) Only shared data members may be accessed by FCGIRequest. These data
+//    members must be accessed under mutex protection.
+// 2) The FCGIServerInterface data member write_mutex_map_ must not be accessed
+//    directly. A write mutex must only be accessed through an FCGIRequest
+//    object's write_mutex_ptr_.
+// 3) Of the methods of FCGIServerInterface, only RemoveRequest may be called.
+//    It must be called under mutex protection.
 namespace fcgi_si {
 
 // Implementation notes:

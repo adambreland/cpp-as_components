@@ -458,12 +458,11 @@ int FCGIServerInterface::AcceptConnection()
 std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 {
   std::vector<FCGIRequest> requests {};
-
-  if(local_bad_interface_state_detected_)
-      throw std::logic_error {"The interface was found to be corrupt."};
   
   // CLEANUP
-  {
+  { 
+    // Start of interface_state_lock handling block.
+
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock 
       {FCGIServerInterface::interface_state_mutex_};
@@ -568,8 +567,24 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     continue;
   if(select_return == -1) // Unrecoverable error from select().
   {
+    // TODO Are there any situations that could cause select to return EBADF
+    // from a call with only a non-null read set other than one of the file
+    // descriptors not being open?
     if(errno == EBADF)
-      local_bad_interface_state_detected_ = true;
+    {
+      // ACQUIRE interface_state_mutex_
+      std::unique_lock<std::mutex> unique_interface_state_lock
+        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+      try
+      {
+        unique_interface_state_lock.lock();
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+      bad_interface_state_detected_ = true;
+    } // RELEASE interface_state_mutex_
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "select"};
   }
@@ -647,7 +662,7 @@ void FCGIServerInterface::AddRequest(RequestIdentifier request_id,
   }
   catch(...)
   {
-    local_bad_interface_state_detected_ = true;
+    bad_interface_state_detected_ = true;
     throw;
   }
 }
@@ -963,30 +978,37 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
   // Logic error check.
   if(mutex_map_iter == write_mutex_map_.end())
   {
-    local_bad_interface_state_detected_ = true;
-    throw std::logic_error {"An expected connection was missing from "
-      "write mutex_map_."};
-  }
-  // ACQUIRE the write mutex for the connection.
-  std::unique_lock<std::mutex> write_lock
-    {*(mutex_map_iter->second.first)};
-  // Check if the connection is corrupt. In this case, RELEASE the write mutex.
-  if(mutex_map_iter->second.second)
-  {
+    std::unique_lock<std::mutex> unique_interface_state_lock
+      {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
     try
     {
-      write_lock.unlock();
-      connections_to_close_set_.insert(connection);
+      // ACQUIRE interface_state_mutex_.
+      unique_interface_state_lock.lock();
     }
     catch(...)
     {
-      local_bad_interface_state_detected_ = true;
-      throw;
+      std::terminate();
     }
-    throw std::runtime_error {ERROR_STRING("A connection from the "
-      "interface to the client was found which had a corrupted state.")};
-  }
+    bad_interface_state_detected_ = true;
+    throw std::logic_error {"An expected connection was missing from "
+      "write mutex_map_."};
+  } // RELEASE interface_state_mutex_.
 
+  // ACQUIRE the write mutex for the connection.
+  std::unique_lock<std::mutex> write_lock
+    {*(mutex_map_iter->second.first)};
+  
+  // Check if the connection is corrupt.
+  // Part of the discipline for connection use is adding the connection
+  // descriptor to one of the closure sets. It need not be done upon corruption
+  // discovery.
+  if(mutex_map_iter->second.second)
+    return false;
+
+  // TODO Have writes on a connection which would be performed by the interface
+  // object be performed instead by a worker thread. It expedient but
+  // inappropriate to have the interface thread block on a write.
+  // 
   // Send record.
   std::size_t number_written {socket_functions::WriteOnSelect(connection, 
     buffer_ptr, count)};
@@ -1003,9 +1025,24 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
       }
       catch(...)
       {
-        local_bad_interface_state_detected_ = true;
+        // RELEASE the write mutex for the connection as the interface mutex
+        // will be acquired and the pattern "wants interface mutex, owns write
+        // mutex" is forbidden.
+        write_lock.unlock();
+        std::unique_lock<std::mutex> unique_interface_state_lock
+          {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+        try
+        {
+          // ACQUIRE interface_state_mutex_.
+          unique_interface_state_lock.lock();
+        }
+        catch(...)
+        {
+          std::terminate();
+        }
+        bad_interface_state_detected_ = true;
         throw;
-      }
+      } // RELEASE interface_state_mutex_.
       return false;
     }
     else 
@@ -1020,9 +1057,25 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
         }
         catch(...)
         {
-          local_bad_interface_state_detected_ = true;
+          // RELEASE the write mutex for the connection as the interface mutex
+          // will be acquired and the pattern "wants interface mutex, owns write
+          // mutex" is forbidden.
+          write_lock.unlock();
+
+          std::unique_lock<std::mutex> unique_interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+          try
+          {
+            // ACQUIRE interface_state_mutex_.
+            unique_interface_state_lock.lock();
+          }
+          catch(...)
+          {
+            std::terminate();
+          }
+          bad_interface_state_detected_ = true;
           throw;
-        }
+        } // RELEASE interface_state_mutex_.
       }
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "write from a call to "

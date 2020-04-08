@@ -114,7 +114,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
           // Logic error check.
           if(request_count_it == i_ptr_->request_count_map_.end())
           {
-            i_ptr_->local_bad_interface_state_detected_ = true;
+            i_ptr_->bad_interface_state_detected_ = true;
             throw std::logic_error {"request_count_map_ did not have an "
               "expected socket descriptor."};
           }
@@ -231,7 +231,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
 // Implementation specification:
 //
 // Synchronization:
-// 1) May implicitly acquire and release interface_state_mutex_.
+// 1) May acquire and release interface_state_mutex_.
 // 2) May implicitly acquire and release the write mutex associated with
 //    the connection of the RecordStatus object.
 std::vector<RequestIdentifier> RecordStatus::ReadRecords()
@@ -251,6 +251,9 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
     std::int_fast32_t number_bytes_processed {0};
     // A safe narrowing conversion as the return value is in the range
     // [0, kBufferSize] and kBufferSize is fairly small.
+    //
+    // Note that reading does not require synchronization as only the
+    // interface reads from the connected sockets.
     std::int_fast32_t number_bytes_received(socket_functions::SocketRead(
       connection_, read_buffer, kBufferSize));
 
@@ -268,9 +271,20 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
         }
         catch(...)
         {
-          i_ptr_->local_bad_interface_state_detected_ = true;
+          std::unique_lock<std::mutex> unique_interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+          try
+          {
+            // ACQUIRE interface_state_mutex_.
+            unique_interface_state_lock.lock();
+          }
+          catch(...)
+          {
+            std::terminate();
+          }
+          i_ptr_->bad_interface_state_detected_ = true;
           throw;
-        }
+        } // RELEASE interface_state_mutex_.
       }
       if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
       {
@@ -280,9 +294,20 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
         }
         catch(...)
         {
-          i_ptr_->local_bad_interface_state_detected_ = true;
+          std::unique_lock<std::mutex> unique_interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+          try
+          {
+            // ACQUIRE interface_state_mutex_.
+            unique_interface_state_lock.lock();
+          }
+          catch(...)
+          {
+            std::terminate();
+          }
+          i_ptr_->bad_interface_state_detected_ = true;
           throw;
-        }
+        } // RELEASE interface_state_mutex_.
         std::error_code ec {errno, std::system_category()};
         throw std::system_error {ec, ERRNO_ERROR_STRING("read from a call to "
           "NonblockingSocketRead")};
@@ -326,9 +351,20 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
             }
             catch(...)
             {
-              i_ptr_->local_bad_interface_state_detected_ = true;
+              std::unique_lock<std::mutex> unique_interface_state_lock
+                {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+              try
+              {
+                // ACQUIRE interface_state_mutex_.
+                unique_interface_state_lock.lock();
+              }
+              catch(...)
+              {
+                std::terminate();
+              }
+              i_ptr_->bad_interface_state_detected_ = true;
               throw;
-            }
+            } // RELEASE interface_state_mutex_.
             throw;
           }
         }
@@ -377,27 +413,42 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
                 }
                 catch(...)
                 {
-                  i_ptr_->local_bad_interface_state_detected_ = true;
+                  std::unique_lock<std::mutex> unique_interface_state_lock
+                    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+                  try
+                  {
+                    // ACQUIRE interface_state_mutex_.
+                    unique_interface_state_lock.lock();
+                  }
+                  catch(...)
+                  {
+                    std::terminate();
+                  }
+                  i_ptr_->bad_interface_state_detected_ = true;
                   throw;
-                }
+                } // RELEASE interface_state_mutex_.
                 throw;
               }
             }
             else // Append to non-local buffer.
             {
+              // ACQUIRE interface_state_mutex_ to locate append location.
+              // The key request_id_ must be present as the record is valid
+              // and it is not a begin request record.
+              std::lock_guard<std::mutex> interface_state_lock
+                {FCGIServerInterface::interface_state_mutex_};
               try
               {
-                // ACQUIRE interface_state_mutex_ to locate append location.
-                // The key request_id_ must be present as the record is valid
-                // and it is not a begin request record.
-                std::lock_guard<std::mutex> interface_state_lock
-                  {FCGIServerInterface::interface_state_mutex_};
+                // Check if the interface is in a bad state.
+                if(i_ptr_->bad_interface_state_detected_)
+                  throw std::runtime_error {"The interface was found to be "
+                    "corupted."};
 
                 std::map<RequestIdentifier, RequestData>::iterator
                   request_map_iter {i_ptr_->request_map_.find(request_id_)};
                 if(request_map_iter == i_ptr_->request_map_.end())
                 {
-                  i_ptr_->local_bad_interface_state_detected_ = true;
+                  i_ptr_->bad_interface_state_detected_ = true;
                   throw std::logic_error {"request_map_ did not have an "
                     "expected RequestData object."};
                 }
@@ -418,15 +469,15 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
                     break;
                   }
                   default : {
-                    i_ptr_->local_bad_interface_state_detected_ = true;
+                    i_ptr_->bad_interface_state_detected_ = true;
                     throw std::logic_error {"An invalid type was encountered "
                       "in a call to Read."};
                   }
                 }
-              } // RELEASE interface_state_mutex_.
+              } 
               catch(...)
               {
-                if(i_ptr_->local_bad_interface_state_detected_ != true)
+                if(i_ptr_->bad_interface_state_detected_ != true)
                 {
                   try
                   {
@@ -434,13 +485,13 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
                   }
                   catch(...)
                   {
-                    i_ptr_->local_bad_interface_state_detected_ = true;
+                    i_ptr_->bad_interface_state_detected_ = true;
                     throw;
                   }
                 }
                 throw;
               }
-            } 
+            } // RELEASE interface_state_mutex_.
           }
           // Whether the record was valid or not and whether the data is added
           // to RecordStatus or not, the tracking variables must be updated.
@@ -479,9 +530,20 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
           }
           catch(...)
           {
-            i_ptr_->local_bad_interface_state_detected_ = true;
+            std::unique_lock<std::mutex> unique_interface_state_lock
+              {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+            try
+            {
+              // ACQUIRE interface_state_mutex_.
+              unique_interface_state_lock.lock();
+            }
+            catch(...)
+            {
+              std::terminate();
+            }
+            i_ptr_->bad_interface_state_detected_ = true;
             throw;
-          }
+          } // RELEASE interface_state_mutex_
           throw;
         }
       } // Loop to check if more received bytes need to be processed.
@@ -557,6 +619,11 @@ void RecordStatus::UpdateAfterHeaderCompletion()
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
+
+  // Before the checks, make sure that the interface is in a good state.
+  if(i_ptr_->bad_interface_state_detected_)
+    throw std::runtime_error {"The interface was found to be corrupted."};
+  
   // Note that it is expected that find may sometimes return the past-the-end
   // iterator.
   std::map<RequestIdentifier, RequestData>::iterator request_map_iter 

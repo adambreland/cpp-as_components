@@ -37,9 +37,12 @@ public:
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) In the event of a throw, either the connection was scheduled to be
-  //    closed or the interface was put into a bad state. In either case,
-  //    additional calls to ReadRecords should not be made.
+  // 2) In the event of a throw, either:
+  //    a) The connection was scheduled to be closed.
+  //    b) The interface was put into a bad state. 
+  //    c) The interface was found to be in a bad state and needed information
+  //       could not be acquired.
+  //    In either case, additional calls to ReadRecords should not be made.
   // 
   // Effects:
   // 1) Returns a list of request identifiers. This list may be empty. The

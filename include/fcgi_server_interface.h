@@ -115,7 +115,7 @@ class FCGIServerInterface {
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) Ater a throw, local_bad_interface_state_detected_ == true.
+  // 2) Ater a throw, bad_interface_state_detected_ == true.
   //
   // Effects:
   // 1) A RequestData object with the given role and close_connection values
@@ -371,11 +371,14 @@ class FCGIServerInterface {
   // 2) SIGPIPE must be handled by the application before calling.
   //
   // Synchronization:
-  // 1) Implicitly acquires and releases the write mutex associated with
+  // 1) Acquires and releases the write mutex associated with
   //    connection.
+  // 2) May acquire and release interface_state_mutex_.
   //
   // Excceptions:
   // 1) May throw exceptions derived from std::exception.
+  // 2) Throws:
+  //    1) 
   // 2) After a throw, several changes in interface state may have occurred:
   //    a) The connection could have been added to connections_to_close_set_.
   //    b) The connection could have been corrupted. The corruption flag is
@@ -385,8 +388,8 @@ class FCGIServerInterface {
   //
   // Effects:
   // 1) If true was returned, the byte sequence was sent.
-  // 2) If false was returned, the connection was found to be closed. The
-  //    descriptor given by connection was added to connections_to_close_set_.
+  // 2) If false was returned, the connection was found to be closed or
+  //    corrupted. The descriptor was scheduled for closure.
   bool SendRecord(int connection, const std::uint8_t* buffer_ptr,
     std::size_t count);
 
@@ -419,10 +422,6 @@ class FCGIServerInterface {
   std::set<int> connections_to_close_set_ {};
 
   std::set<int> dummy_descriptor_set_ {};
-
-  // A flag which is checked by AcceptRequests when it is entered. When
-  // set, AcceptRequests throws immediately.
-  bool local_bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 
