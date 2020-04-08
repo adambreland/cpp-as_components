@@ -9,41 +9,24 @@
 
 namespace fcgi_si {
 
-void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
-  std::uint16_t FCGI_id, std::uint16_t content_length,
-  std::uint8_t padding_length) noexcept
-{
-  std::uint8_t header_array[FCGI_HEADER_LEN];
-  header_array[0] = FCGI_VERSION_1;
-  header_array[1] = static_cast<uint8_t>(type);
-  header_array[2] = static_cast<uint8_t>(FCGI_id >> 8);
-  header_array[3] = static_cast<uint8_t>(FCGI_id);
-  header_array[4] = static_cast<uint8_t>(content_length >> 8);
-  header_array[5] = static_cast<uint8_t>(content_length);
-  header_array[6] = padding_length;
-  header_array[7] = 0;
-
-  std::memcpy(static_cast<void*>(byte_ptr), static_cast<void*>(header_array),
-    FCGI_HEADER_LEN);
-}
-
 std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(const uint8_t* content_ptr, 
+ExtractBinaryNameValuePairs(const uint8_t* content_ptr, 
   int_fast32_t content_length)
 {
   using byte_seq_pair = std::pair<std::vector<std::uint8_t>, 
     std::vector<std::uint8_t>>;
 
-  const char* error_message_ptr {"The allowed content length was not large "
-    "enough given the encoded name and value lengths."};
-  std::invalid_argument length_error {error_message_ptr};
+  if(content_length < 0)
+    throw std::invalid_argument {"A negative argument was given for "
+      "content_length"};
 
-  if(content_length > 0 && content_ptr == nullptr)
-    throw std::invalid_argument {"A nullptr was passed along with a non-zero "
-    "content length."};
+  if(content_length != 0 && content_ptr == nullptr)
+    throw std::invalid_argument {"A null pointer was passed with "
+    "content_length != 0."};
 
   int_fast32_t bytes_processed {0};
   std::vector<byte_seq_pair> result {};
+  std::vector<byte_seq_pair> error_result {};
   std::vector<uint8_t> name_and_value_array[2] = {{}, {}};
 
   while(bytes_processed < content_length)
@@ -55,13 +38,13 @@ ProcessBinaryNameValuePairs(const uint8_t* content_ptr,
     {
       // Checks if a byte is present to continue.
       if((bytes_processed + 1) > content_length)
-        throw length_error;
+        return error_result;
       bool four_byte_bit {*content_ptr & 0x80}; // Check the leading bit.
       if(four_byte_bit)
       {
         // Check that enough bytes were given.
         if((bytes_processed + 4) > content_length)
-          throw length_error;
+          return error_result;
         name_value_lengths[i] = ExtractFourByteLength(content_ptr);
         bytes_processed += 4;
         content_ptr += 4;
@@ -79,7 +62,7 @@ ProcessBinaryNameValuePairs(const uint8_t* content_ptr,
     int_fast32_t length_with_nv {bytes_processed + name_value_lengths[0] 
       + name_value_lengths[1]};
     if(length_with_nv > content_length)
-      throw length_error;
+      return error_result;
     // Extract name and value as byte sequences.
     const uint8_t* past_end {content_ptr};
     for(int i {0}; i < 2; ++i)
@@ -100,6 +83,24 @@ ProcessBinaryNameValuePairs(const uint8_t* content_ptr,
   }
 
   return result;
+}
+
+void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
+  std::uint16_t FCGI_id, std::uint16_t content_length,
+  std::uint8_t padding_length) noexcept
+{
+  std::uint8_t header_array[FCGI_HEADER_LEN];
+  header_array[0] = FCGI_VERSION_1;
+  header_array[1] = static_cast<uint8_t>(type);
+  header_array[2] = static_cast<uint8_t>(FCGI_id >> 8);
+  header_array[3] = static_cast<uint8_t>(FCGI_id);
+  header_array[4] = static_cast<uint8_t>(content_length >> 8);
+  header_array[5] = static_cast<uint8_t>(content_length);
+  header_array[6] = padding_length;
+  header_array[7] = 0;
+
+  std::memcpy(static_cast<void*>(byte_ptr), static_cast<void*>(header_array),
+    FCGI_HEADER_LEN);
 }
 
 std::vector<uint8_t> ToUnsignedCharacterVector(int c)

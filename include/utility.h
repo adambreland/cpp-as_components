@@ -23,7 +23,7 @@ namespace fcgi_si {
 // byte_iter: An iterator to a byte-buffer which will hold the four-byte
 //            sequence which encodes length.
 //
-// Requires:
+// Preconditions:
 // 1) length requires four bytes when encoded in the FastCGI name-value pair
 //    format and is less than or equal to the maximum value able to be
 //    encoded. Hence, length is in [2^7; 2^31 - 1] = [128; 2,147,483,647].
@@ -34,8 +34,14 @@ namespace fcgi_si {
 //    b) Four uint8_t values can be written to the buffer pointed to by
 //       byte_iter.
 //
+// Exceptions:
+// 1) May throw exceptions derived from std::exception.
+// 2) Throws std::invalid_argument if length is less than 128.
+// 3) In the event of a throw, the values of the sequence given by 
+//    [byte_iter, byte_iter + 4) are indeterminate.
+//
 // Effects:
-// 1) Four bytes are written to the buffer pointed to by byte_iter. The
+// 1) Four bytes are written to the sequence pointed to by byte_iter. The
 //    byte sequence encodes length in the FastCGI name-value pair format.
 template<typename ByteIter>
 void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
@@ -139,8 +145,48 @@ std::tuple<bool, std::size_t, std::vector<iovec>,
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
 
-// Returns the length in bytes of a name or value when that length was encoded
-// using four bytes in the FastCGI name-value pair format.
+//    Attempts to extract a collection of name-value pair byte sequences when 
+// they are encoded as a sequence of bytes in the FastCGI name-value pair
+// encoding.
+//    Note: Checking if content_length is zero before a call allows for the
+// differentiation of empty and erroneous byte sequences.
+//
+// Parameters:
+// content_ptr:    A pointer to the first byte of the byte sequence.
+// content_length: The total size of the sequence of bytes which constitutes
+//                 the collection of name-value pairs. Name and value length
+//                 information which is present in the encoded data contributes
+//                 to this value.
+//
+// Preconditions:
+// 1) content_ptr may only be null if content_length == 0.
+// 2) The value of content_length is equal to the number of bytes
+//    which represent the collection of name-value pairs. This number does
+//    not include the length of FastCGI record headers.
+//
+// Exceptions:
+// 1) May throw exceptions derived from std::exception.
+// 2) Throws std::invalid_argument if a nullptr is given and
+//    content_length != 0.
+// 3) Throws std::invalid_argument if content_length < 0.
+// 4) In the event of a throw, the byte sequence given by 
+//    [content_ptr, content_ptr + content_length) is not modified.
+//
+// Effects:
+// 1) The encoded lengths of the name and value byte sequences are extracted
+//    in the order of their occurrence. 
+//    a) If content_length is not large enough to continue processing given the
+//       encountered length values, processing halts and an empty list is
+//       returned.
+//    b) If content_length is sufficient, the name and value byte sequences
+//       are extracted. A list of name-value pairs of byte sequences is
+//       returned.
+std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
+ExtractBinaryNameValuePairs(const uint8_t* content_ptr, 
+  int_fast32_t content_length);
+
+// Attempts to return the length in bytes of a name or value when that length 
+// was encoded using four bytes in the FastCGI name-value pair format.
 //
 // Parameters:
 // byte_iter: An iterator to the first byte of a four-byte sequence.
@@ -151,6 +197,11 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //    requires four bytes to be encoded.
 // 2) The type of *byte_iter must be able to be safely cast through
 //    static_cast<uint8_t>(*byte_iter).
+//
+// Exceptions:
+// 1) May throw exceptions derived from std::exceptions.
+// 2) In the event of a throw, the sequence given by [byte_iter, byte_iter + 4)
+//    is unchanged.
 //
 // Effects:
 // 1) The length is extracted from [byte_iter, byte_iter + 4) and returned.
@@ -177,8 +228,9 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    sequence of byte-sized objects.
 //
 // Exceptions:
-// 1) May throw exceptions derived from std::exception. In the case of
-//    a throw, the call had no effect (strong exception guarantee).
+// 1) May throw exceptions derived from std::exception. 
+// 2) In the event of a throw, the call had no effect (strong exception 
+//    guarantee).
 //
 // Effects:
 // 1) Meaning of returned tuple elements:
@@ -234,35 +286,6 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
 void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
   std::uint16_t FCGI_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept;
-
-// Extracts a collection of name-value pairs when they are encoded as a
-// sequence of bytes in the FastCGI name-value pair encoding.
-//
-// Parameters:
-// content_ptr: points to the first byte of the byte sequence.
-// content_length: the total size of the sequence of bytes which constitutes
-// the collection of name-value pairs.
-//
-// Preconditions:
-// 1) content_ptr may only be null if content_length == 0.
-// 2) The value of content_length is equal to the number of bytes
-//    which represent the collection of name-value pairs. This number does
-//    not include the length of FastCGI record headers.
-//
-// Exceptions:
-// 1) May throw exceptions derived from std::exception.
-// 2) Throws std::invalid_argument if content_length was not large enough
-//    given the encoded name and value byte lengths encountered during
-//    processing.
-// 3) In the event of a throw, the byte sequence given by 
-//    [content_ptr, content_ptr + content_length) is not modified.
-//
-// Effects:
-// 1) The vector of pairs of name and value byte sequences extracted from
-//    [content_ptr, content_ptr + content_length) is returned.
-std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ProcessBinaryNameValuePairs(const uint8_t* content_ptr, 
-  int_fast32_t content_length);
 
 //    Returns a vector of bytes which represents the integer argument in decimal 
 // as a sequence of encoded characters. For example, the value 89 is converted

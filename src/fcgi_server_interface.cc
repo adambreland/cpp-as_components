@@ -861,7 +861,7 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
   // correctly indicate that the request was not understood (as, in this case,
   // an error will have been present).
   std::vector<byte_seq_pair> get_value_pairs
-    {ProcessBinaryNameValuePairs(buffer_ptr, count)};
+    {ExtractBinaryNameValuePairs(buffer_ptr, count)};
   
   std::vector<byte_seq_pair> result_pairs {};
 

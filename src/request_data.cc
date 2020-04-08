@@ -25,7 +25,7 @@ bool RequestData::ProcessFCGI_PARAMS()
   {
     using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
     std::vector<byte_seq_pair> name_value_pair_list
-      {ProcessBinaryNameValuePairs(FCGI_PARAMS_.data(), FCGI_PARAMS_.size())};
+      {ExtractBinaryNameValuePairs(FCGI_PARAMS_.data(), FCGI_PARAMS_.size())};
     if(name_value_pair_list.size())
     {
       auto first_component_comp =

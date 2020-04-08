@@ -19,17 +19,15 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter)
 {
   // TODO Add template type property checking with static asserts.
 
-  if(length < 0)
+  if(length < 128)
     throw std::invalid_argument {"A negative length was given."};
 
   // Set the leading bit to 1 to indicate that a four-byte sequence is
   // present.
   *byte_iter = (static_cast<uint8_t>(length >> 24) | 0x80U);
-
   for(int i {0}; i < 3; i++)
   {
     ++byte_iter;
-
     *byte_iter = length >> (16 - (8*i));
   }
 }

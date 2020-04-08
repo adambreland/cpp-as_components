@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -1375,17 +1376,21 @@ TEST(Utility, EncodeFourByteLength)
 {
   // Testing explanation:
   // Examined properties:
-  // 1) Byte length and value of the length argument.
+  // 1) Positive length greater than or equal to 128.
+  // 2) Values less than 128, including negative values.
   // 2) The type of the iterator used in the instantiation of the template.
   //
   // The following cases are tested:
-  // 1) A random value within the acceptable values of uint32_t.
+  // 1) A random value within the acceptable values of std::int_fast32_t.
   // 2) A random value as above, but using a non-pointer iterator.
   // 3) Minimum value: 128.
   // 4) A value which requires two bytes to encode: 256.
   // 5) A value which requires three bytes to encode: 1UL << 16.
   // 6) One less than the maximum value.
   // 7) The maximum value.
+  // 8) A value less than 128 and larger than zero: 1.
+  // 9) Zero.
+  // 10) -1.
   //
   // For some of the cases, when sizeof(uint8_t) == sizeof(unsigned char),
   // an array of unsigned char variables is used in addition to an array of
@@ -1401,14 +1406,14 @@ TEST(Utility, EncodeFourByteLength)
   uint8_t header_array[4] = {};
   unsigned char char_header_array[4] = {};
 
-  // Random value: 2,128,547
+  // Case 1: Random value: 2,128,547
   fcgi_si::EncodeFourByteLength(2128547, header_array);
   EXPECT_EQ(128, header_array[0]);
   EXPECT_EQ(32, header_array[1]);
   EXPECT_EQ(122, header_array[2]);
   EXPECT_EQ(163, header_array[3]);
 
-  // Random value with back_insert_iterator.
+  // Case 2: Random value with back_insert_iterator.
   std::vector<uint8_t> byte_seq {};
   fcgi_si::EncodeFourByteLength(2128547, std::back_inserter(byte_seq));
   EXPECT_EQ(128, byte_seq[0]);
@@ -1416,7 +1421,7 @@ TEST(Utility, EncodeFourByteLength)
   EXPECT_EQ(122, byte_seq[2]);
   EXPECT_EQ(163, byte_seq[3]);
 
-  // Minimum value, 128.
+  // Case 3: Minimum value, 128.
   fcgi_si::EncodeFourByteLength(128, header_array);
   EXPECT_EQ(128, header_array[0]);
   EXPECT_EQ(0, header_array[1]);
@@ -1432,7 +1437,7 @@ TEST(Utility, EncodeFourByteLength)
     EXPECT_EQ(128, char_header_array[3]);
   }
 
-  // Requires two bytes.
+  // Case 4: Requires two bytes.
   fcgi_si::EncodeFourByteLength(256, header_array);
   EXPECT_EQ(128, header_array[0]);
   EXPECT_EQ(0, header_array[1]);
@@ -1448,7 +1453,7 @@ TEST(Utility, EncodeFourByteLength)
     EXPECT_EQ(0, char_header_array[3]);
   }
 
-  // Requires three bytes.
+  // Case 5: Requires three bytes.
   fcgi_si::EncodeFourByteLength(1UL << 16, header_array);
   EXPECT_EQ(128, header_array[0]);
   EXPECT_EQ(1, header_array[1]);
@@ -1464,7 +1469,7 @@ TEST(Utility, EncodeFourByteLength)
     EXPECT_EQ(0, char_header_array[3]);
   }
 
-  // Maximum value less one.
+  // Case 6: Maximum value less one.
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1 - 1, header_array);
   EXPECT_EQ(255, header_array[0]);
   EXPECT_EQ(255, header_array[1]);
@@ -1480,7 +1485,7 @@ TEST(Utility, EncodeFourByteLength)
     EXPECT_EQ(254, char_header_array[3]);
   }
 
-  // Maximum value
+  // Case 7: Maximum value
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1, header_array);
   EXPECT_EQ(255, header_array[0]);
   EXPECT_EQ(255, header_array[1]);
@@ -1495,6 +1500,18 @@ TEST(Utility, EncodeFourByteLength)
     EXPECT_EQ(255, char_header_array[2]);
     EXPECT_EQ(255, char_header_array[3]);
   }
+
+  // Case 8: 1
+  EXPECT_THROW((fcgi_si::EncodeFourByteLength(1, char_header_array)),
+    std::invalid_argument);
+
+  // Case 9: 0
+  EXPECT_THROW((fcgi_si::EncodeFourByteLength(0, char_header_array)),
+    std::invalid_argument);
+
+  // Case 10: -1
+  EXPECT_THROW((fcgi_si::EncodeFourByteLength(-1, char_header_array)),
+    std::invalid_argument);
 }
 
 TEST(Utility, ExtractFourByteLength)
@@ -1519,32 +1536,32 @@ TEST(Utility, ExtractFourByteLength)
   uint8_t seq[4] = {};
   uint32_t length {};
 
-  // Random value.
+  // Case 1: Random value.
   fcgi_si::EncodeFourByteLength(2128547, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ(2128547, length);
 
-  // Minimum length.
+  // Case 2: Minimum length.
   fcgi_si::EncodeFourByteLength(128, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ(128, length);
 
-  // Requires two bytes.
+  // Case 3: Requires two bytes.
   fcgi_si::EncodeFourByteLength(256, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ(256, length);
 
-  // Requires three bytes.
+  // Case 4: Requires three bytes.
   fcgi_si::EncodeFourByteLength(1UL << 16, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ(1UL << 16, length);
 
-  // Maximum value less one.
+  // Case 5: Maximum value less one.
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1 - 1, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ((1UL << 31) - 1 - 1, length);
 
-  // Maximum value.
+  // Case 6: Maximum value.
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
   EXPECT_EQ((1UL << 31) - 1, length);
@@ -1762,15 +1779,17 @@ TEST(Utility, PopulateHeader)
   }
 }
 
-TEST(Utility, ProcessBinaryNameValuePairs)
+TEST(Utility, ExtractBinaryNameValuePairs)
 {
   // Testing explanation
   // Examined properties:
-  // 1) Number of name-value pairs. (One pair or more than one.)
+  // 1) Number of name-value pairs. (no content, one pair, or more than one.)
   // 2) Number of bytes required to encode the name or value. From the
   //    encoding format, one byte or four bytes.
   // 3) Presence or absence of data. I.e. an empty name or value.
   // 4) Improperly encoded data (see cases below).
+  // 5) content_ptr == nullptr && content_length != 0;
+  // 6) content_length < 0;
   //
   // Test cases:
   //  1) Nothing to process (content_length == 0), for both
@@ -1785,6 +1804,9 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   //  9) Incorrect encoding: a single pair with extra information at the end.
   // 10) Incorrect encoding: a correct pair followed by another pair with
   //     incorrect length information.
+  // 11) content_ptr == nullptr && content_length == 100.
+  // 12) content_ptr == nullptr && content_length == -100.
+  // 13) content_ptr != nullptr && content_length == -100.
   //
   // Modules which testing depends on: none.
   //
@@ -1793,16 +1815,17 @@ TEST(Utility, ProcessBinaryNameValuePairs)
 
   using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
-  // Nothing to process.
+  // Case 1: Nothing to process.
   EXPECT_EQ(std::vector<NameValuePair> {},
-    fcgi_si::ProcessBinaryNameValuePairs(0, nullptr));
+    fcgi_si::ExtractBinaryNameValuePairs(nullptr, 0));
 
   uint8_t test_value {0};
   EXPECT_EQ(std::vector<NameValuePair> {},
-    fcgi_si::ProcessBinaryNameValuePairs(0, &test_value));
+    fcgi_si::ExtractBinaryNameValuePairs(&test_value, 0));
   EXPECT_EQ(0, test_value);
 
-  // Single name-value pair. (1 byte, 1 byte) for lengths. Empty name and value.
+  // Case 2: Single name-value pair. (1 byte, 1 byte) for lengths. 
+  // Empty name and value.
   const char* empty_name_ptr {""};
   const char* empty_value_ptr {""};
   NameValuePair empty_empty_nv_pair {{empty_name_ptr, empty_name_ptr},
@@ -1810,11 +1833,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   std::vector<uint8_t> encoded_nv_pair {};
   encoded_nv_pair.push_back(0);
   encoded_nv_pair.push_back(0);
-  std::vector<NameValuePair> result {fcgi_si::ProcessBinaryNameValuePairs(
-    encoded_nv_pair.size(), encoded_nv_pair.data())};
+  std::vector<NameValuePair> result {fcgi_si::ExtractBinaryNameValuePairs(
+    encoded_nv_pair.data(), encoded_nv_pair.size())};
   EXPECT_EQ(result[0], empty_empty_nv_pair);
 
-  // Single name-value pair. (1 byte, 1 byte) for lengths. Empty value.
+  // Case 3: Single name-value pair. (1 byte, 1 byte) for lengths. Empty value.
   encoded_nv_pair.clear();
   const char* name_ptr {"Name"};
   NameValuePair name_empty_nv_pair {{name_ptr, name_ptr + 4},
@@ -1823,11 +1846,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   encoded_nv_pair.push_back(0);
   for(auto c : name_empty_nv_pair.first)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result[0], name_empty_nv_pair);
 
-  // Single name-value pair. (1 byte, 1 byte) for lengths.
+  // Case 4: Single name-value pair. (1 byte, 1 byte) for lengths.
   encoded_nv_pair.clear();
   const char* value_ptr {"Value"};
   NameValuePair one_one_nv_pair {{name_ptr, name_ptr + 4},
@@ -1838,11 +1861,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
     encoded_nv_pair.push_back(c);
   for(auto c : one_one_nv_pair.second)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result[0], one_one_nv_pair);
 
-  // Single name-value pair, (1 byte, 4 bytes) for lengths.
+  // Case 5: Single name-value pair, (1 byte, 4 bytes) for lengths.
   std::vector<uint8_t> four_value_vector(128, 'a');
   NameValuePair one_four_nv_pair {{name_ptr, name_ptr + 4}, four_value_vector};
   encoded_nv_pair.clear();
@@ -1852,11 +1875,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
     encoded_nv_pair.push_back(c);
   for(auto c : one_four_nv_pair.second)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result[0], one_four_nv_pair);
 
-  // Single name-value pair, (4 byte, 1 bytes) for lengths.
+  // Case 6: Single name-value pair, (4 byte, 1 bytes) for lengths.
   std::vector<uint8_t> four_name_vector(256, 'b');
   NameValuePair four_one_nv_pair {four_name_vector, {value_ptr, value_ptr + 5}};
   encoded_nv_pair.clear();
@@ -1866,12 +1889,12 @@ TEST(Utility, ProcessBinaryNameValuePairs)
     encoded_nv_pair.push_back(c);
   for(auto c : four_one_nv_pair.second)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+   result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result[0], four_one_nv_pair);
 
-  // Multiple name-value pairs with names and values that need one and four
-  // byte lengths. Also includes an empty value.
+  // Case 7: Multiple name-value pairs with names and values that need one and
+  // four byte lengths. Also includes an empty value.
   encoded_nv_pair.clear();
   std::vector<NameValuePair> pairs {};
   pairs.push_back({four_name_vector, four_value_vector});
@@ -1895,11 +1918,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   encoded_nv_pair.push_back(0);
   for(auto c : pairs[2].first)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result, pairs);
 
-  // As above, but with the empty value in the middle.
+  // Case 8: As above, but with the empty value in the middle.
   encoded_nv_pair.clear();
   pairs.clear();
   pairs.push_back({four_name_vector, four_value_vector});
@@ -1923,11 +1946,11 @@ TEST(Utility, ProcessBinaryNameValuePairs)
     encoded_nv_pair.push_back(c);
   for(auto c : pairs[2].second)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result, pairs);
 
-  // An incomplete encoding. A single name and value is present. Extra
+  // Case 9: An incomplete encoding. A single name and value is present. Extra
   // information is added. ProcessBinaryNameValuePairs should return an
   // empty vector.
   encoded_nv_pair.clear();
@@ -1940,12 +1963,12 @@ TEST(Utility, ProcessBinaryNameValuePairs)
   encoded_nv_pair.push_back(10);
   // A byte with length information was added above, but there is no associated
   // data.
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result, std::vector<NameValuePair> {});
 
-  // Too many bytes were specified for the last name, but the first name-
-  // value pair was correct. An empty vector should still be returned.
+  // Case 10: Too many bytes were specified for the last name, but the first 
+  // name-value pair was correct. An empty vector should still be returned.
   encoded_nv_pair.clear();
   encoded_nv_pair.push_back(4);
   encoded_nv_pair.push_back(5);
@@ -1959,9 +1982,28 @@ TEST(Utility, ProcessBinaryNameValuePairs)
     encoded_nv_pair.push_back(c);
   for(auto c : one_one_nv_pair.second)
     encoded_nv_pair.push_back(c);
-  result = fcgi_si::ProcessBinaryNameValuePairs(encoded_nv_pair.size(),
-    encoded_nv_pair.data());
+  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+    encoded_nv_pair.size());
   EXPECT_EQ(result, std::vector<NameValuePair> {});
+
+  // Case 11: content_ptr == nullptr, content_length == 100.
+  EXPECT_THROW((fcgi_si::ExtractBinaryNameValuePairs(nullptr, 100)),
+    std::invalid_argument);
+
+  // Case 12: content_ptr == nullptr, content_length == -100.
+  EXPECT_THROW((fcgi_si::ExtractBinaryNameValuePairs(nullptr, -100)),
+    std::invalid_argument);
+
+  // Case 13: content_ptr != nullptr, content_length == -100
+  encoded_nv_pair.clear();
+  encoded_nv_pair.push_back(1);
+  encoded_nv_pair.push_back(1);
+  encoded_nv_pair.push_back('a');
+  encoded_nv_pair.push_back('b');
+  EXPECT_THROW(
+    (fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(), -100)),
+    std::invalid_argument
+  );
 }
 
 TEST(Utility, EncodeNameValuePairs)
@@ -2171,9 +2213,11 @@ TEST(Utility, EncodeNameValuePairs)
       // Don't return as we can still test name-value pairs.
     }
     std::vector<NameValuePair> pair_result_sequence {
-      fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
-      extract_content_result).size(), std::get<4>(
-      extract_content_result).data())};
+      fcgi_si::ExtractBinaryNameValuePairs(
+        std::get<4>(extract_content_result).data(),
+        std::get<4>(extract_content_result).size()
+      )
+    };
     EXPECT_EQ(pair_sequence, pair_result_sequence);
   };
 
@@ -2675,42 +2719,67 @@ TEST(Utility, EncodeNameValuePairs)
         break;
       }
       std::vector<NameValuePair> pair_result_sequence {
-        fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
-        extract_content_result).size(), std::get<4>(
-        extract_content_result).data())};
+        fcgi_si::ExtractBinaryNameValuePairs(
+          std::get<4>(extract_content_result).data(),
+          std::get<4>(extract_content_result).size())
+      };
       EXPECT_EQ(many_pairs, pair_result_sequence);
       close(temp_fd);
     }
   }
 }
 
-TEST(Utility, uint32_tToUnsignedCharacterVector)
+TEST(Utility, ToUnsignedCharacterVector)
 {
   // Testing explanation
   // Examined properties:
-  // 1) value of c (0, 1, a value greater than 1 but less than the maximum
-  //    value, the maximum value).
+  // 1) Presence of negative values.
+  // 2) Zero.
+  // 2) Presence of positive values.
   //
   // Test cases:
-  // 1) c == 0
-  // 2) c == 1
-  // 3) c == 100
-  // 4) c == uint32_t(-1) (which is equal to 4294967295)
+  // 1) c == std::numeric_limits<int>::min()
+  // 2) c = -200
+  // 3) c == -1
+  // 4) c == 0
+  // 5) c == 1
+  // 6) c == 100
+  // 7) c == std::numeric_limits<int>::max()
   //
   // Modules which testing depends on: none.
   //
   // Other modules whose testing depends on this module: none.
+  //
+  // Note: The minimum and maximum values assume 32-bit, two's complement
+  // integers. If this is not the case, extreme cases are not tested.
+
+  bool test_extremes {(std::numeric_limits<unsigned int>::max()
+    == std::numeric_limits<uint32_t>::max()) 
+    && (std::numeric_limits<int>::min() < -std::numeric_limits<int>::max())};
 
   // Case 1
-  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(0),
-    (std::vector<uint8_t> {'0'}));
+  if(test_extremes)
+    EXPECT_THROW(
+      (fcgi_si::ToUnsignedCharacterVector(std::numeric_limits<int>::min())),
+      std::invalid_argument
+    );  
   // Case 2
-  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(1),
-    (std::vector<uint8_t> {'1'}));
+  EXPECT_THROW(fcgi_si::ToUnsignedCharacterVector(-200), std::invalid_argument);
   // Case 3
-  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(100),
-    (std::vector<uint8_t> {'1','0','0'}));
+  EXPECT_THROW(fcgi_si::ToUnsignedCharacterVector(-1), std::invalid_argument);
   // Case 4
-  EXPECT_EQ(fcgi_si::uint32_tToUnsignedCharacterVector(uint32_t(-1)),
-    (std::vector<uint8_t> {'4','2','9','4','9','6','7','2','9','5'}));
+  EXPECT_EQ(fcgi_si::ToUnsignedCharacterVector(0),
+    (std::vector<uint8_t> {'0'}));
+  // Case 5
+  EXPECT_EQ(fcgi_si::ToUnsignedCharacterVector(1),
+    (std::vector<uint8_t> {'1'}));
+  // Case 6
+  EXPECT_EQ(fcgi_si::ToUnsignedCharacterVector(100),
+    (std::vector<uint8_t> {'1','0','0'}));
+  // Case 7
+  if(test_extremes)
+    EXPECT_EQ(
+      fcgi_si::ToUnsignedCharacterVector(std::numeric_limits<int>::max()),
+      (std::vector<uint8_t> {'2','1','4','7','4','8','3','6','4','7'})
+    );
 }
