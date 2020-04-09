@@ -110,8 +110,13 @@ private:
   //    RequestIdentifier objects returned by ReadRecords must contain a
   //    RequestIdentifier object equivalent to the returned object.
   //
+  // Synchronization:
+  // 1) May acquire and release interface_state_mutex_.
+  // 2) May acquire and release the write mutex associated with connection_.
+  //
   // Exceptions:
-  // 
+  // 1) May throw exceptions derived from std::exception.
+  // 2) 
   //
   // Effects:
   // 1) Records which were deemed invalid upon completion of their headers are
@@ -132,8 +137,9 @@ private:
   //       the request is deleted, an FCGI_END_REQUEST record is sent to the 
   //       client, and request_id_.FCGI_id() is made inactive. 
   //       1) The protocolStatus field of the FCGI_END_REQUEST record is set to 
-  //       FCGI_REQUEST_COMPLETE (0). 
-  //       2) The appStatus field of the record is equal to -1.
+  //          FCGI_REQUEST_COMPLETE (0). 
+  //       2) The appStatus field of the record is equal to
+  //          i_ptr_->app_status_on_abort_.
   //    c) If the request of the record is present has been assigned, the abort
   //       flag of the associated RequestData object is set.
   // 5) Params, stdin, and data stream records:

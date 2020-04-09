@@ -31,7 +31,7 @@
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
-// Implementation notes:
+// Class implementation notes:
 // 1) Mutex acquisition patterns and related actions:
 //    a) With no other mutexes held, the interface may either:
 //        1) Acquire and then release a write mutex.
@@ -639,30 +639,47 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 void FCGIServerInterface::AddRequest(RequestIdentifier request_id, 
   std::uint16_t role, bool close_connection)
 {
+  std::map<int, int>::iterator request_count_iter {};
+  std::map<RequestIdentifier, RequestData>::iterator request_map_iter {};
+
   try
-  {
-    std::map<int, int>::iterator request_count_iter 
-      {request_count_map_.find(request_id.descriptor())};
+  { 
+    request_count_iter = request_count_map_.find(request_id.descriptor());
     if(request_count_iter == request_count_map_.end())
     {
       throw std::logic_error {"request_count_map_ did not possess an "
         "expected file descriptor key."};
     }
 
-    std::map<RequestIdentifier, RequestData>::iterator request_map_iter
-      {request_map_.find(request_id)};
+    request_map_iter = request_map_.find(request_id);
     if(request_map_iter != request_map_.end())
     {
       throw std::logic_error {"An attempt was made to add an element to "
         "request_map_ with a key which was already present."};
     }
-
+  }
+  catch(...)
+  {
+    bad_interface_state_detected_ = true;
+    throw;
+  }
+  
+  try
+  {  
     request_map_[request_id] = RequestData(role, close_connection);
     request_count_iter->second++;
   }
   catch(...)
   {
-    bad_interface_state_detected_ = true;
+    try
+    {
+      connections_to_close_set_.insert(request_id.descriptor());
+    }
+    catch(...)
+    {
+      bad_interface_state_detected_ = true;
+      throw;
+    }
     throw;
   }
 }
@@ -824,10 +841,9 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
 
   // Encode app_status.
   uint8_t app_status_byte_array[4];
-  uint32_t unsigned_app_status {static_cast<uint32_t>(app_status)};
   for(int i {0}; i < 4; i++)
   {
-    app_status_byte_array[i] = unsigned_app_status >> (24 - (8*i));
+    app_status_byte_array[i] = app_status >> (24 - (8*i));
   }
 
   // Set header.
@@ -836,12 +852,10 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   // Set body.
   for(int i {0}; i < 4; i++)
   {
-    result[(i + 1) + kHeaderReservedByteIndex] =
-      app_status_byte_array[i];
+    result[(i + 1) + kHeaderReservedByteIndex] = app_status_byte_array[i];
   }
-  result[5 + kHeaderReservedByteIndex]   =
-    protocol_status;
-  // Remaining bytes were set to zero during string initialization.
+  result[5 + kHeaderReservedByteIndex]   = protocol_status;
+  // Remaining bytes were set to zero during initialization.
 
   return SendRecord(connection, result.data(), result.size());
 }
@@ -855,42 +869,45 @@ SendFCGIUnknownType(int connection, FCGIType type)
   PopulateHeader(result.data(), FCGIType::kFCGI_UNKNOWN_TYPE,
     FCGI_NULL_REQUEST_ID, FCGI_HEADER_LEN, 0U);
   // Set body. (Only the first byte in the body is used.)
-  result[1 + kHeaderReservedByteIndex]   =
-    static_cast<uint8_t>(type);
-  // Remaining bytes were set to zero during string initialization.
+  result[1 + kHeaderReservedByteIndex] = static_cast<uint8_t>(type);
+  // Remaining bytes were set to zero during initialization.
 
   return SendRecord(connection, result.data(), result.size());
 }
 
 bool FCGIServerInterface::
 SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
-  std::size_t count)
+  std::int_fast32_t count)
 {
   using byte_seq_pair = std::pair<std::vector<std::uint8_t>, 
     std::vector<std::uint8_t>>;
+
   // If count is zero or if the sequence of bytes given by the range
-  // [buffer_ptr, buffer_ptr + count) contains an error, the vector returned
-  // by ProcessBinaryNameValuePairs is empty. In either case, an empty
-  // FCGI_GET_VALUES_RESULT record will be sent to the client. If the client
-  // included requests, the absence of those variables in the response will 
-  // correctly indicate that the request was not understood (as, in this case,
-  // an error will have been present).
+  // [buffer_ptr, buffer_ptr + count) contains a FastCGI name-value pair format
+  // error, the vector returned by ExtractBinaryNameValuePairs is empty. In 
+  // either case, an empty FCGI_GET_VALUES_RESULT record will be sent to the 
+  // client. If the client included requests, the absence of those variables 
+  // in the response will correctly indicate that the request was not 
+  // understood (as, in this case, an error will have been present).
   std::vector<byte_seq_pair> get_value_pairs
     {ExtractBinaryNameValuePairs(buffer_ptr, count)};
-  
-  std::vector<byte_seq_pair> result_pairs {};
 
-  // Constructs result pairs. Disregards any name that is not understood and
-  // omit duplicates. The map is used to track which FCGI_GET_VALUES
-  // requests are understood (three are specified in the standard) and which
-  // requests have already occurred. Once a request type is seen, it is
-  // removed from the map. Processing stops once all types have been seen or
-  // the list of understood FCGI_GET_VALUES requests is exhausted.
+  // The following for loop constructs result pairs as a list with elements
+  // of type byte_seq_pair. This process disregards any name that is not 
+  // understood and omits duplicates. The map is used to track which
+  // FCGI_GET_VALUES requests are understood (three are specified in the 
+  // standard) and which requests have already occurred. Once a request type is
+  // seen, it is removed from the map. Processing stops once all requests have 
+  // been seen or the list of understood FCGI_GET_VALUES requests is exhausted.
+
+  std::vector<byte_seq_pair> result_pairs {};
 
   // The integer values in the key-value pairs are used for the switch only. 
   std::map<std::vector<std::uint8_t>, int> get_values_result_request_map
       {{FCGI_MAX_CONNS, 0}, {FCGI_MAX_REQS, 1}, {FCGI_MPXS_CONNS, 2}};
+
   std::vector<uint8_t> local_result {};
+
   for(std::vector<byte_seq_pair>::iterator pairs_iter {get_value_pairs.begin()};
     (pairs_iter != get_value_pairs.end()) && get_values_result_request_map.size(); 
      ++pairs_iter)
@@ -920,6 +937,7 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
       get_values_result_request_map.erase(vpm_iter);
     }
   }
+
   // Process result pairs to generate the response string.
 
   // Allocate space for header.
@@ -971,7 +989,8 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
 }
 
 bool FCGIServerInterface::
-SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
+SendRecord(int connection, const std::uint8_t* buffer_ptr, 
+  std::int_fast32_t count)
 {
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
     mutex_map_iter {write_mutex_map_.find(connection)};
@@ -1000,13 +1019,13 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
   
   // Check if the connection is corrupt.
   // Part of the discipline for connection use is adding the connection
-  // descriptor to one of the closure sets. It need not be done upon corruption
-  // discovery.
+  // descriptor to one of the closure sets if the connection is corrupted.
+  // Adding the descriptor need not be done upon corruption discovery.
   if(mutex_map_iter->second.second)
     return false;
 
   // TODO Have writes on a connection which would be performed by the interface
-  // object be performed instead by a worker thread. It expedient but
+  // object be performed instead by a worker thread. It is expedient but
   // inappropriate to have the interface thread block on a write.
   // 
   // Send record.
@@ -1045,11 +1064,10 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
       } // RELEASE interface_state_mutex_.
       return false;
     }
-    else 
+    else // Any other error is considered non-recoverable.
     {
-      if(number_written != 0U)
+      if(number_written != 0U) // A non-zero write corrupts the connection.
       {
-        // The connection to the client was just corrupted.
         mutex_map_iter->second.second = true;
         try
         {
@@ -1079,7 +1097,7 @@ SendRecord(int connection, const uint8_t* buffer_ptr, std::size_t count)
       }
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "write from a call to "
-        "::socket_functions::WriteOnSelect."};
+        "socket_functions::WriteOnSelect."};
     }
   }
   return true;

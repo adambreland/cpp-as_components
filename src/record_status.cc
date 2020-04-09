@@ -1,6 +1,6 @@
+#include <limits>
 #include <cstdint>          // For std::uint32_t.
 #include <cstring>          // For std::memcpy
-
 #include <mutex>
 #include <vector>
 
@@ -82,12 +82,44 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
   // Check if it is a management record (every management record is valid).
   if(request_id_.FCGI_id() == 0U)
   {
-    if(type_ == FCGIType::kFCGI_GET_VALUES)
-      i_ptr_->SendGetValuesResult(connection_, 
-        local_record_content_buffer_.data(), 
-        local_record_content_buffer_.size());
-    else // Unknown type.
-      i_ptr_->SendFCGIUnknownType(connection_, type_);
+    try
+    {
+        if(type_ == FCGIType::kFCGI_GET_VALUES)
+      {
+        // The maximum length of local_record_content_buffer_.size() is limited
+        // to the maximum value of the content of a FastCGI record. As such,
+        // it will not be too large to be stored in a variable of type
+        // std::int_fast32_t.
+        i_ptr_->SendGetValuesResult(connection_, 
+          local_record_content_buffer_.data(), 
+          local_record_content_buffer_.size());
+      }
+      else // Unknown type.
+        i_ptr_->SendFCGIUnknownType(connection_, type_);
+    }
+    catch(...)
+    {
+      try
+      {
+        i_ptr_->connections_to_close_set_.insert(connection_);
+      }
+      catch(...)
+      {
+        try
+        {
+          // ACQUIRE inteface_state_mutex_.
+          std::lock_guard<std::mutex> interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_};
+          i_ptr_->bad_interface_state_detected_ = true;
+        } // RELEASE interface_state_mutex_.
+        catch(...)
+        {
+          std::terminate();
+        }
+        throw;
+      }
+      throw;
+    }
   }
   // Check if the record is valid. Ignore record if it is not.
   else if(invalidated_by_header_)
@@ -105,7 +137,8 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
 
         // Determine if the request limit was reached for the connection.
         bool limit_reached {false};
-        { // Start lock handling block.
+        { 
+          // Start lock handling block.
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
             {FCGIServerInterface::interface_state_mutex_};
@@ -149,14 +182,28 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
       case FCGIType::kFCGI_ABORT_REQUEST: {
         // Has the request already been assigned?
         bool send_end_request {false};
-        { // Start lock handling block.
+        { 
+          // Start lock handling block.
           // ACQUIRE interface_state_mutex_.
           std::lock_guard<std::mutex> interface_state_lock
             {FCGIServerInterface::interface_state_mutex_};
+          
+          //    Between header validation for the abort record and now, the
+          // request may have been removed from request_map_ by the
+          // FCGIRequest object for the request for several reasons.
+          //    Thus, failure to find the request is not an error, but indicates
+          // that the abort can be ignored.
+          //    Not checking for request removal would introduce a race 
+          // condition between the FCGIRequest object and the interface. If the 
+          // FCGIRequest object removed the request, the below expression
+          // request_data_it->second.get_status() becomes an access through a 
+          // non-dereferenceable iterator.
           auto request_data_it {i_ptr_->request_map_.find(request_id_)};
+          if(request_data_it == i_ptr_->request_map_.end())
+            break;
 
-          if(request_data_it->second.get_status()
-             == RequestStatus::kRequestAssigned)
+          if(request_data_it->second.get_status() == 
+             RequestStatus::kRequestAssigned)
             request_data_it->second.set_abort();
           else // Not assigned. We can erase the request and update state.
           {
@@ -168,6 +215,9 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
             send_end_request = true;
           }
         } // RELEASE interface_state_mutex_.
+
+        // If send_end_request == true, the request is not assigned and cannot
+        // be removed from request_map_ by an FCGIRequest object.
         if(send_end_request)
           i_ptr_->SendFCGIEndRequest(connection_, request_id_,
             FCGI_REQUEST_COMPLETE, i_ptr_->app_status_on_abort_);
@@ -177,6 +227,8 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
           // this information in the middle of the call to read.
         break;
       }
+      // Processing for these types can be performed in one block.
+      // Fall through if needed.
       case FCGIType::kFCGI_PARAMS:
       case FCGIType::kFCGI_STDIN:
       case FCGIType::kFCGI_DATA: {
@@ -271,20 +323,19 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
         }
         catch(...)
         {
-          std::unique_lock<std::mutex> unique_interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
           try
           {
             // ACQUIRE interface_state_mutex_.
-            unique_interface_state_lock.lock();
-          }
+            std::lock_guard<std::mutex> interface_state_lock
+              {FCGIServerInterface::interface_state_mutex_};
+            i_ptr_->bad_interface_state_detected_ = true;
+          } // RELEASE interface_state_mutex_.
           catch(...)
           {
             std::terminate();
           }
-          i_ptr_->bad_interface_state_detected_ = true;
           throw;
-        } // RELEASE interface_state_mutex_.
+        }
       }
       if((errno != EAGAIN) && (errno != EWOULDBLOCK)) // Unrecoverable error.
       {
@@ -294,20 +345,19 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
         }
         catch(...)
         {
-          std::unique_lock<std::mutex> unique_interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
           try
           {
             // ACQUIRE interface_state_mutex_.
-            unique_interface_state_lock.lock();
-          }
+            std::lock_guard<std::mutex> interface_state_lock
+              {FCGIServerInterface::interface_state_mutex_};
+            i_ptr_->bad_interface_state_detected_ = true;
+          } // RELEASE interface_state_mutex_.
           catch(...)
           {
             std::terminate();
           }
-          i_ptr_->bad_interface_state_detected_ = true;
           throw;
-        } // RELEASE interface_state_mutex_.
+        }
         std::error_code ec {errno, std::system_category()};
         throw std::system_error {ec, ERRNO_ERROR_STRING("read from a call to "
           "NonblockingSocketRead")};
@@ -351,20 +401,19 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
             }
             catch(...)
             {
-              std::unique_lock<std::mutex> unique_interface_state_lock
-                {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
               try
               {
                 // ACQUIRE interface_state_mutex_.
-                unique_interface_state_lock.lock();
-              }
+                std::lock_guard<std::mutex> interface_state_lock
+                  {FCGIServerInterface::interface_state_mutex_};
+                i_ptr_->bad_interface_state_detected_ = true;
+              } // RELEASE interface_state_mutex_.
               catch(...)
               {
                 std::terminate();
               }
-              i_ptr_->bad_interface_state_detected_ = true;
               throw;
-            } // RELEASE interface_state_mutex_.
+            }
             throw;
           }
         }
@@ -413,20 +462,19 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
                 }
                 catch(...)
                 {
-                  std::unique_lock<std::mutex> unique_interface_state_lock
-                    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
                   try
                   {
                     // ACQUIRE interface_state_mutex_.
-                    unique_interface_state_lock.lock();
-                  }
+                    std::lock_guard<std::mutex> interface_state_lock
+                      {FCGIServerInterface::interface_state_mutex_};
+                    i_ptr_->bad_interface_state_detected_ = true;
+                  } // RELEASE interface_state_mutex_.
                   catch(...)
                   {
                     std::terminate();
                   }
-                  i_ptr_->bad_interface_state_detected_ = true;
                   throw;
-                } // RELEASE interface_state_mutex_.
+                }
                 throw;
               }
             }
@@ -530,20 +578,19 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
           }
           catch(...)
           {
-            std::unique_lock<std::mutex> unique_interface_state_lock
-              {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
             try
             {
               // ACQUIRE interface_state_mutex_.
-              unique_interface_state_lock.lock();
-            }
+              std::lock_guard<std::mutex> interface_state_lock
+                {FCGIServerInterface::interface_state_mutex_};
+              i_ptr_->bad_interface_state_detected_ = true;
+            } // RELEASE interface_state_mutex_.
             catch(...)
             {
               std::terminate();
             }
-            i_ptr_->bad_interface_state_detected_ = true;
             throw;
-          } // RELEASE interface_state_mutex_
+          }
           throw;
         }
       } // Loop to check if more received bytes need to be processed.

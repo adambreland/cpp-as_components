@@ -1786,7 +1786,7 @@ TEST(Utility, ExtractBinaryNameValuePairs)
   // 1) Number of name-value pairs. (no content, one pair, or more than one.)
   // 2) Number of bytes required to encode the name or value. From the
   //    encoding format, one byte or four bytes.
-  // 3) Presence or absence of data. I.e. an empty name or value.
+  // 3) Presence or absence of data, i.e. an empty name or value.
   // 4) Improperly encoded data (see cases below).
   // 5) content_ptr == nullptr && content_length != 0;
   // 6) content_length < 0;

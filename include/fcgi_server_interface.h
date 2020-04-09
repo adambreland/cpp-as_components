@@ -115,7 +115,9 @@ class FCGIServerInterface {
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) Ater a throw, bad_interface_state_detected_ == true.
+  // 2) Ater a throw, either the connection given by request_id.descriptor()
+  //    was added to connections_to_close_set_ or
+  //    bad_interface_state_detected_ == true.
   //
   // Effects:
   // 1) A RequestData object with the given role and close_connection values
@@ -342,19 +344,116 @@ class FCGIServerInterface {
   //    assigned. Returns false otherwise.
   bool RequestCleanupDuringConnectionClosure(int connection);
 
+  // Attempts to send an FCGI_END_REQUEST record to a client over connection.
+  // The request is identified by request_id. The body of the record contains
+  // the given protocol_status and app_status fields.
   //
+  // Parameters:
+  // connection:      The descriptor of connection over which the
+  //                  FCGI_END_REQUEST record will be sent.
+  // request_id:      A RequestIdentifier object which identifies the request
+  //                  and which will be used to indicate which request sent by
+  //                  the client over connection is being ended.
+  // protocol_status: The FastCGI protocol status for the final response to the
+  //                  request.
+  // app_status:      The exit status that an equivalent CGI program would
+  //                  have returned on exit.
   //
+  // Preconditions:
+  // 1) connection must be in use by the interface.
+  //
+  // Synchronization:
+  // 1) May acquire the write mutex associated with connection.
+  // 2) May acquire interface_state_mutex_.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) May throw any exceptions thrown by SendRecord. See the exception
+  //    specification for SendRecord.
+  //
+  // Effects:
+  // 1) If true was returned, an FCGI_UNKNOWN_TYPE record with type was
+  //    sent over connection.
+  // 2) If false was returned, the connection was found to be closed or
+  //    corrupted. The descriptor given by connection is present in a closure
+  //    set.
   bool SendFCGIEndRequest(int connection, RequestIdentifier request_id,
     std::uint8_t protocol_status, std::int32_t app_status);
 
+  // Attempts to send an FCGI_UNKNOWN_TYPE management record. The
+  // unknown type of the record body is given by type.
   //
+  // Parameters:
+  // connection: The descriptor of connection over which the
+  //             FCGI_UNKNOWN_TYPE record will be sent. 
+  // type:       The type which the FastCGI implementation did not recognize
+  //             and which was received as the type of a management record.
   //
+  // Preconditions:
+  // 1) connection must be in use by the interface.
+  //
+  // Synchronization:
+  // 1) May acquire the write mutex associated with connection.
+  // 2) May acquire interface_state_mutex_.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) May throw any exceptions thrown by SendRecord. See the exception
+  //    specification for SendRecord.
+  //
+  // Effects:
+  // 1) If true was returned, an FCGI_UNKNOWN_TYPE record with type was
+  //    sent over connection.
+  // 2) If false was returned, the connection was found to be closed or
+  //    corrupted. The descriptor given by connection is present in a closure
+  //    set.
   bool SendFCGIUnknownType(int connection, FCGIType type);
 
+  // Attempts to send an FCGI_GET_VALUES_RESULT reply to an FCGI_GET_VALUES
+  // management record. The binary data of the request is given by
+  // [buffer_ptr, buffer_ptr + count).
   //
+  // Parameters: 
+  // connection: The descriptor of connection over which the 
+  //             FCGI_GET_VALUES_RESULT record will be sent.
+  // buffer_ptr: A pointer to the first byte a of sequence of name-value pairs
+  //             encoded in the FastCGI name-value pair format. Note that
+  //             FastCGI headers should not be present in the sequence given by
+  //             [buffer_ptr, buffer_ptr + count). 
+  // count:      The number of bytes in the binary name-value pair sequence
+  //             pointed to by buffer_ptr.
   //
+  // Preconditions:
+  // 1) connection must be in use by the interface.
+  // 2) buffer_ptr may not be null unless count == 0.
+  // 3) The byte length of the content of a maximal response, when that content
+  //    is encoded in the FastCGI name-value pair format, may not exceed the
+  //    maximum size of the content of a FastCGI record. (A maximal response
+  //    must be a single, well-formed FastCGI record.)
+  //
+  // Synchronization:
+  // 1) May acquire the write mutex associated with connection.
+  // 2) May acquire interface_state_mutex_.
+  // 
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) Throws std::invalid_argument if a nullptr is given and
+  //    content_length != 0.
+  // 3) Throws std::invalid_argument if content_length < 0.
+  // 4) May throw any exception thrown by SendRecord. See the exception
+  //    specification for SendRecord.
+  // 5) In the event of a throw, the byte sequence given by 
+  //    [content_ptr, content_ptr + content_length) is not modified.
+  //
+  // Effects:
+  // 1) If true was returned, an FCGI_GET_VALUES_RESULT record with one
+  //    instance of any understood name from the content of an
+  //    FCGI_GET_VALUES record was sent over connection.
+  // 2) If false was returned, the connection was found to be closed or
+  //    corrupted. The descriptor given by connection is present in a closure
+  //    set.
   bool SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
-    std::size_t count);
+    std::int_fast32_t count);
 
   // Attempts to send the byte sequence given by 
   // [buffer_ptr, buffer_ptr + count) to a client over connection.
@@ -375,23 +474,31 @@ class FCGIServerInterface {
   //    connection.
   // 2) May acquire and release interface_state_mutex_.
   //
-  // Excceptions:
+  // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) Throws:
-  //    1) 
-  // 2) After a throw, several changes in interface state may have occurred:
+  // 2) In the event of a throw, the sequence given by 
+  //    [buffer_ptr, buffer_ptr + count) is not modified.
+  // 3) Throws:
+  //    a) std::logic_error when the interface state was found to be corrupt.
+  //       In this case, bad_interface_state_detected_ was set.
+  //    b) std::system_error when an unrecoverable system error occurred
+  //       while during the write. 
+  // 4) After a throw, several changes in interface state may have occurred:
   //    a) The connection could have been added to connections_to_close_set_.
   //    b) The connection could have been corrupted. The corruption flag is
   //       set in this case.
   //    c) The interface may be in a bad state.
   //    No other changes will have occurred.
+  // 5) Program termination will occur if the interface could not be put into a
+  //    bad state when this was necessary.
   //
   // Effects:
   // 1) If true was returned, the byte sequence was sent.
   // 2) If false was returned, the connection was found to be closed or
-  //    corrupted. The descriptor was scheduled for closure.
+  //    corrupted. The descriptor given by connection is present in a closure
+  //    set.
   bool SendRecord(int connection, const std::uint8_t* buffer_ptr,
-    std::size_t count);
+    std::int_fast32_t count);
 
   // DATA MEMBERS
 
