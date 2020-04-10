@@ -153,7 +153,9 @@
 //    members must be accessed under mutex protection.
 // 2) The FCGIServerInterface data member write_mutex_map_ must not be accessed
 //    directly. A write mutex must only be accessed through an FCGIRequest
-//    object's write_mutex_ptr_.
+//    object's write_mutex_ptr_. In other words, the mutexes are shared, but
+//    the map which stores them is not. FCGIServerInterface may treat the map
+//    as a non-shared data member which locates shared objects.
 // 3) Of the methods of FCGIServerInterface, only RemoveRequest may be called.
 //    It must be called under mutex protection.
 namespace fcgi_si {

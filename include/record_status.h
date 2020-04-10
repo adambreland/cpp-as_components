@@ -12,11 +12,11 @@
 namespace fcgi_si {
 
 // RecordStatus objects are used as internal components of an
-// FCGIServerInterface object. They represent the status of a FastCGI record as
-// it received over a socket connection. The method Read updates interface
-// state as records are received over the connection. It produces a list of
-// requests which are complete and ready to be used to create an FCGIRequest
-// object.
+// FCGIServerInterface object. A RecordStatus object represents the status of
+// a FastCGI record as it is received over a socket connection. The method
+// ReadRecords updates interface state as records are received over the
+// connection. It produces a list of requests which are complete and ready to
+// be used to create an FCGIRequest object.
 class RecordStatus {
 public:
 
@@ -116,7 +116,9 @@ private:
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) 
+  // 2) In the event of a throw, either the connection was added to
+  //    connections_to_close_set_ or the interface was put into a bad state.
+  // 3) An internal exception may result in program termination.
   //
   // Effects:
   // 1) Records which were deemed invalid upon completion of their headers are
@@ -140,8 +142,12 @@ private:
   //          FCGI_REQUEST_COMPLETE (0). 
   //       2) The appStatus field of the record is equal to
   //          i_ptr_->app_status_on_abort_.
-  //    c) If the request of the record is present has been assigned, the abort
-  //       flag of the associated RequestData object is set.
+  //    c) If the request of the record is present and has been assigned, 
+  //       the abort flag of the associated RequestData object is set. 
+  //       
+  //       Note that a request could have been assigned and the response to 
+  //       the request completed between the time of abort record header
+  //       validation and the call of ProcessCompleteRecord on the abort record.
   // 5) Params, stdin, and data stream records:
   //    a) A null or non-null request identifier may be returned.
   //    b) If the size of the content section of the record is non-zero, the
@@ -217,6 +223,10 @@ private:
   std::uint16_t content_bytes_expected_ {0U};
   std::uint8_t padding_bytes_expected_ {0U};
 
+  // Implementation note:
+  // The value zero is used for type_ as no FastCGI record has this value as a
+  // type. This is appropriate as no record identity has yet been assigned to the
+  // RecordStatus object.
   FCGIType type_ {static_cast<FCGIType>(0U)};
   RequestIdentifier request_id_ {};
 

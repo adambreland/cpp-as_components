@@ -70,7 +70,11 @@ public:
   //    object (strong exception guarantee).
   //
   // Effects:
-  // 1) 
+  // 1) If true was returned, the FCGI_PARAMS byte sequence was used to
+  //    construct an internal environment variable map.
+  // 2) If false was returned, the FCGI_PARAMS byte sequence had a FastCGI
+  //    name-value pair binary formatting error or the list of environment
+  //    variable definitions had distinct definitions for the same variable.
   bool ProcessFCGI_PARAMS();
 
   inline bool get_PARAMS_completion() const noexcept

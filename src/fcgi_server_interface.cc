@@ -71,8 +71,8 @@
 //       connection is corrupted.
 // 2) Invariants on state:
 //    a) The sets dummy_descriptor_set_ and 
-//       (application_closure_request_set_ U connections_to_close_set_)
-//       should be disjoint before and after connection cleanup.
+//       application_closure_request_set_ U connections_to_close_set_ (set
+//       union) should be disjoint before and after connection cleanup.
 //    b) The interface destructor should always be able to safely destroy the
 //       interface by:
 //       1) Closing the connections in either of write_mutex_map_ or
@@ -457,6 +457,14 @@ int FCGIServerInterface::AcceptConnection()
 
 std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 {
+  auto InterfaceCheck = [this]()->void
+  {
+    if(bad_interface_state_detected_)
+      throw std::runtime_error {"The interface was found to be "
+        "corrupt in a call to "
+        "fcgi_si::FCGIServerInterface::AcceptRequests."};
+  };
+
   std::vector<FCGIRequest> requests {};
   
   // CLEANUP
@@ -466,9 +474,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock 
       {FCGIServerInterface::interface_state_mutex_};
-
-    if(bad_interface_state_detected_)
-      throw std::logic_error {"The interface was found to be corrupt."};
+    InterfaceCheck();
 
     // Remove dummy descriptors if possible.
     //
@@ -529,6 +535,8 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     // connections_to_close_set_ and application_closure_request_set_. This
     // is necessary as the presence of a descriptor in both categories of
     // descriptors may result in double closure.
+    // TODO Formally prove this property and include proof in supporting
+    // documentation.
     ConnectionClosureProcessing(&connections_to_close_set_,
       connections_to_close_set_.begin(), connections_to_close_set_.end(),
       &application_closure_request_set_, application_closure_request_set_.begin(),
@@ -607,6 +615,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         // ACQUIRE interface_state_mutex_.
         std::lock_guard<std::mutex> interface_state_lock
           {FCGIServerInterface::interface_state_mutex_};
+        InterfaceCheck();
 
         std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
           write_mutex_map_iter {write_mutex_map_.find(fd)};

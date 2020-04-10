@@ -16,50 +16,62 @@ RequestData::RequestData(uint16_t role, bool close_connection)
 
 bool RequestData::ProcessFCGI_PARAMS()
 {
-  if(FCGI_PARAMS_.size())
+  try
   {
-    using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
-
-    std::vector<byte_seq_pair> name_value_pair_list
-      {ExtractBinaryNameValuePairs(FCGI_PARAMS_.data(), FCGI_PARAMS_.size())};
-
-    if(name_value_pair_list.size())
+    if(FCGI_PARAMS_.size())
     {
-      auto first_component_comp =
-        [](const byte_seq_pair& lhs, const byte_seq_pair& rhs)->bool
-        {
-          return lhs.first < rhs.first;
-        };
+      using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
-      std::sort(name_value_pair_list.begin(), name_value_pair_list.end(),
-        first_component_comp);
-      auto current = name_value_pair_list.begin();
-      auto next = ++name_value_pair_list.begin();
+      std::vector<byte_seq_pair> name_value_pair_list
+        {ExtractBinaryNameValuePairs(FCGI_PARAMS_.data(), FCGI_PARAMS_.size())};
 
-      while(next != name_value_pair_list.end())
+      if(name_value_pair_list.size())
       {
-        if(current->first == next->first)
-        {
-          if(current->second == next->second)
-            ++next;
-          else
-            return false;
-        }
-        else
-        {
-          environment_map_.emplace_hint(environment_map_.end(),
-            std::move(*current));
-          current = next;
-          ++next;
-        }
-      }
-      environment_map_.emplace_hint(environment_map_.end(), std::move(*current));
-    }
-    else // ExtractBinaryNameValuePairs found a formatting error.
-      return false;
-  }
+        auto first_component_comp =
+          [](const byte_seq_pair& lhs, const byte_seq_pair& rhs)->bool
+          {
+            return lhs.first < rhs.first;
+          };
 
-  return true;
+        std::sort(name_value_pair_list.begin(), name_value_pair_list.end(),
+          first_component_comp);
+
+        auto current = name_value_pair_list.begin();
+        auto next = ++(name_value_pair_list.begin());
+
+        while(next != name_value_pair_list.end())
+        {
+          if(current->first == next->first)
+          {
+            if(current->second == next->second)
+              ++next;
+            else
+              return false; 
+              // A list of environment variables was sent which had distinct
+              // definitions for the same variable. Regard the list as corrupt.
+          }
+          else
+          {
+            environment_map_.emplace_hint(environment_map_.end(),
+              std::move(*current));
+            current = next;
+            ++next;
+          }
+        }
+        environment_map_.emplace_hint(environment_map_.end(), 
+          std::move(*current));
+      }
+      else // ExtractBinaryNameValuePairs found a formatting error.
+        return false;
+    }
+
+    return true;
+  }
+  catch(...)
+  {
+    environment_map_.clear();
+    throw;
+  }
 }
 
 } // namespace fcgi_si

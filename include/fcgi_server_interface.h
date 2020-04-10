@@ -57,20 +57,19 @@ class FCGIServerInterface {
 
   // HELPER FUNCTIONS
 
-  // AcceptConnection wraps the accept system call. It performs socket error
+  //    AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation. When a connection is accepted,
   // interface state is updated so that requests can be received over the
   // connection.
-  //
-  // It is intended that AcceptConnection is called in a loop in the
+  //    It is intended that AcceptConnection is called in a loop in the
   // implementation of AcceptRequests. When -1 is returned, a blocking
   // error must have occurred and the loop should terminate.
+  //
+  // Parameters: none.
   //
   // Preconditions:
   // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
   //    a listening socket.
-  //
-  // Parameters: none.
   //
   // Synchronization:
   // 1) May implicitly acquire and release interface_state_mutex_.
