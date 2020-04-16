@@ -4,7 +4,6 @@
 #include <mutex>
 #include <vector>
 
-#include "external/error_handling/include/error_handling.h"
 #include "external/socket_functions/include/socket_functions.h"
 
 #include "include/fcgi_request.h"
@@ -418,8 +417,8 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
           throw;
         }
         std::error_code ec {errno, std::system_category()};
-        throw std::system_error {ec, ERRNO_ERROR_STRING("read from a call to "
-          "NonblockingSocketRead")};
+        throw std::system_error {ec, "read from a call to "
+          "NonblockingSocketRead"};
       }
     }
     // Processed received bytes.

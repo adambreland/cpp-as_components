@@ -178,13 +178,12 @@ class FCGIRequest {
   template<typename ByteIter>
   bool WriteError(ByteIter begin_iter, ByteIter end_iter);
 
-  // No copy or default construction.
+  // No default construction or copy.
   FCGIRequest() = delete;
-
   FCGIRequest(const FCGIRequest&) = delete;
-  FCGIRequest(FCGIRequest&&) noexcept;
-
   FCGIRequest& operator=(const FCGIRequest&) = delete;
+  
+  FCGIRequest(FCGIRequest&&) noexcept;
   FCGIRequest& operator=(FCGIRequest&&) noexcept;
 
   ~FCGIRequest();

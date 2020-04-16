@@ -17,7 +17,6 @@
 #include <utility>
 #include <vector>
 
-#include "external/error_handling/include/error_handling.h"
 #include "external/socket_functions/include/socket_functions.h"
 
 #include "include/fcgi_request.h"
@@ -198,8 +197,8 @@ FCGIRequest::FCGIRequest(
      || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
   {
     interface_ptr_->bad_interface_state_detected_ = true; 
-    throw std::logic_error {ERROR_STRING("An FCGIRequest could not be "
-      "constructed.")};
+    throw std::logic_error {"An FCGIRequest could not be "
+      "constructed."};
   }
 
   // TODO double check noexcept specifications for move assignments.
@@ -363,16 +362,16 @@ bool FCGIRequest::AbortStatus()
   {
     completed_ = true;
     was_aborted_ = true;
-    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
-      "with an FCGIRequest object was destroyed before the request.")};
+    throw std::runtime_error {"The FCGIServerInterface associated "
+      "with an FCGIRequest object was destroyed before the request."};
   }
   // Check if the interface is in a bad state.
   if(interface_ptr_->bad_interface_state_detected_)
   {
     completed_ = true;
     was_aborted_ = true;
-    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
-      "with an FCGIRequest object was in a bad state.")};
+    throw std::runtime_error {"The FCGIServerInterface associated "
+      "with an FCGIRequest object was in a bad state."};
   }
   // Check if the connection has been closed by the interface.
   if(request_data_ptr_->connection_closed_by_interface_)
@@ -495,16 +494,16 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   {
     completed_   = true;
     was_aborted_ = true;
-    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
-      "with an FCGIRequest object was destroyed before the request.")};
+    throw std::runtime_error {"The FCGIServerInterface associated "
+      "with an FCGIRequest object was destroyed before the request."};
   }
   // Check if the interface is in a bad state.
   if(interface_ptr_->bad_interface_state_detected_)
   {
     completed_   = true;
     was_aborted_ = true;
-    throw std::runtime_error {ERROR_STRING("The FCGIServerInterface associated "
-      "with an FCGIRequest object was in a bad state.")};
+    throw std::runtime_error {"The FCGIServerInterface associated "
+      "with an FCGIRequest object was in a bad state."};
   }
   // Check if the interface has closed the connection.
   if(request_data_ptr_->connection_closed_by_interface_)
@@ -605,8 +604,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         completed_ = true;
         was_aborted_ = true;
         interface_ptr_->RemoveRequest(request_identifier_);
-        throw std::runtime_error {ERROR_STRING("A connection from the "
-          "interface to the client was found which had a corrupted state.")};
+        throw std::runtime_error {"A connection from the "
+          "interface to the client was found which had a corrupted state."};
       }
     }
     // *write_mutex_ptr_ is held.
@@ -677,7 +676,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
                   return false;
               }
               std::error_code ec {errno, std::system_category()};
-              throw std::system_error {ec, ERRNO_ERROR_STRING("select")};
+              throw std::system_error {ec, "select"};
             }
             // else: loop (EINTR is handled)
           }
@@ -719,8 +718,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
             return false;
         }
         std::error_code ec {errno, std::system_category()};
-        throw std::system_error {ec, ERRNO_ERROR_STRING("write from a call to "
-          "socket_functions::SocketWrite")};
+        throw std::system_error {ec, "write from a call to "
+          "socket_functions::SocketWrite"};
       }
     } // End handling incomplete writes. Loop.
   } // Exit write loop.

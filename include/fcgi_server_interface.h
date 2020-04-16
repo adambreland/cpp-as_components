@@ -74,12 +74,12 @@ class FCGIServerInterface {
   //       internal state associated with the connection.
   std::vector<FCGIRequest> AcceptRequests();
 
-  inline int connection_count() const
+  inline std::size_t connection_count() const noexcept
   {
-    return record_status_map_.size();
+    return record_status_map_.size() + dummy_descriptor_set_.size();
   }
 
-  inline bool get_overload() const
+  inline bool get_overload() const noexcept
   {
     return application_overload_;
   }
@@ -100,7 +100,7 @@ class FCGIServerInterface {
   //       FCGI_OVERLOADED and an application status of EXIT_FAILURE.
   //    c) Requests which were previously assigned to the application may
   //       be serviced normally.
-  inline void set_overload(bool overload_status)
+  inline void set_overload(bool overload_status) noexcept
   {
     application_overload_ = overload_status;
   }
@@ -108,8 +108,12 @@ class FCGIServerInterface {
   // TODO explain how addresses are given in the value of the environment
   // variable FCGI_WEB_SERVER_ADDRS as per the FastCGI standard.
   //
+  // TODO explain construction configuration checks and what results in
+  // a throw. The public specification is what will be used when constructing
+  // tests. Construction behavior must conform to the FastCGI standard and
+  // can be more strict.
   FCGIServerInterface(int max_connections, int max_requests,
-    std::uint16_t role, std::int32_t app_status_on_abort = EXIT_FAILURE);
+    std::int32_t app_status_on_abort = EXIT_FAILURE);
 
   // No copy, move, or default construction.
   FCGIServerInterface() = delete;
@@ -145,7 +149,10 @@ class FCGIServerInterface {
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) 
+  // 2) May terminate the program if an exception occurs which could lead
+  //    to a violation of file descriptor usage discipline.
+  // 3) On a throw, interface state is not modified (strong exception
+  //    guarantee).
   //
   // Effects:
   // 1) Connection validation uses several criteria:
@@ -179,12 +186,13 @@ class FCGIServerInterface {
   //
   // Preconditions:
   // 1) interface_state_mutex_ must be held prior to a call.
+  // 2) The descriptor of the request must be valid. In particular, it must
+  //    already be present as a key of request_count_map_.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) Ater a throw, either the connection given by request_id.descriptor()
-  //    was added to connections_to_close_set_ or
-  //    bad_interface_state_detected_ == true.
+  // 2) Ater a throw, either bad_interface_state_detected_ == true or the
+  //    call had no effect.
   //
   // Effects:
   // 1) A RequestData object with the given role and close_connection values
@@ -583,7 +591,6 @@ class FCGIServerInterface {
   std::int32_t app_status_on_abort_;
   int maximum_connection_count_;
   int maximum_request_count_per_connection_;
-  std::uint16_t role_;
   int socket_domain_;
     // A list of IP addresses from which the interface will accept connections.
     // The IP version is given by socket_domain_ (AF_INET or AF_INET6).
