@@ -36,8 +36,6 @@ const     std::vector<std::uint8_t>   FCGI_MAX_REQS
   {'F', 'C', 'G', 'I', '_', 'M', 'A', 'X', '_', 'R', 'E', 'Q', 'S'};
 const     std::vector<std::uint8_t>   FCGI_MPXS_CONNS
   {'F', 'C', 'G', 'I', '_', 'M', 'P', 'X', 'S', '_', 'C', 'O', 'N', 'N', 'S'};
-
-// Implementation Constants (determined by current protocol features)
   // Header byte position definitions
 constexpr std::int_fast32_t            kHeaderVersionIndex            {0};
 constexpr std::int_fast32_t            kHeaderTypeIndex               {1};
@@ -57,7 +55,6 @@ constexpr std::int_fast32_t            kNameValuePairFourByteLength   {(1LU << 3
       // Use LU suffix to avoid overflow - a 32-bit signed integer cannot hold
       // 1 << 31.
 constexpr std::int_fast32_t            kMaxRecordContentByteLength    {(1LU << 16) - 1};
-      // Largest possible value for the type per implicit conversions.
 
 // Enum class for header type values.
 enum class FCGIType : std::uint8_t
@@ -75,6 +72,8 @@ enum class FCGIType : std::uint8_t
   kFCGI_UNKNOWN_TYPE      = 11
 };
 
+// The system-dependent maximum struct iovec array length for scatter-gatter
+// I/O.
 const long iovec_MAX {sysconf(_SC_IOV_MAX)};
 
 } // namespace fcgi_si

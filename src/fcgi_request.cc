@@ -148,16 +148,23 @@
 //   d) A request may never acquire interface_state_mutex_ while a write mutex
 //      is held. Doing so may lead to deadlock.
 //
-// Other disciplines:
-// 1) Only shared data members may be accessed by FCGIRequest. These data
-//    members must be accessed under mutex protection.
-// 2) The FCGIServerInterface data member write_mutex_map_ must not be accessed
-//    directly. A write mutex must only be accessed through an FCGIRequest
-//    object's write_mutex_ptr_. In other words, the mutexes are shared, but
-//    the map which stores them is not. FCGIServerInterface may treat the map
-//    as a non-shared data member which locates shared objects.
-// 3) Of the methods of FCGIServerInterface, only RemoveRequest may be called.
-//    It must be called under mutex protection.
+// 3) Other disciplines:
+//    a) Only shared data members may be accessed by FCGIRequest. These data
+//       members must be accessed under mutex protection.
+//    b) The FCGIServerInterface data member write_mutex_map_ must not be
+//       accessed directly. A write mutex must only be accessed through an
+//       FCGIRequest object's write_mutex_ptr_. In other words, the mutexes are
+//       shared, but the map which stores them is not. FCGIServerInterface may
+//       treat the map as a non-shared data member which locates shared objects.
+//    c) Of the methods of FCGIServerInterface, only RemoveRequest may be
+//       called. It must be called under mutex protection.
+//
+// 4) General notes:
+// a) The destructor of an FCGIRequest object acquires and releases
+//    FCGIServerInterface::interface_state_mutex_. This is not problematic
+//    when requests are destroyed within the scope of user code. It will
+//    lead to deadlock in implementation code if the destructor is executed
+//    in a scope which owns the interface mutex.
 namespace fcgi_si {
 
 // Implementation notes:
@@ -190,7 +197,7 @@ FCGIRequest::FCGIRequest(
      || write_mutex_ptr == nullptr || bad_connection_state_ptr_ == nullptr)
      || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
   {
-    interface_ptr_->bad_interface_state_detected_ = true;
+    interface_ptr_->bad_interface_state_detected_ = true; 
     throw std::logic_error {ERROR_STRING("An FCGIRequest could not be "
       "constructed.")};
   }

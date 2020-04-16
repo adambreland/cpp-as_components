@@ -49,30 +49,38 @@
 //          by a request as requests follow the discipline of only acquiring a
 //          write mutex while holding the interface mutex.
 //       5) Acquire and release other write mutexes if needed.
-//       6) Implicitly destroy the write mutexes.
+//       6) Implicitly destroy the write mutexes (such as by erasing nodes of
+//          write_mutex_map_).
 //       7) Update interface state so that any requests which still exist for
 //          a connection whose write mutex was destroyed will not try to
 //          acquire the destroyed write mutex.
-//    d) File descriptor invalidation through calling close on the descriptor
-//       may only occur under the protection of the interface mutex. Requests
-//       treat mutex validity and file descriptor validity as equivalent.
-//       These properties are currently signaled through the 
+//       8) Release interface_state_mutex_.
+//    d) File descriptor invalidation for an active connection by calling close
+//       on the descriptor may only occur:
+//       Either 1) Under the protection of the interface mutex.
+//       Or     2) After the connection_closed_by_interface_ flag has
+//                 been set under the protection of the interface mutex.
+//       Requests treat mutex validity and file descriptor validity as 
+//       equivalent. These properties are currently signaled through the 
 //       connection_closed_by_interface_ flag of the RequestData object of the
 //       request.
+//
 // 2) State checks after mutex acquisition:
 //    a) Whenever interface_state_mutex_ is obtained with the intention of
-//       using interface state for an action other than interface destruction, 
-//       bad_interface_state_detected_ must be checked. If true, some part of
-//       the shared interface state is corrupt. An exception should be thrown.
-//       The interface should be destroyed.
+//       reading shared interface state, bad_interface_state_detected_ must be 
+//       checked. If this flag was set, some part of the shared interface state
+//       is corrupt. An exception should be thrown. The interface should be 
+//       destroyed.
 //    b) Whenever a write mutex is obtained with the intention of writing data
-//       to the connection protected by the interface, the boolean value 
+//       to the connection protected by the mutex, the boolean value 
 //       associated with the write mutex must be checked. If true, the
-//       connection is corrupted.
-// 2) Invariants on state:
+//       connection is corrupted. The write cannot proceed.
+//
+// 3) Invariants on state:
 //    a) The sets dummy_descriptor_set_ and 
 //       application_closure_request_set_ U connections_to_close_set_ (set
-//       union) should be disjoint before and after connection cleanup.
+//       union) should be disjoint before and after the connection cleanup
+//       process of AcceptRequests.
 //    b) The interface destructor should always be able to safely destroy the
 //       interface by:
 //       1) Closing the connections in either of write_mutex_map_ or
@@ -80,6 +88,9 @@
 //       2) Closing the connections in dummy_descriptor_set_.
 //       Any action which would prevent safe destruction must result in
 //       program termination.
+//    c) If a connection is corrupted from a write which wrote some but not all
+//       of its data, the boolean value associated with the write mutex of the
+//       connection must be set under the protection of the mutex.
 namespace fcgi_si {
 
 // Initialize static class data members.
@@ -131,7 +142,7 @@ FCGIServerInterface(int max_connections, int max_requests,
     throw std::invalid_argument {ERROR_STRING(error_message)};
 
   // Ensure that the supplied listening socket is non-blocking. This property
-  // is assumed in the design of the AcceptRequests() loop.
+  // is assumed in the design of the AcceptRequests loop.
   int flags = fcntl(FCGI_LISTENSOCK_FILENO, F_GETFL);
   if(flags == -1)
     throw std::runtime_error {ERRNO_ERROR_STRING("fcntl with F_GETFL")};
@@ -290,11 +301,14 @@ FCGIServerInterface::~FCGIServerInterface()
 int FCGIServerInterface::AcceptConnection()
 {
   struct sockaddr_storage new_connection_address;
+  struct sockaddr* address_ptr
+    {static_cast<struct sockaddr*>(static_cast<void*>(&new_connection_address))};
   socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
   int accept_return {};
-  while((accept_return = accept(FCGI_LISTENSOCK_FILENO,
-    (struct sockaddr*)&new_connection_address, &new_connection_address_length))
-    == -1 && errno == EINTR)
+
+  while((accept_return = accept(FCGI_LISTENSOCK_FILENO, address_ptr, 
+    &new_connection_address_length)) == -1 && (errno == EINTR || 
+    errno == ECONNABORTED))
   {
     new_connection_address_length = sizeof(struct sockaddr_storage);
   }
@@ -302,39 +316,25 @@ int FCGIServerInterface::AcceptConnection()
   {
     if(errno == EWOULDBLOCK || errno == EAGAIN)
       return -1;
-    else if(errno == ECONNABORTED)
-      return 0;
     else
     {
       std::error_code ec {errno, std::system_category()};
       throw std::system_error(ec, "accept");
     }
   }
-  // The call to accept() returned a file descriptor for a new connected socket.
+
   int new_socket_descriptor {accept_return};
 
-  // Check that the connected socket has the same domain as the listening
-  // socket and that it is a stream socket.
   int getsockopt_int_buffer {};
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
   int getsockopt_return {};
 
   while((getsockopt_return = getsockopt(new_socket_descriptor,
-    SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 && errno == EINTR)
-    continue;
-  if(getsockopt_return == -1)
-  {
-    std::error_code ec {errno, std::system_category()};
-    throw std::system_error(ec, "getsockopt with SO_DOMAIN");
-  }
-  int new_socket_domain {getsockopt_int_buffer};
-
-  getsockopt_int_buffer_size = sizeof(int);
-  while((getsockopt_return = getsockopt(new_socket_descriptor,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1 && errno == EINTR)
-    continue;
+  {
+    getsockopt_int_buffer_size = sizeof(int);
+  }
   if(getsockopt_return == -1)
   {
     std::error_code ec {errno, std::system_category()};
@@ -342,36 +342,82 @@ int FCGIServerInterface::AcceptConnection()
   }
   int new_socket_type {getsockopt_int_buffer};
 
+  // Check if the interface is overloaded, the maximum connection count was
+  // met, or is of an incorrect type. Reject by closing if so.
+  if(application_overload_ || 
+     record_status_map_.size() >= maximum_connection_count_ ||
+     new_socket_type != SOCK_STREAM)
+  {
+    int close_return {close(new_socket_descriptor)};
+    if(close_return == -1)
+    {
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "close"};
+    }
+    return 0;
+  }
+
+  getsockopt_int_buffer_size = sizeof(int);
+  while((getsockopt_return = getsockopt(new_socket_descriptor,
+    SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
+    == -1 && errno == EINTR)
+  {
+    getsockopt_int_buffer_size = sizeof(int);
+  }
+  if(getsockopt_return == -1)
+  {
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error(ec, "getsockopt with SO_DOMAIN");
+  }
+  int new_socket_domain {getsockopt_int_buffer};
+
   // Perform address validation against the list of authorized addresses
   // if applicable. A non-empty set implies an internet domain.
   std::string new_address {};
+  bool valid_address {true};
   if(valid_ip_address_set_.size())
   {
     char address_array[INET6_ADDRSTRLEN];
-    void* addr_ptr {(new_socket_domain == AF_INET) ?
-      (void*)&(((struct sockaddr_in*)&new_connection_address)->sin_addr)
-      : (void*)&(((struct sockaddr_in6*)&new_connection_address)->sin6_addr)};
-    if(!inet_ntop(new_socket_domain, addr_ptr, address_array, INET6_ADDRSTRLEN))
+    void* addr_ptr {nullptr};
+
+    // Handle both IPv4 and IPv6.
+    if(new_socket_domain == AF_INET)
     {
-      std::error_code ec {errno, std::system_category()};
-      throw std::system_error(ec, "inet_ntop");
+      struct sockaddr_in* inet_addr_ptr {static_cast<struct sockaddr_in*>(
+        static_cast<void*>(&new_connection_address))};
+      addr_ptr = &(inet_addr_ptr->sin_addr);
     }
-    new_address = address_array;
+    else if(new_socket_domain == AF_INET6)
+    {
+      struct sockaddr_in6* inet_addr_ptr {static_cast<struct sockaddr_in6*>(
+        static_cast<void*>(&new_connection_address))};
+      addr_ptr = &(inet_addr_ptr->sin6_addr);
+    }
+    
+    if(addr_ptr)
+    {     
+      if(!inet_ntop(new_socket_domain, addr_ptr, address_array, 
+        INET6_ADDRSTRLEN))
+      {
+        std::error_code ec {errno, std::system_category()};
+        throw std::system_error(ec, "inet_ntop");
+      }
+      new_address = address_array;
+      valid_address = (valid_ip_address_set_.find(new_address) 
+        != valid_ip_address_set_.end());
+    }
+    else
+      valid_address = false;
   }
 
-  // Validate the new connected socket against the gathered information.
-  if(new_socket_domain != socket_domain_ || new_socket_type != SOCK_STREAM
-     || (valid_ip_address_set_.size() > 0U
-         && (valid_ip_address_set_.find(new_address) ==
-             valid_ip_address_set_.end())))
+  // Validate the new connected socket against domain and address.
+  if(new_socket_domain != socket_domain_ || !valid_address)
   {
-    try {linux_scw::CloseWithErrorCheck(new_socket_descriptor);}
-    catch(std::runtime_error& e)
+    int close_return {close(new_socket_descriptor)};
+    if(close_return == -1)
     {
-      std::string error_message {e.what()};
-      error_message += ERROR_STRING("A call to CloseWithErrorCheck threw an "
-        "error which could not be handled.");
-      throw std::runtime_error {error_message};
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "close"};
     }
     return 0;
   }
@@ -464,11 +510,14 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         "corrupt in a call to "
         "fcgi_si::FCGIServerInterface::AcceptRequests."};
   };
-
-  std::vector<FCGIRequest> requests {};
   
-  // CLEANUP
-  { 
+  // Check for previously-created requests that could not be returned because
+  // of an error.
+  if(request_buffer_on_throw_.size())
+    return std::move(request_buffer_on_throw_);
+
+  // CLEANUP CONNECTIONS
+  {
     // Start of interface_state_lock handling block.
 
     // ACQUIRE interface_state_mutex_.
@@ -482,11 +531,12 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     // Removal of a descriptor from dummy_descriptor_set_ and calling close on
     // that descriptor must be transactional. If performance of these actions
     // was not a transactional step, the following scenario is possible:  
-    // 1) The descriptor is released for use but not removed from  
-    //    dummy_descriptor_set_.
+    // 1) The descriptor is released for use by calling close but is not 
+    //    removed from dummy_descriptor_set_.
     // 2) The descriptor is allocated for use by the application.
-    // 3) When the destructor of the interface executes, the descriptor is 
-    //    spuriously closed as the descriptor remained in dummy_descriptor_set_.
+    // 3) When the destructor of the interface executes, the descriptor, which
+    //    is now in use by the application, is spuriously closed as the 
+    //    descriptor remained in dummy_descriptor_set_.
     for(auto dds_iter {dummy_descriptor_set_.begin()};
         dds_iter != dummy_descriptor_set_.end(); /*no-op*/)
     {
@@ -535,6 +585,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     // connections_to_close_set_ and application_closure_request_set_. This
     // is necessary as the presence of a descriptor in both categories of
     // descriptors may result in double closure.
+    //
     // TODO Formally prove this property and include proof in supporting
     // documentation.
     ConnectionClosureProcessing(&connections_to_close_set_,
@@ -549,11 +600,9 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
   // For example, some glibc implementations have an upper limit of 1023 for
   // file descriptor values due to the size of FD_SET (which is just an integer
   // type used as a bitset).
-  //
-  // Construct a descriptor set to wait on for select.
+
   fd_set read_set;
   FD_ZERO(&read_set);
-  // Add listening socket to read_set for new connections.
   FD_SET(FCGI_LISTENSOCK_FILENO, &read_set);
   // 0 + 1 = 1 Set for proper select call if no connected sockets are present.
   int number_for_select {1};
@@ -567,80 +616,181 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
       FD_SET(map_reverse_iter->first, &read_set);
   }
 
-  // Wait for data to be available or new connections to be available.
   int select_return {};
   while((select_return =
     select(number_for_select, &read_set, nullptr, nullptr, nullptr))
     == -1 && (errno == EINTR || errno == EAGAIN))
     continue;
-  if(select_return == -1) // Unrecoverable error from select().
+  if(select_return == -1)
   {
     // TODO Are there any situations that could cause select to return EBADF
     // from a call with only a non-null read set other than one of the file
     // descriptors not being open?
     if(errno == EBADF)
     {
-      // ACQUIRE interface_state_mutex_
-      std::unique_lock<std::mutex> unique_interface_state_lock
-        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
       try
       {
-        unique_interface_state_lock.lock();
-      }
+        // ACQUIRE interface_state_mutex_
+        std::unique_lock<std::mutex> interface_state_lock
+          {FCGIServerInterface::interface_state_mutex_};
+        bad_interface_state_detected_ = true;
+      } // RELEASE interface_state_mutex_
       catch(...)
       {
         std::terminate();
       }
-      bad_interface_state_detected_ = true;
-    } // RELEASE interface_state_mutex_
+    } 
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "select"};
   }
-  // Check connected sockets (as held in record_status_map_) before the
-  // listening socket.
-  int connections_read {0};
-  for(auto it = record_status_map_.begin();
-      (it != record_status_map_.end()) && (connections_read < select_return);
-      ++it)
-  {
-    // Extract file descriptor and check if it is ready.
-    int fd {it->first};
-    if(FD_ISSET(fd, &read_set))
-    {
-      connections_read++;
-      std::vector<RequestIdentifier> request_identifiers
-        {it->second.ReadRecords()};
-      if(request_identifiers.size())
-      {
-        // ACQUIRE interface_state_mutex_.
-        std::lock_guard<std::mutex> interface_state_lock
-          {FCGIServerInterface::interface_state_mutex_};
-        InterfaceCheck();
 
-        std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
-          write_mutex_map_iter {write_mutex_map_.find(fd)};
-        std::mutex* write_mutex_ptr 
-          {write_mutex_map_iter->second.first.get()};
-        bool* write_mutex_bad_state_ptr
-          {&(write_mutex_map_iter->second.second)};
-        // For each request_id, find the associated RequestData object, extract
-        // a pointer to it, and create an FCGIRequest object from it.
-        for(RequestIdentifier request_id : request_identifiers)
+  std::vector<FCGIRequest> requests {};
+
+  // This list length variable is assigned to at the end of each iteration of
+  // the below for loop. It allows the following case to be detected: 1) some
+  // FCGIRequest objects were added to requests in a loop iteration 2) a throw
+  // occurred in that iteration. In this case, length_at_loop and 
+  // requests.size() will differ.
+  std::vector<FCGIRequest>::size_type length_at_loop {0U};
+
+  // This variable allows the number of connected sockets read in the below
+  // loop to be tracked so that a comparison of select_return and it determines
+  // if select found that peers were waiting for socket connection requests
+  // to be accepted.
+  int connections_read {0};
+
+  // This variable 1) serves as the value of the current file descriptor
+  // where that information is needed in function calls in the loop below and 
+  // 2) allows, in the case that a throw occurred during a loop iteration, the
+  // value of the file descriptor during the iteration to be in scope in the
+  // catch block below.
+  int current_connection {};
+  try
+  {
+    for(auto it = record_status_map_.begin();
+        (it != record_status_map_.end()) && (connections_read < select_return);
+        ++it)
+    {
+      current_connection = it->first;
+      // Call ReadRecords and construct FCGIRequest objects for any application
+      // requests which are complete and ready to be passed to the application.
+      if(FD_ISSET(current_connection, &read_set))
+      {
+        connections_read++;
+        std::vector<RequestIdentifier> request_identifiers
+          {it->second.ReadRecords()};
+        if(request_identifiers.size())
         {
-          RequestData* request_data_ptr
-            {&(request_map_.find(request_id)->second)};
-          FCGIRequest request {request_id,
-            FCGIServerInterface::interface_identifier_, this, request_data_ptr,
-            write_mutex_ptr, write_mutex_bad_state_ptr};
-          requests.push_back(std::move(request));
-        }
-      } // RELEASE interface_state_mutex_.
+          // ACQUIRE interface_state_mutex_.
+          std::unique_lock<std::mutex> unique_interface_state_lock
+            {FCGIServerInterface::interface_state_mutex_};
+          InterfaceCheck();
+
+          std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
+            write_mutex_map_iter {write_mutex_map_.find(current_connection)};
+          if(write_mutex_map_iter == write_mutex_map_.end())
+          {
+            bad_interface_state_detected_ = true;
+            throw std::logic_error {"An expected write mutex and flag pair "
+              "was not present in write_mutex_map_ in a call to "
+              "fcgi_si::FCGIServerInterface::AcceptRequests."};
+          }
+          std::mutex* write_mutex_ptr 
+            {write_mutex_map_iter->second.first.get()};
+          bool* write_mutex_bad_state_ptr
+            {&(write_mutex_map_iter->second.second)};
+
+          // For each request_id, find the associated RequestData object, extract
+          // a pointer to it, and create an FCGIRequest object from it.
+          for(RequestIdentifier request_id : request_identifiers)
+          {
+            std::map<RequestIdentifier, RequestData>::iterator request_data_iter
+              {request_map_.find(request_id)};
+            if(request_data_iter == request_map_.end())
+            {
+              bad_interface_state_detected_ = true;
+              throw std::logic_error {"An expected request "
+                "was not present in request_map_ in a call to "
+                "fcgi_si::FCGIServerInterface::AcceptRequests."};
+            }
+            RequestData* request_data_ptr {&(request_data_iter->second)};
+            
+            // This is a rare instance where an FCGIRequest may be destroyed
+            // within the scope of implementation code. The destructor of
+            // FCGIRequest objects tries to acquire interface_state_mutex_.
+            // See the catch block immediately below.
+            FCGIRequest request {request_id,
+              FCGIServerInterface::interface_identifier_, this, request_data_ptr,
+              write_mutex_ptr, write_mutex_bad_state_ptr};
+            try
+            {
+              requests.push_back(std::move(request));
+            }
+            catch(...)
+            {
+              // Conditionally RELEASE interface_state_mutex_ so that
+              // deadlock will not occur when the destructor of request
+              // executes.
+              unique_interface_state_lock.unlock();
+              throw;
+            }
+          }
+          length_at_loop = requests.size();
+        } // RELEASE interface_state_mutex_.
+      }
     }
+    // Accept new connections if some are present.
+    if(connections_read < select_return)
+      while(AcceptConnection() != -1)
+        continue;
   }
-  // Accept new connections if some are present.
-  if(connections_read < select_return)
-    while(AcceptConnection() != -1)
-      continue;
+  catch(...)
+  {
+    if(requests.size() == 0)
+      throw;
+
+    std::unique_lock<std::mutex> unique_interface_state_lock
+        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+    try
+    {
+      // We need to check if there is a point to try to preserve the request
+      // objects which were created.
+      //
+      // ACQUIRE interface_state_mutex_
+      unique_interface_state_lock.lock();
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
+
+    if(!bad_interface_state_detected_) // We can save the requests.
+    {
+      try
+      {
+        for(std::vector<FCGIRequest>::size_type i {0}; i < length_at_loop; ++i)
+          request_buffer_on_throw_.push_back(std::move(requests[i]));
+      }
+      catch(...)
+      {
+        bad_interface_state_detected_ = true;
+        throw;
+      }
+      
+      if(requests.size() > length_at_loop)
+      {
+        try
+        {
+          connections_to_close_set_.insert(current_connection);
+        }
+        catch(...)
+        {
+          std::terminate();
+        }
+      }
+    }
+    throw;
+  } // RELEASE interface_state_mutex_.
 
   return requests;
 }

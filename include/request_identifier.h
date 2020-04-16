@@ -7,6 +7,9 @@
 
 namespace fcgi_si {
 
+// A value class for identifying a FastCGI request by the connected socket
+// descriptor over which it was sent and its FastCGI request identifier.
+// Instances may be ordered and used as keys in ordered, associative arrays.
 class RequestIdentifier {
 public:
   inline int descriptor() const noexcept

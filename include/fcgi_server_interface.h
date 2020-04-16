@@ -22,6 +22,56 @@ namespace fcgi_si {
 //
 class FCGIServerInterface {
  public:
+
+  // Returns a list of FCGIRequest objects which are ready for service.
+  //
+  // Parameters: none.
+  //
+  // Preconditions:
+  // 1) Signal handling: SIGPIPE must be appropriately handled by the
+  //    application. If SIGPIPE is not handled, the default behavior of
+  //    program termination will apply when it is discovered through a write
+  //    operation that a connection was closed by the peer.
+  //
+  // Effects:
+  // 1) All connections which were ready for reading were read. Internal state
+  //    was updated to reflect the read data.
+  // 2) For FCGI_BEGIN_REQUEST records, if the interface was overloaded or the
+  //    maximum request limit was met at the time of receipt, the request
+  //    was rejected with an FCGI_END_REQUEST record. The protocol status of
+  //    the record was FCGI_OVERLOADED or FCGI_CANT_MPX_CONN as appropriate.
+  //    The application status of the record was EXIT_FAILURE.
+  // 3) For FCGI_ABORT_REQUEST records, either the request was deleted from the
+  //    interface or state was updated so that inspection by the AbortStatus
+  //    method of FCGIRequest will indicate abortion. 
+  //    a) Request erasure occurs if the request had not yet been used to 
+  //       construct an FCGIRequest object. In this case, an FCGI_END_REQUEST
+  //       record was sent for the request. The protocol status was
+  //       FCGI_REQUEST_COMPLETE. The application status was that given by the
+  //       app_status_on_abort variable during interface construction.
+  // 4) If all of the data for a request was received during reading, an
+  //    FCGIRequest object was created for the request. It was added to the
+  //    returned list.
+  // 5) Management requests which were completed during reading were serviced.
+  //    The only currently-recognized management request is FCGI_GET_VALUES. 
+  //    All other management requests receive an FCGI_UNKNOWN_TYPE response.
+  // 6) New connections which were waiting to be accepted were accepted. 
+  //    a) Connections were validated against the list of authorized IP 
+  //       addresses if the list contains addresses. Unauthorized connections 
+  //       were immediately closed.
+  //    b) If the interface was overloaded or the maximum number of connections
+  //       was met, new connections were immediately closed.
+  //    c) Connections were validated for socket domain and socket type. The
+  //       reference domain and type were those determined from 
+  //       FCGI_LISTENSOCK_FILENO during interface construction.
+  // 7) Connections which were scheduled to be closed were closed. Connection
+  //    closure scheduling occurs in two instances:
+  //    a) On the completion of a request for which the FCGI_KEEP_CONN flag was
+  //       not set in the request's FCGI_BEGIN_REQUEST record. Closure will 
+  //       occur even if other requests on the connection have been received
+  //       from the client.
+  //    b) If an error during reading or writing corrupted the connection or
+  //       internal state associated with the connection.
   std::vector<FCGIRequest> AcceptRequests();
 
   inline int connection_count() const
@@ -34,18 +84,37 @@ class FCGIServerInterface {
     return application_overload_;
   }
 
+  // Sets the overload flag of the interface to overload_status. 
+  //
+  // Parameters:
+  // overload_status: True if the interface should be put into the overloaded
+  //                  state. False otherwise.
+  // 
+  // Preconditions: none.
+  //
+  // Effects:
+  // 1) While the flag is set:
+  //    a) All new connections will be accepted and them immediately closed.
+  //    b) All requests for which data receipt was completed will be rejected
+  //       with an FCGI_END_REQUEST record with a protocol status of
+  //       FCGI_OVERLOADED and an application status of EXIT_FAILURE.
+  //    c) Requests which were previously assigned to the application may
+  //       be serviced normally.
   inline void set_overload(bool overload_status)
   {
     application_overload_ = overload_status;
   }
 
-  // No copy, move, or default construction.
-  FCGIServerInterface() = delete;
+  // TODO explain how addresses are given in the value of the environment
+  // variable FCGI_WEB_SERVER_ADDRS as per the FastCGI standard.
+  //
   FCGIServerInterface(int max_connections, int max_requests,
     std::uint16_t role, std::int32_t app_status_on_abort = EXIT_FAILURE);
+
+  // No copy, move, or default construction.
+  FCGIServerInterface() = delete;
   FCGIServerInterface(const FCGIServerInterface&) = delete;
   FCGIServerInterface(FCGIServerInterface&&) = delete;
-
   FCGIServerInterface& operator=(const FCGIServerInterface&) = delete;
   FCGIServerInterface& operator=(FCGIServerInterface&&) = delete;
 
@@ -75,29 +144,28 @@ class FCGIServerInterface {
   // 1) May implicitly acquire and release interface_state_mutex_.
   //
   // Exceptions:
-  // 1) Strong exception guarantee for FCGIServerInterface instance state.
-  // 2) May directly throw:
-  //    a) std::system_error
-  //    b) std::logic_error
+  // 1) May throw exceptions derived from std::exception.
+  // 2) 
   //
   // Effects:
-  // 1) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the
-  //    connection was validated after being accepted, a new connected socket
-  //    with a descriptor equal to the returned value is present. The socket
-  //    is non-blocking. The returned socket descriptor is added to
-  //    record_status_map_, write_mutex_map_, and request_count_map_. The
-  //    appropriate default values are added as map values for the descriptor.
-  // 2) If the connection request was accepted and then rejected or was
-  //    accepted and a non-terminal, non-blocking error was returned by
-  //    accept, 0 is returned. A call to AcceptConnection may be made again.
-  // 3) If a blocking error was returned by accept, -1 is returned.
-  // 4) If accept returned an error which could not be handled, a
-  //    std::runtime_error object is thrown with information on the value of
-  //    errno set by the call to accept.
-  // 5) If another system call returned an error which could not be handled, a
-  //    std::runtime_error object is thrown with information on errno.
-  // 6) If a violation of the invariant on maps which contain socket
-  //    descriptors as keys is found, a std::logic_error object is thrown.
+  // 1) Connection validation uses several criteria:
+  //    a) maximum_connection_count_
+  //    b) application_overload_
+  //    c) If valid_ip_address_set_ is non-empty, whether or not the IP address
+  //       of the connection is in the set.
+  //    d) Whether or not the socket domain and type match socket_domain_ and
+  //       socket_type_, respectively.
+  //    Failure to meet any criterion results in connection rejection.       
+  // 2) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the
+  //    connection was validated after being accepted:
+  //    a) A new connected socket with a descriptor equal to the returned value
+  //       is present.
+  //    b) The socket is non-blocking. 
+  //    c) The returned socket descriptor was added to record_status_map_, 
+  //       write_mutex_map_, and request_count_map_. The appropriate default
+  //       values were added as map values for the descriptor.
+  // 3) If a connection was rejected, 0 was returned.
+  // 4) If a blocking error was returned by accept, -1 was returned.
   int AcceptConnection();
 
   // Attempts to add a new RequestData object to request_map_ while
@@ -164,7 +232,15 @@ class FCGIServerInterface {
   //    of the containers were closed.
   // 3) If a connection had assigned requests, the descriptor of the
   //    connection was added to dummy_descriptor_set_ and the descriptor
-  //    was associated with the description of FCGI_LISTENSOCK_FILENO.
+  //    was associated with the description of FCGI_LISTENSOCK_FILENO in an
+  //    atomic fashion. This allows the connection to be closed while 
+  //    preventing the reuse of the descriptor by the interface while 
+  //    requests which use that descriptor are still present.
+  // 4) For every request which is associated with one of the descriptors in 
+  //    the sets, the connection_closed_by_interface_ flag of the RequestData 
+  //    object of the request was set.
+  // 5) write_mutex_map_ and record_status_map_ are updated to reflect the
+  //    closure of the connections.
   template <typename C>
   void ConnectionClosureProcessing(C* first_ptr, typename C ::iterator 
     first_iter, typename C ::iterator first_end_iter, C* second_ptr, 
@@ -214,7 +290,7 @@ class FCGIServerInterface {
   //       will not be reused until properly processed as a member of 
   //       dummy_desriptor_set_.
   // 5) The element associated with the key connection was removed from
-  //    write_mutex_map_.  
+  //    write_mutex_map_ and record_status_map_.  
   void RemoveConnection(int connection);
 
   // Attemps to remove the request pointed to by request_map_iter from
@@ -513,21 +589,24 @@ class FCGIServerInterface {
     // The IP version is given by socket_domain_ (AF_INET or AF_INET6).
   std::set<std::string> valid_ip_address_set_;
 
-  // The state of the application-set overload flag.
+  // An application-set overload flag.
   bool application_overload_ {false};
 
-  // This map takes the file descriptor of the connection and accesses the
-  // RecordStatus object which summarizes the current state of record receipt
-  // from the client which initiated the connection. Per the FastCGI protocol,
-  // information from the client is a sequence of complete FastCGI records.
+  // This map takes the file descriptor of a connection and accesses the
+  // RecordStatus object of the connection. A RecordStatus object summarizes the 
+  // current state of record receipt from the client which initiated the
+  // connection. Per the FastCGI protocol, information from the client is a
+  // sequence of complete FastCGI records.
   std::map<int, RecordStatus> record_status_map_ {};
 
   // A set for connections which were found to have been closed by the peer or
   // which were corrupted by the interface through a partial write.
-  // Connection closure occurs in a cleanup step.
+  // Connection closure occurs in a cleanup step in AcceptRequests.
   std::set<int> connections_to_close_set_ {};
 
   std::set<int> dummy_descriptor_set_ {};
+
+  std::vector<FCGIRequest> request_buffer_on_throw_ {};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 

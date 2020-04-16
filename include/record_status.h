@@ -35,6 +35,11 @@ public:
   //    b) Has not yet been removed from the interface by a call to 
   //       RemoveConnection.
   //
+  // Synchronization:
+  // 1) May acquire and release interface_state_mutex_.
+  // 2) May implicitly acquire and release the write mutex associated with
+  //    the connection of the RecordStatus object.
+  //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
   // 2) In the event of a throw, either:
@@ -42,7 +47,6 @@ public:
   //    b) The interface was put into a bad state. 
   //    c) The interface was found to be in a bad state and needed information
   //       could not be acquired.
-  //    In either case, additional calls to ReadRecords should not be made.
   // 
   // Effects:
   // 1) Returns a list of request identifiers. This list may be empty. The
@@ -52,7 +56,7 @@ public:
   // 2) The return of an empty list does not indicate an absence of side-
   //    effects. For example, interface state may have been updated to track
   //    partially-complete requests or the interface may have sent the response
-  //    to a FastCGI management request to the client.
+  //    to a FastCGI management request to a client.
   std::vector<RequestIdentifier> ReadRecords();
 
   RecordStatus() = default;
