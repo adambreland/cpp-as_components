@@ -271,7 +271,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
             (type_ == FCGIType::kFCGI_PARAMS) ?
               request_data_ptr->CompletePARAMS() :
             (type_ == FCGIType::kFCGI_STDIN)  ?
-              request_data_ptr->CompleteSTDIN() :
+              request_data_ptr->CompleteSTDIN()  :
               request_data_ptr->CompleteDATA();
 
             // Check if the request is complete. If it is, validate the

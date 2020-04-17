@@ -25,7 +25,7 @@ class FCGIServerInterface;
 // FCGIRequest objects are produced by an instance of FCGIServerInterface. 
 // A request object contains all of the information given to the interface by a
 // client for a FastCGI request. Requests are serviced by inspecting this 
-// information, writing to the FCGI_STDOUT and FCGI_STDERR streams from
+// information, writing to the FCGI_STDOUT and FCGI_STDERR streams with
 // calls to Write and WriteError, respectively, and completing the request by 
 // a call to Complete.
 //
@@ -52,14 +52,13 @@ class FCGIServerInterface;
 // Synchronization:
 // 1) All calls on a particular request must be made in the same thread.
 // 2) Calls on distinct requests in separate threads do not require
-//    synchronization.
+//    synchronization. This is true whether or not requests share
+//    underlying socket connections.
 class FCGIRequest {
  public:
 
   // Returns true if the request was aborted by the client or the interface.
   // Returns false otherwise.
-  //
-  // Parameters: none.
   //
   // Preconditions: none.
   //
@@ -140,6 +139,9 @@ class FCGIRequest {
     return request_stdin_content_;
   }
 
+  // TODO Implement this method!
+  // bool RejectRole(int32_t app_status);
+
   // Attempts to send a byte sequence to the client on the FCGI_STDOUT stream.
   //
   // Parameters:
@@ -184,7 +186,16 @@ class FCGIRequest {
   FCGIRequest& operator=(const FCGIRequest&) = delete;
   
   FCGIRequest(FCGIRequest&&) noexcept;
-  FCGIRequest& operator=(FCGIRequest&&) noexcept;
+
+  // Move assignment may only occur to FCGIRequest objects which have been 
+  // completed or moved from. An exception is thrown if a move is attempted
+  // to an FCGIRequest opbject which is in any other state.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) In the event of a throw, neither the source nor the destination
+  //    FCGIRequest object was modified (strong exception guarantee).
+  FCGIRequest& operator=(FCGIRequest&&);
 
   ~FCGIRequest();
 

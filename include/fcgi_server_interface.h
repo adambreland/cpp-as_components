@@ -25,13 +25,17 @@ class FCGIServerInterface {
 
   // Returns a list of FCGIRequest objects which are ready for service.
   //
-  // Parameters: none.
-  //
   // Preconditions:
   // 1) Signal handling: SIGPIPE must be appropriately handled by the
   //    application. If SIGPIPE is not handled, the default behavior of
   //    program termination will apply when it is discovered through a write
   //    operation that a connection was closed by the peer.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) An unrecoverable error from a system call causes a std::system_error
+  //    exception to be thrown with the value of errno set by the call.
+  // 3) 
   //
   // Effects:
   // 1) All connections which were ready for reading were read. Internal state
@@ -71,47 +75,112 @@ class FCGIServerInterface {
   //       occur even if other requests on the connection have been received
   //       from the client.
   //    b) If an error during reading or writing corrupted the connection or
-  //       internal state associated with the connection.
+  //       corrupted internal state associated with the connection.
+  //    Corruption is associated with errors; exceptions are thrown at the
+  //    source of the error.
   std::vector<FCGIRequest> AcceptRequests();
 
+  // Gets the current number of connected sockets which were accepted by
+  // the listening socket associated with FCGI_LISTENSOCK_FILENO.
+  //
+  // Preconditions: none.
   inline std::size_t connection_count() const noexcept
   {
     return record_status_map_.size() + dummy_descriptor_set_.size();
   }
 
+  // Returns the current overload status of the interface. Returns false
+  // unless the interface was put into an overloaded state by a call of
+  // set_overload(true).
+  //
+  // Preconditions: none.
   inline bool get_overload() const noexcept
   {
     return application_overload_;
   }
 
+  // Returns the current state of the interface. False indicates that the
+  // interface is in a bad state and should be destroyed.
+  //
+  // Preconditions: none.
+  //
+  // Exceptions:
+  // 1) Throws std::system_error if the sychronization primitive used to
+  //    access interface state encounters an error.
+  bool interface_status() const;
+
   // Sets the overload flag of the interface to overload_status. 
   //
   // Parameters:
   // overload_status: True if the interface should be put into the overloaded
-  //                  state. False otherwise.
+  //                  state. False if the interface should be put into the
+  //                  regular state.
   // 
   // Preconditions: none.
   //
   // Effects:
   // 1) While the flag is set:
-  //    a) All new connections will be accepted and them immediately closed.
-  //    b) All requests for which data receipt was completed will be rejected
-  //       with an FCGI_END_REQUEST record with a protocol status of
-  //       FCGI_OVERLOADED and an application status of EXIT_FAILURE.
-  //    c) Requests which were previously assigned to the application may
-  //       be serviced normally.
+  //    a) All new connections will be accepted and then immediately closed.
+  //    b) If the maximum number of requests on a connection is not met, all
+  //       requests initiated with an FCGI_BEGIN_REQUEST record on the
+  //       connection will be rejected with an FCGI_END_REQUEST record. The
+  //       protocol status of the record will be FCGI_OVERLOADED. The
+  //       application status of the record will be EXIT_FAILURE.
+  //    c) Requests which were previously accepted from the receipt of an
+  //       FCGI_BEGIN_REQUEST record will continue to receive data.
+  //    d) Requests which were previously assigned to the application through
+  //       the production of an FCGIRequest object may be serviced normally.
   inline void set_overload(bool overload_status) noexcept
   {
     application_overload_ = overload_status;
   }
 
-  // TODO explain how addresses are given in the value of the environment
-  // variable FCGI_WEB_SERVER_ADDRS as per the FastCGI standard.
+  // Parameters:
+  // max_connections:     The maximum number of currently-active socket 
+  //                      connections of those which were accepted by the
+  //                      listening socket given by FCGI_LISTENSOCK_FILENO.
+  // max_requests:        The maximum number of active requests for a
+  //                      socket connection.
+  // app_status_on_abort: The application status which will be returned by the
+  //                      interface in the case that:
+  //                      a) An abort is requested by the client with an 
+  //                         FCGI_ABORT_REQUEST record. 
+  //                      b) The request has yet to be assigned to the
+  //                         application by the generation of an FCGIRequest
+  //                         object.
   //
-  // TODO explain construction configuration checks and what results in
-  // a throw. The public specification is what will be used when constructing
-  // tests. Construction behavior must conform to the FastCGI standard and
-  // can be more strict.
+  // Preconditions:
+  // 1) Signal handling: SIGPIPE must be handled by the application. Failure to
+  //    handle SIGPIPE will result in the default behavior of program
+  //    termination upon the discovery of a closed socket connection by a
+  //    write.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) An unrecoverable error from a system call causes a std::system_error
+  //    exception to be thrown with the value of errno set by the call.
+  // 3) (Configuration errors) An exception is thrown if:
+  //    a) Either of max_connections or max_requests is less than or equal to
+  //       zero.
+  //    b) The socket type of the socket associated with FCGI_LISTENSOCK_FILENO
+  //       is not SOCK_STREAM.
+  //    c) The socket associated with FCGI_LISTENSOCK_FILENO is not listening.
+  //    d) The socket domain of the listening socket is AF_INET or AF_INET6,
+  //       FCGI_WEB_SERVER_ADDRS is bound to a non-empty value, and no
+  //       valid addresses are found when that value is processed. An address
+  //       is valid if inet_pton finds the address to be valid when given the
+  //       appropriate socket domain.
+  //    e) During construction, another FCGIServerInterface object exists.
+  //       Only a single FCGIServerInterface may be active at a time.
+  //
+  // Effects:
+  // 1) The FCGIServerInterface object is ready to be used in a loop which
+  //    calls AcceptRequests to update interface state as clients request
+  //    connections and send request data.
+  // 2) The new interface object is differentiated from recent, previous 
+  //    objects. The new interface is safe to use in the presence of 
+  //    FCGIRequest objects which were recently generated from a previous
+  //    interface.
   FCGIServerInterface(int max_connections, int max_requests,
     std::int32_t app_status_on_abort = EXIT_FAILURE);
 

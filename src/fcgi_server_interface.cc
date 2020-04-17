@@ -318,7 +318,7 @@ FCGIServerInterface::~FCGIServerInterface()
 
 int FCGIServerInterface::AcceptConnection()
 {
-  // A local RAII class for the returned socket descriptor from a call to
+  // A local RAII class for the socket descriptor returned from a call to
   // accept.
   class UniqueDescriptor {
    public:
@@ -911,6 +911,14 @@ void FCGIServerInterface::AddRequest(RequestIdentifier request_id,
     throw;
   }
 }
+
+bool FCGIServerInterface::interface_status() const
+{
+  // ACQUIRE interface_state_mutex_.
+  std::lock_guard<std::mutex> interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_};
+  return bad_interface_state_detected_;
+} // RELEASE interface_state_mutex_.
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.

@@ -243,10 +243,13 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.completed_ = true;
 }
 
-FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request) noexcept
+FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
 {
   if(this != &request)
   {
+    if((!completed_ || associated_interface_id_ != 0))
+      throw std::logic_error {""};
+
     associated_interface_id_ = request.associated_interface_id_;
     interface_ptr_ = request.interface_ptr_;
     request_identifier_ = request.request_identifier_;
