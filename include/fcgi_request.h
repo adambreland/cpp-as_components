@@ -19,7 +19,7 @@
 namespace fcgi_si {
 
 // Forward declaration to break the cyclic dependencies between FCGIRequest
-// and FCGIServerInterface includes directives.
+// and FCGIServerInterface include directives.
 class FCGIServerInterface;
 
 // FCGIRequest objects are produced by an instance of FCGIServerInterface. 
@@ -72,7 +72,7 @@ class FCGIRequest {
   // Completes the response of an FCGIRequest object.
   //
   // Parameters:
-  // app_status: The applicaton status that would be returned at the exit of an
+  // app_status: The application status that would be returned at the exit of an
   //             equivalent CGI program which served the request. This value is
   //             encoded in the FCGI_END_REQUEST record sent by the interface
   //             to the client.
@@ -132,7 +132,7 @@ class FCGIRequest {
     return environment_map_;
   }
 
-  // Default-contructed and moved-from requests have a role value of zero.
+  // Default-constructed and moved-from requests have a role value of zero.
   // This value does not correspond to any FastCGI role.
   inline uint16_t get_role() const noexcept
   {
@@ -275,7 +275,7 @@ class FCGIRequest {
   // and protocol status of the record are as given.
   //
   // Parameters:
-  // app_status:      The applicaton status that would be returned at the exit
+  // app_status:      The application status that would be returned at the exit
   //                  of an equivalent CGI program which served the request.
   //                  This value is encoded in the FCGI_END_REQUEST record sent
   //                  by the interface to the client.

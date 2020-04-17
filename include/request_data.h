@@ -12,8 +12,6 @@ enum class RequestStatus {kRequestPending, kRequestAssigned};
 
 class RequestData {
 public:
-  // TODO Add a member function which is essentially a helper function
-  // for FCGIRequest.
 
   using size = std::allocator_traits<std::allocator<std::uint8_t>>::size_type;
 

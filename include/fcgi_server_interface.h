@@ -17,13 +17,68 @@
 
 namespace fcgi_si {
 
+//    FCGIServerInterface is a singleton class which implements the majority of
+// the FastCGI protocol for application servers. This class and its
+// associated class FCGIRequest are intended to support multi-threaded
+// applications. FCGIRequest objects are produced by the AcceptRequests
+// method of FCGIServerInterface. A request object may be moved to a worker
+// thread and serviced from it. Methods of FCGIRequest allow request response
+// to be performed without explicit synchronization between threads.
+//    The thread which houses the instance of FCGIServerInterface is intended
+// to execute calls to AcceptRequest in a loop. The FCGIRequest objects
+// produced by these calls may be moved to a concurrent queue or otherwise
+// exposed to worker threads. The interface fully supports multiple concurrent
+// connections and request multiplexing over a single connection as specified
+// by the FastCGI protocol. AcceptRequests uses I/O multiplexing on connections
+// and will block until new connection requests or request data are present.
+//
+// Configuration:
+//    FCGI_LISTENSOCK_FILENO: The interface expects, as per the FastCGI 
+// protocol, that STDIN_FILENO is bound to a listening socket before
+// construction begins. FCGI_LISTENSOCK_FILENO is an alias for STDIN_FILENO.
+//
+//    The interface is configured with:
+// a) A maximum number of concurrent connections.
+// b) A maximum number of active requests for a connection.
+// c) A default response if a request is aborted by a client before notice of
+//    receipt of the request was given by the interface to the application.
+// d) For internet domain sockets (AF_INET and AF_INET6), the environment
+//    variable FCGI_WEB_SERVER_ADDRS is inspected during interface construction
+//    to generate a list of authorized IP addresses.
 // 
+// Overloaded state:
+//    The interface may be put into and removed from an overloaded state. This
+// state allows previously-received requests to be serviced while preventing
+// new requests or connections from being accepted. 
 //
+// Bad state:
+//    During use, the interface or FCGIRequest objects produced by the
+// interface may encounter errors which corrupt the state of the interface.
+// In this case, the interface assumes a bad state. The current state of the
+// interface may be queried by calling interface_status. Once in a bad state,
+// the interface should be destroyed.
+//    Synchronization between the destruction of an interface and the
+// destruction of FCGIRequest objects produced by the interface need not be
+// explicitly handled.
 //
+// Synchronization:
+//    It is expected that all methods of FCGIServerInterface are called on
+// the interface from the same thread which houses the interface. In other
+// words, interface method calls are not thread safe. In particular, putting
+// the interface into or removing the interface from an overloaded state
+// should be performed synchronously with the thread which houses the interface.
+//
+// Program termination:
+//    It may occur that an underlying system error would prevent an invariant
+// from being maintained. In these cases, the interface terminates the program
+// by calling std::terminate. A termination handler is not registered by the
+// interface.
 class FCGIServerInterface {
  public:
 
-  // Returns a list of FCGIRequest objects which are ready for service.
+  // Attempts to return a list of FCGIRequest objects which are ready for 
+  // service. Attempts to update internal state as appropriate for data and
+  // connection requests sent by clients. 
   //
   // Preconditions:
   // 1) Signal handling: SIGPIPE must be appropriately handled by the
@@ -35,17 +90,35 @@ class FCGIServerInterface {
   // 1) May throw exceptions derived from std::exception.
   // 2) An unrecoverable error from a system call causes a std::system_error
   //    exception to be thrown with the value of errno set by the call.
-  // 3) 
+  // 3) If the interface is in a bad state as determined by a call of
+  //    interface_status, an exception is thrown.
+  // 4) In the event of a throw, the returned value of a call to
+  //    interface_status may be used to determine if recovery should be
+  //    performed. In this case, recovery allows the interface object to
+  //    continue to receive data and to support request response.
+  // 5) After recovery from an exception, a connection may have been scheduled
+  //    for closure. 
+  //    a) Requests associated with the connection which had not yet been used
+  //       to construct an FCGIRequest object will be deleted. 
+  //    b) Requests associated with the connection which had been used to
+  //       construct an FCGIRequest object will no longer communicate with
+  //       their client.
+  //    c) Closure of the connection implies the termination of all requests
+  //       received over the connection.
   //
   // Effects:
-  // 1) All connections which were ready for reading were read. Internal state
+  // 1) A call blocks until data or connection requests are received. However:
+  //    a) In the case that requests which had been generated by a previous 
+  //       call could not be returned because of an exception, those requests
+  //       are returned immediately.
+  // 2) All connections which were ready for reading were read. Internal state
   //    was updated to reflect the read data.
-  // 2) For FCGI_BEGIN_REQUEST records, if the interface was overloaded or the
-  //    maximum request limit was met at the time of receipt, the request
+  // 3) For FCGI_BEGIN_REQUEST records, if the interface was overloaded or the
+  //    maximum request limit was met at the time of record receipt, the request
   //    was rejected with an FCGI_END_REQUEST record. The protocol status of
   //    the record was FCGI_OVERLOADED or FCGI_CANT_MPX_CONN as appropriate.
   //    The application status of the record was EXIT_FAILURE.
-  // 3) For FCGI_ABORT_REQUEST records, either the request was deleted from the
+  // 4) For FCGI_ABORT_REQUEST records, either the request was deleted from the
   //    interface or state was updated so that inspection by the AbortStatus
   //    method of FCGIRequest will indicate abortion. 
   //    a) Request erasure occurs if the request had not yet been used to 
@@ -53,13 +126,13 @@ class FCGIServerInterface {
   //       record was sent for the request. The protocol status was
   //       FCGI_REQUEST_COMPLETE. The application status was that given by the
   //       app_status_on_abort variable during interface construction.
-  // 4) If all of the data for a request was received during reading, an
+  // 5) If all of the data for a request was received during reading, an
   //    FCGIRequest object was created for the request. It was added to the
   //    returned list.
-  // 5) Management requests which were completed during reading were serviced.
+  // 6) Management requests which were completed during reading were serviced.
   //    The only currently-recognized management request is FCGI_GET_VALUES. 
   //    All other management requests receive an FCGI_UNKNOWN_TYPE response.
-  // 6) New connections which were waiting to be accepted were accepted. 
+  // 7) New connections which were waiting to be accepted were accepted. 
   //    a) Connections were validated against the list of authorized IP 
   //       addresses if the list contains addresses. Unauthorized connections 
   //       were immediately closed.
@@ -68,7 +141,7 @@ class FCGIServerInterface {
   //    c) Connections were validated for socket domain and socket type. The
   //       reference domain and type were those determined from 
   //       FCGI_LISTENSOCK_FILENO during interface construction.
-  // 7) Connections which were scheduled to be closed were closed. Connection
+  // 8) Connections which were scheduled to be closed were closed. Connection
   //    closure scheduling occurs in two instances:
   //    a) On the completion of a request for which the FCGI_KEEP_CONN flag was
   //       not set in the request's FCGI_BEGIN_REQUEST record. Closure will 
@@ -105,7 +178,7 @@ class FCGIServerInterface {
   // Preconditions: none.
   //
   // Exceptions:
-  // 1) Throws std::system_error if the sychronization primitive used to
+  // 1) Throws std::system_error if the synchronization primitive used to
   //    access interface state encounters an error.
   bool interface_status() const;
 
@@ -291,7 +364,7 @@ class FCGIServerInterface {
   // 2) (Duck typing) C::iterator and C::value_type are types and C::erase is a
   //    member function. All have the usual semantics.
   // 3) C::value_type is int.
-  // 4) C::iterator satsifies, at least, the requirements of 
+  // 4) C::iterator satisfies, at least, the requirements of 
   //    LegacyForwardIterator.
   // 
   // Exceptions:
@@ -365,12 +438,12 @@ class FCGIServerInterface {
   //    c) The descriptor is associated with the file description of 
   //       FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
   //       will not be reused until properly processed as a member of 
-  //       dummy_desriptor_set_.
+  //       dummy_descriptor_set_.
   // 5) The element associated with the key connection was removed from
   //    write_mutex_map_ and record_status_map_.  
   void RemoveConnection(int connection);
 
-  // Attemps to remove the request pointed to by request_map_iter from
+  // Attempts to remove the request pointed to by request_map_iter from
   // request_map_ while also updating request_count_map_.
   //
   // Parameters:
