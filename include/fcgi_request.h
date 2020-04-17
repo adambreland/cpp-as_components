@@ -58,7 +58,8 @@ class FCGIRequest {
  public:
 
   // Returns true if the request was aborted by the client or the interface.
-  // Returns false otherwise.
+  // Returns false otherwise. In particular, calls on default-constructed and
+  // moved-from requests return false.
   //
   // Preconditions: none.
   //
@@ -102,9 +103,13 @@ class FCGIRequest {
   //          No further action is needed for this request.
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
-  //    b) If the request had been completed at the time of the call, the call
-  //       had no effect.
-  bool Complete(int32_t app_status);
+  //    b) If the request had been completed at the time of the call or the
+  //       request was default-constructed or moved-from, the call had no
+  //       effect.
+  inline bool Complete(int32_t app_status)
+  {
+    return EndRequestHelper(app_status, FCGI_REQUEST_COMPLETE);
+  }
 
   inline bool get_completion_status() const noexcept
   {
@@ -127,6 +132,8 @@ class FCGIRequest {
     return environment_map_;
   }
 
+  // Default-contructed and moved-from requests have a role value of zero.
+  // This value does not correspond to any FastCGI role.
   inline uint16_t get_role() const noexcept
   {
     return role_;
@@ -139,8 +146,15 @@ class FCGIRequest {
     return request_stdin_content_;
   }
 
-  // TODO Implement this method!
-  // bool RejectRole(int32_t app_status);
+  // Rejects a request by closing the FCGI_STDOUT and FCGI_STDERR streams
+  // and sending a terminal FCGI_END_REQUEST record with an application
+  // status given by app_status and a protocol status of FCGI_UNKNOWN_ROLE.
+  //
+  // Functions as Complete except for the value of protocol status. See above.
+  inline bool RejectRole(int32_t app_status)
+  {
+    return EndRequestHelper(app_status, FCGI_UNKNOWN_ROLE);
+  }
 
   // Attempts to send a byte sequence to the client on the FCGI_STDOUT stream.
   //
@@ -172,7 +186,8 @@ class FCGIRequest {
   //          taken to service the request. The request should be destroyed.
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
-  //    b) If the request had been previously completed, the call had no effect.
+  //    b) If the request had been previously completed or the request was
+  //       default-constructed or moved-from, the call had no effect.
   template<typename ByteIter>
   bool Write(ByteIter begin_iter, ByteIter end_iter);
 
@@ -180,11 +195,7 @@ class FCGIRequest {
   template<typename ByteIter>
   bool WriteError(ByteIter begin_iter, ByteIter end_iter);
 
-  // No default construction or copy.
-  FCGIRequest() = delete;
-  FCGIRequest(const FCGIRequest&) = delete;
-  FCGIRequest& operator=(const FCGIRequest&) = delete;
-  
+  FCGIRequest();
   FCGIRequest(FCGIRequest&&) noexcept;
 
   // Move assignment may only occur to FCGIRequest objects which have been 
@@ -196,6 +207,10 @@ class FCGIRequest {
   // 2) In the event of a throw, neither the source nor the destination
   //    FCGIRequest object was modified (strong exception guarantee).
   FCGIRequest& operator=(FCGIRequest&&);
+
+  // No copy.
+  FCGIRequest(const FCGIRequest&) = delete;
+  FCGIRequest& operator=(const FCGIRequest&) = delete;
 
   ~FCGIRequest();
 
@@ -254,6 +269,56 @@ class FCGIRequest {
   FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
     FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr);
+
+  // Attempts to complete the STDOUT and STDERR streams and send an
+  // FCGI_END_REQUEST record to complete the request. The application status
+  // and protocol status of the record are as given.
+  //
+  // Parameters:
+  // app_status:      The applicaton status that would be returned at the exit
+  //                  of an equivalent CGI program which served the request.
+  //                  This value is encoded in the FCGI_END_REQUEST record sent
+  //                  by the interface to the client.
+  // protocol_status: A byte value used by the FastCGI interface to communicate
+  //                  why the response for a request is complete.
+  //
+  // Preconditions:
+  // 1) protocol_status is one of FCGI_REQUEST_COMPLETE (to indicate successful
+  //    servicing of the request) or FCGI_UNKNOWN_ROLE (to indicate that the
+  //    application cannot service requests with the role given by role_).
+  //
+  // Synchronization:
+  // 1) Acquires and releases interface_state_mutex_.
+  // 2) May acquire and release a write mutex.
+  //
+  // Exceptions:
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) If an exception was thrown:
+  //    a) No conclusions may be drawn regarding the transmission of terminal
+  //       records or the state of the request object.
+  //    b) A non-recoverable error must be assumed. The request should be
+  //       destroyed.
+  //
+  // Effects:
+  // 1) If the call returned true:
+  //    a) Terminal empty records for the FCGI_STDOUT and FCGI_STDERR streams
+  //       were sent. The records close these streams according to the
+  //       FastCGI protocol. In addition, the client was informed that the
+  //       request was serviced by the transmission of a final FCGI_END_REQUEST
+  //       record. The application status of this record was given by the value
+  //       of app_status. The protocol_status was given by protocol_status.
+  //    b) The request was completed. Calls to Complete, Write, and WriteError
+  //       will have no effect.
+  // 2) If the call returned false:
+  //    a) If the request had not been completed at the time of the call:
+  //       1) It was discovered that the connection to the client is closed.
+  //          No further action is needed for this request.
+  //       2) The request was completed. Calls to Complete, Write, and
+  //          WriteError will have no effect.
+  //    b) If the request had been completed at the time of the call or the
+  //       request was default-constructed or moved-from, the call had no
+  //       effect.
+  bool EndRequestHelper(std::int32_t app_status, std::uint8_t protocol_status);
 
   // Checks if the interface associated with the request is in a valid state for
   // writing. This member function is designed to be called immediately after

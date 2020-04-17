@@ -166,6 +166,23 @@
 //    in a scope which owns the interface mutex.
 namespace fcgi_si {
 
+
+FCGIRequest::FCGIRequest()
+: associated_interface_id_   {0U},
+  interface_ptr_             {nullptr},
+  request_identifier_        {RequestIdentifier {}},
+  request_data_ptr_          {nullptr},
+  write_mutex_ptr_           {nullptr},
+  bad_connection_state_ptr_  {nullptr},
+  environment_map_           {},
+  request_stdin_content_     {},
+  request_data_content_      {},
+  role_                      {0U},
+  close_connection_          {false},
+  was_aborted_               {false},
+  completed_                 {false}
+{}
+
 // Implementation notes:
 // This constructor should only be called by an FCGIServerInterface object.
 //
@@ -229,7 +246,7 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   was_aborted_               {request.was_aborted_},
   completed_                 {request.completed_}
 {
-  request.associated_interface_id_ = 0;
+  request.associated_interface_id_ = 0U;
   request.interface_ptr_ = nullptr;
   request.request_identifier_ = RequestIdentifier {};
   request.request_data_ptr_ = nullptr;
@@ -238,17 +255,17 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.environment_map_.clear();
   request.request_stdin_content_.clear();
   request.request_data_content_.clear();
-  // request.role_ is unchanged.
+  request.role_ = 0U;
   request.close_connection_ = false;
-  // TODO was_aborted_
-  request.completed_ = true;
+  request.was_aborted_ = false;
+  request.completed_ = false;
 }
 
 FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
 {
   if(this != &request)
   {
-    if((!completed_ || associated_interface_id_ != 0))
+    if(!(completed_ || associated_interface_id_ == 0))
       throw std::logic_error {"Move assignment would have occurred on an "
         "FCGIRequest object which was not in a valid state to be moved to."};
 
@@ -266,7 +283,7 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
     was_aborted_ = request.was_aborted_;
     completed_ = request.completed_;
 
-    request.associated_interface_id_ = 0;
+    request.associated_interface_id_ = 0U;
     request.interface_ptr_ = nullptr;
     request.request_identifier_ = RequestIdentifier {};
     request.request_data_ptr_ = nullptr;
@@ -275,10 +292,10 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
     request.environment_map_.clear();
     request.request_stdin_content_.clear();
     request.request_data_content_.clear();
-    // request.role_ is unchanged.
+    request.role_ = 0U;
     request.close_connection_ = false;
     request.was_aborted_ = false;
-    request.completed_ = true;
+    request.completed_ = false;
   }
   return *this;
 }
@@ -308,7 +325,7 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
 // 2) If the request was completed, the call had no effect.
 FCGIRequest::~FCGIRequest()
 {
-  if(!completed_)
+  if(!(completed_ || associated_interface_id_ == 0U))
   {
     // ACQUIRE interface_state_mutex_.
     std::unique_lock<std::mutex> interface_state_lock
@@ -355,7 +372,7 @@ FCGIRequest::~FCGIRequest()
 // 1) Acquires interface_state_mutex_.
 bool FCGIRequest::AbortStatus()
 {
-  if(completed_ || was_aborted_)
+  if(completed_ || was_aborted_ || associated_interface_id_ == 0U)
     return was_aborted_;
   
   // The actual abort status is unknown if this point is reached.
@@ -401,27 +418,28 @@ bool FCGIRequest::AbortStatus()
 // 2) May acquire and release a write mutex.
 //
 // Race condition discussion:
-// If interface_state_mutex_ is not held for the duration of the write, it is
-// possible that a race condition may occur. There are two steps to
+//    If interface_state_mutex_ is not held for the duration of the write, 
+// it is possible that a race condition may occur. There are two steps to
 // consider:
 // 1) Removing the request from the interface.
 // 2) Notifying the client that the request is complete.
 //
-//    According to the mutex acquisition discipline, a write mutex can only be
-// acquired when the interface mutex is held. Suppose that the request is
+//    According to the mutex acquisition discipline, a write mutex can only
+// be acquired when the interface mutex is held. Suppose that the request is
 // removed from the interface and, as for other writes to the client, the
 // interface mutex is released before the write starts. Then suppose that
-// the client erroneously re-uses the request id of the request. The interface
-// will accept a begin request record with this request id. A request could
-// then be produced by the interface. The presence of two request objects which
-// are associated with the same connection and which share a request identifier
-// could cause several errors.
-//   In this scenario, an error on the part of the client can corrupt interface
-// state. Holding the interface mutex during the write prevents the interface
-// from spuriously validating an erroneous begin request record.
-bool FCGIRequest::Complete(std::int32_t app_status)
+// the client erroneously re-uses the request id of the request. The
+// interface will accept a begin request record with this request id. A
+// request could then be produced by the interface. The presence of two
+// request objects which are associated with the same connection and which
+// share a request identifier could cause several errors.
+//   In this scenario, an error on the part of the client can corrupt
+// interface state. Holding the interface mutex during the write prevents the
+// interface from spuriously validating an erroneous begin request record.
+bool FCGIRequest::EndRequestHelper(std::int32_t app_status, 
+  std::uint8_t protocol_status)
 {
-  if(completed_)
+  if(completed_ || associated_interface_id_ == 0U)
     return false;
 
   constexpr int seq_num {4}; // Three headers and an 8-byte body. 3+1=4
@@ -443,7 +461,7 @@ bool FCGIRequest::Complete(std::int32_t app_status)
     header_and_end_content[3][i] = static_cast<uint8_t>(
       app_status >> (24 - (8*i)));
   header_and_end_content[3][app_status_byte_length] = 
-    FCGI_REQUEST_COMPLETE;
+    protocol_status;
   for(int i {app_status_byte_length + 1}; i < FCGI_HEADER_LEN; ++i)
     header_and_end_content[3][i] = 0;
 
