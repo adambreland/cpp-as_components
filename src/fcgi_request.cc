@@ -240,6 +240,7 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.request_data_content_.clear();
   // request.role_ is unchanged.
   request.close_connection_ = false;
+  // TODO was_aborted_
   request.completed_ = true;
 }
 
@@ -248,7 +249,8 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
   if(this != &request)
   {
     if((!completed_ || associated_interface_id_ != 0))
-      throw std::logic_error {""};
+      throw std::logic_error {"Move assignment would have occurred on an "
+        "FCGIRequest object which was not in a valid state to be moved to."};
 
     associated_interface_id_ = request.associated_interface_id_;
     interface_ptr_ = request.interface_ptr_;
