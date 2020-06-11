@@ -71,6 +71,11 @@ class FCGIRequest {
 
   // Completes the response of an FCGIRequest object.
   //
+  // Note that allowing a valid FCGIRequest to be destroyed without completion
+  // prevents terminal records from being sent for the request. The destructor
+  // of FCGIRequest maintains interface invariants but does not send
+  // information to the client upon request destruction.
+  //
   // Parameters:
   // app_status: The application status that would be returned at the exit of an
   //             equivalent CGI program which served the request. This value is
@@ -205,7 +210,7 @@ class FCGIRequest {
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
   // 2) In the event of a throw, neither the source nor the destination
-  //    FCGIRequest object was modified (strong exception guarantee).
+  //    FCGIRequest object were modified (strong exception guarantee).
   FCGIRequest& operator=(FCGIRequest&&);
 
   // No copy.

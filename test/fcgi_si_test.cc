@@ -2274,7 +2274,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 4: As in 3, but with a FCGI_id larger than 255.
   {
-    std::string message {"Case 3"};
+    std::string message {"Case 4"};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       {'v','a','l','u','e'}}};

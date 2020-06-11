@@ -340,8 +340,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
-PartitionByteSequence(ByteIter begin_iter, 
-  ByteIter end_iter, FCGIType type, std::uint16_t FCGI_id)
+PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type, 
+  std::uint16_t FCGI_id)
 {
   // Verify that ByteIter iterates over units of data which are the size of
   // a byte.

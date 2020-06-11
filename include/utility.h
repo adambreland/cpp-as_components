@@ -48,8 +48,9 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 
 // Processes name-value pairs and returns a tuple containing information which
 // allows a byte sequence to be written via a scatter-gather I/O system call.
-// When written, this byte sequence is the byte sequence of the name-value
-// pairs when they are encoded in the FastCGI name-value pair format.
+// When written, this byte sequence is the byte sequence of an initial range
+// of the name-value pairs when they are encoded as FastCGI records. The
+// content of these records is encoded in the FastCGI name-value pair format.
 //
 // Parameters:
 // pair_iter: An iterator to a std::pair object.
@@ -65,7 +66,8 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 // offset:    A value used to indicate how many bytes have previously been
 //            encoded of the first name-value pair pointed to by pair_iter.
 //            The first offset bytes of the byte sequence generated from this
-//            name value pair will be omitted from the total byte sequence.
+//            name value pair will be omitted from the total byte sequence
+//            of the pair.
 //
 // Preconditions:
 // 1) [pair_iter, end) is a valid range.
@@ -89,39 +91,43 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 // 1) The sequence of name-value pairs given by [pair_iter, end) is processed
 //    in order.
 // 2) Meaning of returned tuple values:
-//       Access: std::get<0>; Type: bool; True if processing occurred
-//    without error. False if processing was halted due to an error. See below.
-//       Access: std::get<1>; Type: std::size_t; The total number of
-//    bytes that would be written if all bytes pointed to by the struct iovec
-//    instances of the returned std::vector<iovec> instance were written.
-//    This value is equal to the sum of iov_len for each struct iovec instance
-//    in the returned list. This value allows the actual number of bytes
-//    written by a system call to be compared to the expected number.
-//       Access: std::get<2>; Type: std::vector<iovec>; A list of
-//    iovec instances to be used in a call to writev or a similar
-//    function. For a returned tuple t, std::get<2>(t).data() is a pointer
-//    to the first iovec instance and may be used in a call to writev.
-//       Access: std::get<3>; Type: const std::vector<uint8_t>; A
-//    byte sequence that contains FastCGI headers and encoded name and value
-//    length information. Destruction of this vector invalidates pointers
-//    contained in the iovec instances of the vector accessed by std::get<2>.
-//       Access: std::get<4>; Type: std::size_t; Zero if all name-value
-//    pairs in the encoded range were completely encoded. Non-zero if the last
-//    name-value pair of the encoded range could not be completely encoded.
-//    When non-zero, the value indicates the number of bytes from the encoded
-//    FastCGI name-value byte sequence that will be written. This value is
-//    intended to be passed to EncodeNameValuePairs in a subsequent call so
-//    that the list of iovec structures produced in that call does not contain
-//     duplicate information.
-//       Access: std::get<5>; Type: typename ByteSeqPairIter; An
-//    iterator pointing to an element of the range given by pair_iter
-//    and end. If the returned boolean value is false, the iterator points
-//    to the name-value pair which caused processing to halt. If the returned
-//    boolean value is true and std::get<4>(t) == 0, the iterator points to
-//    either end, if all name-value pairs could be encoded, or to the
-//    name-value pair which should be encoded next. If the returned boolean
-//    value is true and std::get<4>(t) != 0, the iterator points to the name-
-//    value pair which could not be completely encoded.
+//    a) Access: std::get<0>; Type: bool; True if processing occurred
+//       without error. False if processing was halted due to an error.
+//    b) Access: std::get<1>; Type: std::size_t; The total number of
+//       bytes that would be written if all bytes pointed to by the struct
+//       iovec instances of the returned std::vector<iovec> instance were
+//       written. This value is equal to the sum of iov_len for each struct
+//       iovec instance in the returned list. This value allows the actual
+//       number of bytes written by a scatter-gather write system call to be
+//       compared to the expected number.
+//    c) Access: std::get<2>; Type: std::vector<iovec>; A list of iovec
+//       instances to be used in a call to writev or a similar function. For a
+//       returned tuple t, std::get<2>(t).data() is a pointer to the first
+//       iovec instance and may be used in a call to writev. 
+//    d) Access: std::get<3>; Type: const std::vector<uint8_t>; A byte sequence
+//       that contains FastCGI headers and encoded name and value length
+//       information. Destruction of this vector invalidates pointers contained
+//       in the iovec instances of the vector accessed by std::get<2>.
+//    e) Access: std::get<4>; Type: std::size_t; 
+//       1) Zero if all name-value pairs in the encoded range were completely 
+//          encoded. 
+//       2) Non-zero if the last name-value pair of the encoded range could not
+//          be completely encoded. When non-zero, the value indicates the 
+//          number of bytes from the encoded FastCGI name-value byte sequence
+//          that will be written. This value is intended to be passed to
+//          EncodeNameValuePairs in a subsequent call so that the list of iovec
+//          structures produced in that call does not contain duplicate
+//          information.
+//    f) Access: std::get<5>; Type: typename ByteSeqPairIter; An iterator
+//       pointing to an element of the range given by pair_iter and end. 
+//       a) If the returned boolean value is false, the iterator points
+//          to the name-value pair which caused processing to halt. 
+//       b) If the returned boolean value is true and std::get<4>(t) == 0, the 
+//          iterator points to either end, if all name-value pairs could be
+//          encoded, or to the name-value pair which should be encoded next. If
+//          the returned boolean value is true and std::get<4>(t) != 0, the
+//          iterator points to the name-value pair which could not be
+//          completely encoded.
 // 3) If the range [pair_iter, end) is empty, then the returned tuple is
 //    equal to the tuple initialized by {true, 0, {}, {}, 0, end}.
 // 4) In two cases, the boolean value of the tuple returned by the function
@@ -247,10 +253,10 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    array of struct iovec instances were written.
 //       Access: std::get<3>; Type: ByteIter; If the range given by
 //    [begin_iter, end_iter) could be completely encoded, this iterator is
-//    equal to end_iter. If the range could not be completely encoded, this
-//    iterator gives the range of bytes which could be. The next call
-//    to PartitionByteSequence should use this iterator to initialize 
-//    begin_iter.
+//    equal to end_iter. If the range could not be completely encoded,
+//    begin_iter together with this iterator give the range of bytes which 
+//    could be encoded. The next call to PartitionByteSequence should use this
+//    iterator to initialize begin_iter.
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
@@ -269,7 +275,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
 // content_length: The content length of the record described by the header.
 // padding_length: The padding length of the record described by the header.
 //
-// Requires:
+// Preconditions:
 // 1) byte_ptr is not null.
 // 2) The buffer pointed to by byte_ptr must be able to hold at least
 //    FCGI_HEADER_LEN bytes.

@@ -229,8 +229,8 @@ private:
 
   // Implementation note:
   // The value zero is used for type_ as no FastCGI record has this value as a
-  // type. This is appropriate as no record identity has yet been assigned to the
-  // RecordStatus object.
+  // type. This is appropriate as no record identity has yet been assigned to
+  // the RecordStatus object.
   FCGIType type_ {static_cast<FCGIType>(0U)};
   RequestIdentifier request_id_ {};
 
