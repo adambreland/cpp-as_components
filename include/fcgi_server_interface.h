@@ -681,7 +681,9 @@ class FCGIServerInterface {
     std::int_fast32_t count);
 
   // Attempts to send the byte sequence given by 
-  // [buffer_ptr, buffer_ptr + count) to a client over connection.
+  // [buffer_ptr, buffer_ptr + count) to a client over connection. Writing
+  // may block. If writing blocks, fcgi_si::write_block_timeout is used as
+  // as a time limit for a single blocking call.
   //
   // Parameters:
   // connection: The file descriptor of the connection over which data will be
@@ -701,27 +703,28 @@ class FCGIServerInterface {
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
-  // 2) In the event of a throw, the sequence given by 
-  //    [buffer_ptr, buffer_ptr + count) is not modified.
-  // 3) Throws:
-  //    a) std::logic_error when the interface state was found to be corrupt.
-  //       In this case, bad_interface_state_detected_ was set.
-  //    b) std::system_error when an unrecoverable system error occurred
-  //       while during the write. 
-  // 4) After a throw, several changes in interface state may have occurred:
+  // 2) Explicit throws:
+  //    a) std::logic_error if the interface state was found to be corrupt.
+  //    b) std::system_error if an unrecoverable system error occurred
+  //       during the write. 
+  // 3) After a throw, several changes in interface state may have occurred:
   //    a) The connection could have been added to connections_to_close_set_.
   //    b) The connection could have been corrupted. The corruption flag is
   //       set in this case.
   //    c) The interface may be in a bad state.
   //    No other changes will have occurred.
-  // 5) Program termination will occur if the interface could not be put into a
+  // 4) Program termination will occur if the interface could not be put into a
   //    bad state when this was necessary.
   //
   // Effects:
   // 1) If true was returned, the byte sequence was sent.
-  // 2) If false was returned, the connection was found to be closed or
-  //    corrupted. The descriptor given by connection is present in a closure
-  //    set.
+  // 2) If false was returned, one of the following conditions prevented the
+  //    write from completing:
+  //    a) It was found that the connection was closed by the client.
+  //    b) The connection was found to be corrupted.
+  //    c) The most recent blocking call exceeded the
+  //       fcgi_si::write_block_timeout limit.
+  //    In all cases, the descriptor connection is present in a closure set.
   bool SendRecord(int connection, const std::uint8_t* buffer_ptr,
     std::int_fast32_t count);
 

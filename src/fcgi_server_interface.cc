@@ -1241,7 +1241,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
 {
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
     mutex_map_iter {write_mutex_map_.find(connection)};
-  // Logic error check.
+  // Defensive check on write mutex existence for connection.
   if(mutex_map_iter == write_mutex_map_.end())
   {
     std::unique_lock<std::mutex> unique_interface_state_lock
@@ -1257,95 +1257,72 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     }
     bad_interface_state_detected_ = true;
     throw std::logic_error {"An expected connection was missing from "
-      "write mutex_map_."};
+      "write_mutex_map_."};
   } // RELEASE interface_state_mutex_.
 
   // ACQUIRE the write mutex for the connection.
-  std::unique_lock<std::mutex> write_lock
-    {*(mutex_map_iter->second.first)};
+  std::unique_lock<std::mutex> write_lock {*(mutex_map_iter->second.first)};
   
   // Check if the connection is corrupt.
-  // Part of the discipline for connection use is adding the connection
-  // descriptor to one of the closure sets if the connection is corrupted.
-  // Adding the descriptor need not be done upon corruption discovery.
-  if(mutex_map_iter->second.second)
+  if(mutex_map_iter->second.second) {
+    // This insertion is defensive. Part of the discipline for writing to a
+    // connection is adding the descriptor to a closure set in the event of
+    // corruption.
+    connections_to_close_set_.insert(connection);
     return false;
+  }
 
   // TODO Have writes on a connection which would be performed by the interface
   // object be performed instead by a worker thread. It is expedient but
   // inappropriate to have the interface thread block on a write.
   // 
   // Send record.
+  struct timeval timeout {write_block_timeout, 0};
   std::size_t number_written {socket_functions::WriteOnSelect(connection, 
-    buffer_ptr, count)};
+    buffer_ptr, count, &timeout)};
   
   // Check for errors which prevented a full write.
   if(number_written < count)
   {
-    // The application must handle SIGPIPE.
-    if(errno == EPIPE)
+    // Add the connection to the non-shared closure set.
+    try
     {
+      connections_to_close_set_.insert(connection);
+    }
+    catch(...)
+    {
+      // RELEASE the write mutex for the connection as the interface mutex
+      // will be acquired and the pattern "wants interface mutex, owns write
+      // mutex" is forbidden.
+      write_lock.unlock();
+      std::unique_lock<std::mutex> unique_interface_state_lock
+        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
       try
       {
-        connections_to_close_set_.insert(connection);
+        // ACQUIRE interface_state_mutex_.
+        unique_interface_state_lock.lock();
       }
       catch(...)
       {
-        // RELEASE the write mutex for the connection as the interface mutex
-        // will be acquired and the pattern "wants interface mutex, owns write
-        // mutex" is forbidden.
-        write_lock.unlock();
-        std::unique_lock<std::mutex> unique_interface_state_lock
-          {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
-        try
-        {
-          // ACQUIRE interface_state_mutex_.
-          unique_interface_state_lock.lock();
-        }
-        catch(...)
-        {
-          std::terminate();
-        }
-        bad_interface_state_detected_ = true;
-        throw;
-      } // RELEASE interface_state_mutex_.
-      return false;
-    }
-    else // Any other error is considered non-recoverable.
-    {
-      if(number_written != 0U) // A non-zero write corrupts the connection.
-      {
-        mutex_map_iter->second.second = true;
-        try
-        {
-          connections_to_close_set_.insert(connection);
-        }
-        catch(...)
-        {
-          // RELEASE the write mutex for the connection as the interface mutex
-          // will be acquired and the pattern "wants interface mutex, owns write
-          // mutex" is forbidden.
-          write_lock.unlock();
-
-          std::unique_lock<std::mutex> unique_interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
-          try
-          {
-            // ACQUIRE interface_state_mutex_.
-            unique_interface_state_lock.lock();
-          }
-          catch(...)
-          {
-            std::terminate();
-          }
-          bad_interface_state_detected_ = true;
-          throw;
-        } // RELEASE interface_state_mutex_.
+        std::terminate();
       }
+      bad_interface_state_detected_ = true;
+      throw;
+    } // RELEASE interface_state_mutex_.
+
+    // Indicate that the connection is corrupt if it is still open and some 
+    // data was written.
+    if((errno != EPIPE) && (number_written != 0U))
+      mutex_map_iter->second.second = true;
+
+    if((errno == EPIPE) || (errno == 0))
+      return false;
+    else // Any other error is considered exceptional.
+    {
       std::error_code ec {errno, std::system_category()};
-      throw std::system_error {ec, "write from a call to "
+      throw std::system_error {ec, "An error from a call to "
         "socket_functions::WriteOnSelect."};
-    }
+    } // Conditionally RELEASE the write mutex. 
   }
   return true;
 } // RELEASE the write mutex for the connection.

@@ -2,7 +2,7 @@
 #include <sys/time.h>           // For portable use of select.
 #include <sys/types.h>          // For ssize_t and portable use of select.
 #include <sys/uio.h>
-#include <unistd.h>             // For portable use of select among others.
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -642,7 +642,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::tuple<struct iovec*, int, std::size_t> write_return
       {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
         working_number_to_write)};
-    if(std::get<2>(write_return) == 0)
+    if(std::get<2>(write_return) == 0) // All data was written.
     {
       // RELEASE *write_mutex_ptr_.
       write_lock.unlock();

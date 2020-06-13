@@ -78,8 +78,8 @@ class FCGIRequest {
   //
   // Parameters:
   // app_status: The application status that would be returned at the exit of an
-  //             equivalent CGI program which served the request. This value is
-  //             encoded in the FCGI_END_REQUEST record sent by the interface
+  //             equivalent CGI program which serviced the request. This value
+  //             is encoded in the FCGI_END_REQUEST record sent by the interface
   //             to the client.
   //
   // Preconditions: none.
@@ -357,11 +357,15 @@ class FCGIRequest {
   //    c) The request was removed from the interface.
   bool InterfaceStateCheckForWritingUponMutexAcquisition();
 
-  // Attempts to a perform a scatter-gather write on the active socket given
+  //    Attempts to a perform a scatter-gather write on the active socket given
   // by request_identifier_.descriptor(). If errors occur during the write
   // or if connection closure is discovered, interface invariants are
   // maintained. If interface invariants may not be maintained, the program
   // is terminated.
+  //    Note that scatter-gather I/O is useful in general for request servicing
+  // as user-provided byte sequences must be split into FastCGI records. The
+  // header of such records will be stored in a buffer which is not contiguous
+  // with that of the user byte sequence. Hence scatter-gather I/O.
   //
   // Parameters:
   // iovec_ptr:            A pointer to an array of struct iovec instances.
@@ -418,8 +422,8 @@ class FCGIRequest {
   bool ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
-  // A utility function which allows PartitionByteSequence to partition only
-  // a subrange of the range [begin_iter, end_iter).
+  // A utility function which allows fcgi_si::PartitionByteSequence to 
+  // partition only a subrange of the range [begin_iter, end_iter).
   //
   // As for Write and Write error.
   template<typename ByteIter>

@@ -1,6 +1,8 @@
 #ifndef FCGI_SERVER_INTERFACE_INCLUDE_PROTOCOL_CONSTANTS_H_
 #define FCGI_SERVER_INTERFACE_INCLUDE_PROTOCOL_CONSTANTS_H_
 
+#include <sys/time.h>
+#include <sys/select.h>
 #include <unistd.h>
 
 #include <cstdint>         // For uint8_t.
@@ -75,6 +77,11 @@ enum class FCGIType : std::uint8_t
 // The system-dependent maximum struct iovec array length for scatter-gatter
 // I/O.
 const long iovec_MAX {sysconf(_SC_IOV_MAX)};
+
+// A timeout for select calls to prevent infinite blocking in the unusual
+// case that a mutex is held and a blocking call to select was made.
+// The number of seconds until a call to select times out.
+const time_t write_block_timeout {300};
 
 } // namespace fcgi_si
 
