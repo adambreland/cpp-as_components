@@ -357,7 +357,7 @@ class FCGIRequest {
   //    c) The request was removed from the interface.
   bool InterfaceStateCheckForWritingUponMutexAcquisition();
 
-  //    Attempts to a perform a scatter-gather write on the active socket given
+  //    Attempts to a perform a scatter-gather write on the socket given
   // by request_identifier_.descriptor(). If errors occur during the write
   // or if connection closure is discovered, interface invariants are
   // maintained. If interface invariants may not be maintained, the program
@@ -378,7 +378,7 @@ class FCGIRequest {
   //                       or not interface_state_mutex_ is held before a call.
   //                       This allows WriteHelper to be called in contexts
   //                       which must maintain mutex ownership during the call
-  //                       and in contexts which do not need interface mutex
+  //                       and in contexts which do not require interface mutex
   //                       ownership over the entire call.
   //
   // Preconditions:
@@ -401,6 +401,8 @@ class FCGIRequest {
   //    d) Connection corruption invariants were maintained. The connection
   //       may have been corrupted. If so, the descriptor of the connection was
   //       added to application_closure_request_set_.
+  // 3) Program termination may occur if invariants cannot be maintained during
+  //    exceptional behavior.
   //
   // Synchronization:
   // 1) interface_state_mutex_ may be acquired depending on the value of
@@ -412,13 +414,16 @@ class FCGIRequest {
   //    a) The message was sent successfully.
   //    b) No change in request state occurred.
   // 2) If false was returned:
-  //    a) The connection of the response is closed. The request should be
-  //       destroyed.
-  //    b) completed_ == true
+  //    Either it was discovered that the connection was closed or writing 
+  //    timed out relative to fcgi_si::write_block_timeout.
+  //    a) The request should be destroyed.
+  //    b) completed_ == true.
   //    c) The request was removed from the interface.
   //    d) Connection corruption invariants were maintained. The connection
-  //       may have been corrupted. If so, the descriptor of the connection was
-  //       added to application_closure_request_set_. 
+  //       may have been corrupted. If so, the descriptor of the connection
+  //       was added to application_closure_request_set_.
+  //    e) A timeout caused the connection to be added to
+  //       application_closure_request_set_.
   bool ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 
@@ -430,6 +435,8 @@ class FCGIRequest {
   bool WriteHelper(ByteIter begin_iter, ByteIter end_iter, FCGIType type);
 
   // State for internal request management. Constant after initialization.
+    // Note that default constructed and moved-from FCGIRequest objects have
+    // an associated_interface_id_ value of 0U.
   unsigned long associated_interface_id_;
   FCGIServerInterface* interface_ptr_;
   RequestIdentifier request_identifier_;

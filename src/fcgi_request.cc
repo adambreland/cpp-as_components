@@ -159,11 +159,11 @@
 //       called. It must be called under mutex protection.
 //
 // 4) General notes:
-// a) The destructor of an FCGIRequest object acquires and releases
-//    FCGIServerInterface::interface_state_mutex_. This is not problematic
-//    when requests are destroyed within the scope of user code. It will
-//    lead to deadlock in implementation code if the destructor is executed
-//    in a scope which owns the interface mutex.
+//    a) The destructor of an FCGIRequest object acquires and releases
+//       FCGIServerInterface::interface_state_mutex_. This is not problematic
+//       when requests are destroyed within the scope of user code. It will
+//       lead to deadlock in implementation code if the destructor is executed
+//       in a scope which owns the interface mutex.
 namespace fcgi_si {
 
 
@@ -325,7 +325,7 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
 // 2) If the request was completed, the call had no effect.
 FCGIRequest::~FCGIRequest()
 {
-  if(!(completed_ || associated_interface_id_ == 0U))
+  if(!(completed_ || (associated_interface_id_ == 0U)))
   {
     // ACQUIRE interface_state_mutex_.
     std::unique_lock<std::mutex> interface_state_lock
@@ -548,13 +548,18 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
 
   // An internal helper function used when application_closure_request_set_
-  // of the interface may be be accessed. This occurs when:
-  // 1) The connection was found to be closed and close_connection_ == true
-  // 2) The connection from the server to the client was corrupted from
+  // of the interface must be accessed. This occurs when:
+  // 1) The connection was found to be closed and close_connection_ == true.
+  // 2) The connection from the server to the client was corrupted by
   //    an incomplete write.
   //
   // If insert == true, insertion is attempted.
   // If insert == false, insertion is attempted if close_connection == true.
+  //
+  // Returns false if the interface was found to be corrupted.
+  // Returns true if FCGIRequest object updates and conditional connection
+  // insertion were successful.
+  // May throw.
   auto TryToAddToApplicationClosureRequestSet = 
   [this, interface_mutex_held, &interface_state_lock](bool insert)->bool
   {
@@ -570,7 +575,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         std::terminate();
       }
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+      {
         return false;
+      }
     }
     // interface_state_mutex held.
     try
@@ -599,10 +606,6 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_,
     std::defer_lock_t {}};
   int fd {request_identifier_.descriptor()};
-  int select_descriptor_range {fd + 1};
-  // A set for file descriptors for a select call below.
-  fd_set write_set {};
-
   while(working_number_to_write > 0) // Start write loop.
   {
     // Conditionally ACQUIRE interface_state_mutex_.
@@ -610,6 +613,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     // was destroyed or that the connection was closed.
     if(!interface_mutex_held && !write_lock.owns_lock())
     {
+      // Note that the write mutex is not released once some data has been
+      // written. As such, a throw from lock() does not risk corrupting
+      // the connection.
       interface_state_lock.lock();
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
         return false;
@@ -618,6 +624,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     // Conditionally ACQUIRE *write_mutex_ptr_.
     if(!write_lock.owns_lock())
     {
+      // As above, no data will have been written to the connection. A throw
+      // from lock() does not risk connection corruption.
       write_lock.lock();
       if(*bad_connection_state_ptr_)
       {
@@ -663,15 +671,20 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           std::tie(iovec_ptr, iovec_count, working_number_to_write) =
             write_return;
         // Call select with error handling to wait until a write won't block.
+        int select_descriptor_range {fd + 1};
+        fd_set write_set {};
+        struct timeval timeout {};
         while(true) // Start select loop.
         {
-          // The loop exits only when writing won't block or an error is thrown.
+          // The loop exits only when writing won't block or an error occurs.
           FD_ZERO(&write_set);
           FD_SET(fd, &write_set);
-          if(select(select_descriptor_range, nullptr, &write_set, nullptr,
-            nullptr) == -1)
+          timeout = {write_block_timeout, 0};
+          int select_return {};
+          if((select_return = select(select_descriptor_range, nullptr, 
+            &write_set, nullptr, &timeout)) <= 0)
           {
-            if(errno != EINTR)
+            if((select_return == 0) || (errno != EINTR))
             {
               // If some data was written and a throw will occur, the
               // connection must be closed. This is becasue, if the write mutex
@@ -694,12 +707,17 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               {
                 *bad_connection_state_ptr_ = true;
                 write_lock.unlock();
-                // May ACQUIRE interface_state_mutex_.
-                if(!TryToAddToApplicationClosureRequestSet(true))
-                  return false;
               }
-              std::error_code ec {errno, std::system_category()};
-              throw std::system_error {ec, "select"};
+              // May ACQUIRE interface_state_mutex_.
+              if(!TryToAddToApplicationClosureRequestSet(true))
+                return false;
+
+              if(select_return != 0) {
+                std::error_code ec {errno, std::system_category()};
+                throw std::system_error {ec, "select"};
+              }
+              else
+                return false; // A timeout is not exceptional.
             }
             // else: loop (EINTR is handled)
           }
