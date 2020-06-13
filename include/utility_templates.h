@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <utility>
 #include <vector>
@@ -385,9 +386,9 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
     if(remaining_content_length < 8 && remaining_iovec == 2)
       break;
 
-    uint16_t current_record_content_length {std::min<ssize_t>(
+    uint16_t current_record_content_length {std::min<ssize_t>({
       remaining_ssize_t - FCGI_HEADER_LEN, remaining_content_length, 
-        max_aligned_content_length)};
+        max_aligned_content_length})};
     uint8_t padding_length {0};
       
     // Check if we must produce a record with aligned content.
@@ -422,7 +423,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
     number_to_write += total_record_bytes;
     remaining_iovec -= 2 + (padding_length > 0);
     remaining_content_length -= current_record_content_length;
-    begin_iter.advance(current_record_content_length);
+    std::advance(begin_iter, current_record_content_length);
   }
   return std::make_tuple(std::move(noncontent_record_information), 
     std::move(iovec_list), number_to_write, begin_iter);
