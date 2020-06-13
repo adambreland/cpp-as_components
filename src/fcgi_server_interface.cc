@@ -93,8 +93,8 @@ namespace fcgi_si {
 
 // Initialize static class data members.
 std::mutex FCGIServerInterface::interface_state_mutex_ {};
-unsigned long FCGIServerInterface::interface_identifier_ {0};
-unsigned long FCGIServerInterface::previous_interface_identifier_ {0};
+unsigned long FCGIServerInterface::interface_identifier_ {0U};
+unsigned long FCGIServerInterface::previous_interface_identifier_ {0U};
 
 FCGIServerInterface::
 FCGIServerInterface(int max_connections, int max_requests, 
@@ -280,6 +280,30 @@ FCGIServerInterface(int max_connections, int max_requests,
     previous_interface_identifier_ = 1U;
 
   interface_identifier_ = previous_interface_identifier_;
+
+  // Create the self-pipe.
+  int pipe_fd_array[2] = {};
+  if(pipe(pipe_fd_array) < 0) 
+  {
+    interface_identifier_ = 0U;
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error {ec, "pipe"};
+  }
+  self_pipe_read_descriptor  = pipe_fd_array[0];
+  self_pipe_write_descriptor = pipe_fd_array[1];
+  for(int i {0}; i < 2; ++i) {
+    int f_getfl_return {fcntl(pipe_fd_array[i], F_GETFL)};
+    f_getfl_return |= O_NONBLOCK;
+    int f_setfl_return {fcntl(pipe_fd_array[i], F_SETFL, f_getfl_return)};
+    if((f_getfl_return == -1) || (f_setfl_return == -1)) 
+    {
+      interface_identifier_ = 0U;
+      close(self_pipe_read_descriptor);
+      close(self_pipe_write_descriptor);
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "fcntl"};
+    }
+  }
 } // RELEASE interface_state_mutex_.
 
 FCGIServerInterface::~FCGIServerInterface()
@@ -294,6 +318,9 @@ FCGIServerInterface::~FCGIServerInterface()
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
+    
+    close(self_pipe_read_descriptor);
+    close(self_pipe_write_descriptor);
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
     // FCGIRequest objects for write mutexes ensures that no write mutex will
@@ -651,6 +678,26 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         ++dds_iter;
     }
 
+    // Clear the self-pipe. It may have been written to to wake up the
+    // interface while it was blocked waiting for incoming connections
+    // or data.
+    int read_return {};
+    constexpr int bl {32};
+    std::uint8_t read_buffer[bl];
+    while((read_return = read(self_pipe_read_descriptor, read_buffer, bl)) > 0)
+      continue;
+    if(read_return == 0) 
+    {
+      bad_interface_state_detected_ = true;
+      throw std::logic_error {"The self-pipe of the interface was found "
+        "to be closed for reading."};
+    }
+    if(errno != EAGAIN) 
+    {
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "read"};
+    }
+
     // Close connection descriptors for which closure was requested.
     // Update interface state to allow FCGIRequest objects to inspect for
     // connection closure. 
@@ -678,13 +725,14 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
   fd_set read_set;
   FD_ZERO(&read_set);
   FD_SET(FCGI_LISTENSOCK_FILENO, &read_set);
-  // 0 + 1 = 1 Set for proper select call if no connected sockets are present.
-  int number_for_select {1};
+  FD_SET(self_pipe_read_descriptor, &read_set);
+  int number_for_select {self_pipe_read_descriptor + 1};
   // Reverse to access highest fd immediately.
   auto map_reverse_iter = record_status_map_.rbegin();
   if(map_reverse_iter != record_status_map_.rend())
   {
-    number_for_select = (map_reverse_iter->first) + 1; // Use (highest fd) + 1.
+    number_for_select = std::max<int>(number_for_select, 
+      (map_reverse_iter->first) + 1); 
     for(/*no-op*/; map_reverse_iter != record_status_map_.rend();
       ++map_reverse_iter)
       FD_SET(map_reverse_iter->first, &read_set);
@@ -717,6 +765,13 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "select"};
   }
+
+  // Check if the interface was corrupted while it blocked on select.
+  { // ACQUIRE interface_state_mutex_.
+    std::lock_guard<std::mutex> interface_state_lock 
+      {FCGIServerInterface::interface_state_mutex_};
+    InterfaceCheck();
+  } // RELEASE interface_state_mutex_.
 
   std::vector<FCGIRequest> requests {};
 
@@ -794,8 +849,9 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
             // FCGIRequest objects tries to acquire interface_state_mutex_.
             // See the catch block immediately below.
             FCGIRequest request {request_id,
-              FCGIServerInterface::interface_identifier_, this, request_data_ptr,
-              write_mutex_ptr, write_mutex_bad_state_ptr};
+              FCGIServerInterface::interface_identifier_, this, 
+              request_data_ptr, write_mutex_ptr, write_mutex_bad_state_ptr, 
+              self_pipe_write_descriptor};
             try
             {
               requests.push_back(std::move(request));

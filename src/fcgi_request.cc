@@ -168,19 +168,20 @@ namespace fcgi_si {
 
 
 FCGIRequest::FCGIRequest()
-: associated_interface_id_   {0U},
-  interface_ptr_             {nullptr},
-  request_identifier_        {RequestIdentifier {}},
-  request_data_ptr_          {nullptr},
-  write_mutex_ptr_           {nullptr},
-  bad_connection_state_ptr_  {nullptr},
-  environment_map_           {},
-  request_stdin_content_     {},
-  request_data_content_      {},
-  role_                      {0U},
-  close_connection_          {false},
-  was_aborted_               {false},
-  completed_                 {false}
+: associated_interface_id_         {0U},
+  interface_ptr_                   {nullptr},
+  request_identifier_              {RequestIdentifier {}},
+  request_data_ptr_                {nullptr},
+  write_mutex_ptr_                 {nullptr},
+  bad_connection_state_ptr_        {nullptr},
+  interface_pipe_write_descriptor_ {-1},
+  environment_map_                 {},
+  request_stdin_content_           {},
+  request_data_content_            {},
+  role_                            {0U},
+  close_connection_                {false},
+  was_aborted_                     {false},
+  completed_                       {false}
 {}
 
 // Implementation notes:
@@ -194,20 +195,22 @@ FCGIRequest::FCGIRequest(
   FCGIServerInterface* interface_ptr,
   RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr,
-  bool* bad_connection_state_ptr)
-  : associated_interface_id_   {interface_id},
-    interface_ptr_             {interface_ptr},
-    request_identifier_        {request_id},
-    request_data_ptr_          {request_data_ptr},
-    write_mutex_ptr_           {write_mutex_ptr},
-    bad_connection_state_ptr_  {bad_connection_state_ptr},
-    environment_map_           {},
-    request_stdin_content_     {},
-    request_data_content_      {},
-    role_                      {request_data_ptr->role_},
-    close_connection_          {request_data_ptr->close_connection_},
-    was_aborted_               {false},
-    completed_                 {false}
+  bool* bad_connection_state_ptr,
+  int write_fd)
+  : associated_interface_id_         {interface_id},
+    interface_ptr_                   {interface_ptr},
+    request_identifier_              {request_id},
+    request_data_ptr_                {request_data_ptr},
+    write_mutex_ptr_                 {write_mutex_ptr},
+    bad_connection_state_ptr_        {bad_connection_state_ptr},
+    interface_pipe_write_descriptor_ {write_fd},
+    environment_map_                 {},
+    request_stdin_content_           {},
+    request_data_content_            {},
+    role_                            {request_data_ptr->role_},
+    close_connection_                {request_data_ptr->close_connection_},
+    was_aborted_                     {false},
+    completed_                       {false}
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
      || write_mutex_ptr == nullptr || bad_connection_state_ptr_ == nullptr)
@@ -232,19 +235,20 @@ FCGIRequest::FCGIRequest(
 }
 
 FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
-: associated_interface_id_   {request.associated_interface_id_},
-  interface_ptr_             {request.interface_ptr_},
-  request_identifier_        {request.request_identifier_},
-  request_data_ptr_          {request.request_data_ptr_},
-  write_mutex_ptr_           {request.write_mutex_ptr_},
-  bad_connection_state_ptr_  {request.bad_connection_state_ptr_},
-  environment_map_           {std::move(request.environment_map_)},
-  request_stdin_content_     {std::move(request.request_stdin_content_)},
-  request_data_content_      {std::move(request.request_data_content_)},
-  role_                      {request.role_},
-  close_connection_          {request.close_connection_},
-  was_aborted_               {request.was_aborted_},
-  completed_                 {request.completed_}
+: associated_interface_id_         {request.associated_interface_id_},
+  interface_ptr_                   {request.interface_ptr_},
+  request_identifier_              {request.request_identifier_},
+  request_data_ptr_                {request.request_data_ptr_},
+  write_mutex_ptr_                 {request.write_mutex_ptr_},
+  bad_connection_state_ptr_        {request.bad_connection_state_ptr_},
+  interface_pipe_write_descriptor_ {request.interface_pipe_write_descriptor_},
+  environment_map_                 {std::move(request.environment_map_)},
+  request_stdin_content_           {std::move(request.request_stdin_content_)},
+  request_data_content_            {std::move(request.request_data_content_)},
+  role_                            {request.role_},
+  close_connection_                {request.close_connection_},
+  was_aborted_                     {request.was_aborted_},
+  completed_                       {request.completed_}
 {
   request.associated_interface_id_ = 0U;
   request.interface_ptr_ = nullptr;
@@ -252,6 +256,7 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.request_data_ptr_ = nullptr;
   request.write_mutex_ptr_ = nullptr;
   request.bad_connection_state_ptr_ = nullptr;
+  request.interface_pipe_write_descriptor_ = -1;
   request.environment_map_.clear();
   request.request_stdin_content_.clear();
   request.request_data_content_.clear();
@@ -275,6 +280,7 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
     request_data_ptr_ = request.request_data_ptr_;
     write_mutex_ptr_ = request.write_mutex_ptr_;
     bad_connection_state_ptr_ = request.bad_connection_state_ptr_;
+    interface_pipe_write_descriptor_ = request.interface_pipe_write_descriptor_;
     environment_map_ = std::move(request.environment_map_);
     request_stdin_content_ = std::move(request.request_stdin_content_);
     request_data_content_ = std::move(request.request_data_content_);
@@ -289,6 +295,7 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
     request.request_data_ptr_ = nullptr;
     request.write_mutex_ptr_ = nullptr;
     request.bad_connection_state_ptr_ = nullptr;
+    request.interface_pipe_write_descriptor_ = -1;
     request.environment_map_.clear();
     request.request_stdin_content_.clear();
     request.request_data_content_.clear();
@@ -355,13 +362,22 @@ FCGIRequest::~FCGIRequest()
            && !(request_data_ptr_->connection_closed_by_interface_))
         {
           interface_ptr_->application_closure_request_set_.insert(
-          request_identifier_.descriptor());
+            request_identifier_.descriptor());
+          InterfacePipeWrite();
         }
         interface_ptr_->RemoveRequest(request_identifier_);
       }
       catch(...) 
       {
         interface_ptr_->bad_interface_state_detected_ = true;
+        try
+        {
+          InterfacePipeWrite();
+        }
+        catch(...)
+        {
+          std::terminate();
+        }
       }
     }
   } // RELEASE interface_state_mutex_.
@@ -402,7 +418,23 @@ bool FCGIRequest::AbortStatus()
     was_aborted_ = true;
     // RemoveRequest implicitly sets bad_interface_state_detected_ if it
     // throws.
-    interface_ptr_->RemoveRequest(request_identifier_);
+    try 
+    {
+      interface_ptr_->RemoveRequest(request_identifier_);
+    }
+    catch(...) 
+    {
+      try 
+      {
+        InterfacePipeWrite();
+      }
+      catch(...) 
+      {
+        // no-op. The interface is already in a bad state and no resources
+        // will be held by the request.
+      }
+      throw;
+    }
     return was_aborted_;
   }
 
@@ -490,7 +522,23 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   if(write_return)
   {
     completed_ = true;
-    interface_ptr_->RemoveRequest(request_identifier_);
+    try 
+    {
+      interface_ptr_->RemoveRequest(request_identifier_);
+    }
+    catch(...) 
+    {
+      try 
+      {
+        InterfacePipeWrite();
+      }
+      catch(...) 
+      {
+        // no-op. The interface is already in a bad state and no resources
+        // will be held by the request.
+      }
+      throw;
+    }
     if(close_connection_)
     {
       try
@@ -498,16 +546,39 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
         // It's possible that the the descriptor is already in the set.
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
+        InterfacePipeWrite();
       }
       catch(...)
       {
         interface_ptr_->bad_interface_state_detected_ = true;
+        try
+        {
+          InterfacePipeWrite();
+        }
+        catch(...)
+        {
+          // no-op.
+        }
         throw;
       }
     }
   }
   return write_return;
 } // RELEASE interface_state_mutex_.
+
+void FCGIRequest::InterfacePipeWrite()
+{
+  // Inform the interface that a connection closure was requested.
+  std::uint8_t pipe_buff[1] = {0};
+  ssize_t write_return {};
+  while(((write_return = write(interface_pipe_write_descriptor_, 
+    pipe_buff, 1)) < 0) && (errno == EINTR))
+    continue;
+  // Failure to write indicates that something is wrong with the
+  // pipe and, hence, the interface.
+  if(write_return < 0)
+    throw std::logic_error {"The interface pipe could not be written to."};
+}
 
 bool FCGIRequest::
 InterfaceStateCheckForWritingUponMutexAcquisition()
@@ -533,7 +604,23 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   {
     completed_   = true;
     was_aborted_ = true;
-    interface_ptr_->RemoveRequest(request_identifier_);
+    try 
+    {
+      interface_ptr_->RemoveRequest(request_identifier_);
+    }
+    catch(...) 
+    {
+      try 
+      {
+        InterfacePipeWrite();
+      }
+      catch(...) 
+      {
+        // no-op. The interface is already in a bad state and no resources
+        // will be held by the request.
+      }
+      throw;
+    }
     return false;
   }
   
@@ -586,12 +673,17 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       was_aborted_ = true;
       interface_ptr_->RemoveRequest(request_identifier_);
       if(insert || close_connection_)
+      {
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
+        InterfacePipeWrite();
+      }
       return true;
     }
     catch(...)
     {
+      if(insert)
+        std::terminate();
       interface_ptr_->bad_interface_state_detected_ = true;
       throw;
     }
@@ -709,8 +801,12 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
                 write_lock.unlock();
               }
               // May ACQUIRE interface_state_mutex_.
-              if(!TryToAddToApplicationClosureRequestSet(true))
-                return false;
+              if((select_return == 0) || 
+                 (working_number_to_write < number_to_write)) 
+              {
+                if(!TryToAddToApplicationClosureRequestSet(true))
+                  return false;
+              }
 
               if(select_return != 0) {
                 std::error_code ec {errno, std::system_category()};

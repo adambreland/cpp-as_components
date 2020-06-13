@@ -273,7 +273,8 @@ class FCGIRequest {
   //    for the RequestData object given by *request_data_ptr.
   FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
     FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
-    std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr);
+    std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr,
+    int write_fd);
 
   // Attempts to complete the STDOUT and STDERR streams and send an
   // FCGI_END_REQUEST record to complete the request. The application status
@@ -324,6 +325,8 @@ class FCGIRequest {
   //       request was default-constructed or moved-from, the call had no
   //       effect.
   bool EndRequestHelper(std::int32_t app_status, std::uint8_t protocol_status);
+
+  void InterfacePipeWrite();
 
   // Checks if the interface associated with the request is in a valid state for
   // writing. This member function is designed to be called immediately after
@@ -443,6 +446,7 @@ class FCGIRequest {
   RequestData* request_data_ptr_;
   std::mutex* write_mutex_ptr_;
   bool* bad_connection_state_ptr_;
+  int interface_pipe_write_descriptor_;
 
   // Request information. Constant after initialization.
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;

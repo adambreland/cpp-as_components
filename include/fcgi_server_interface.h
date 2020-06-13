@@ -744,6 +744,12 @@ class FCGIServerInterface {
   // An application-set overload flag.
   bool application_overload_ {false};
 
+  // File descriptors of the self-pipe which is used for wake ups on state
+  // changes from blocking during I/O multiplexing for incoming connections 
+  // and data.
+  int self_pipe_read_descriptor {};
+  int self_pipe_write_descriptor {};
+
   // This map takes the file descriptor of a connection and accesses the
   // RecordStatus object of the connection. A RecordStatus object summarizes the 
   // current state of record receipt from the client which initiated the
