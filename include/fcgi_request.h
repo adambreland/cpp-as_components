@@ -326,6 +326,23 @@ class FCGIRequest {
   //       effect.
   bool EndRequestHelper(std::int32_t app_status, std::uint8_t protocol_status);
 
+  // A helper function which tries to write a null byte to the interface
+  // pipe and throws an error if it cannot. This function is used in the
+  // current implementation of the prevention of interface blocking in the
+  // presence of local work (connection closure requests) and state changes
+  // (the transition from good to bad interface state). 
+  //
+  // Preconditions:
+  // 1) The interface associated with the request must exist.
+  // 2) The interface associated with the request must be in a valid state.
+  //
+  // Exceptions:
+  // 1) Throws std::logic error if any error from a call to write prevented
+  //    the write. errno error EINTR is handled.
+  //
+  // Effects:
+  // 1) A single null byte was written to the interface pipe
+  //    (interface_pipe_write_descriptor_). errno error EINTR was handled.
   void InterfacePipeWrite();
 
   // Checks if the interface associated with the request is in a valid state for

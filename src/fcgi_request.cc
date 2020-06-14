@@ -91,10 +91,36 @@
 //       interface has been destroyed, has already been put into a bad state,
 //       or the connection of the request has been closed, then the bad state
 //       flag need not be set.
-//    e) Terminating the program:
-//          If the interface cannot be put into a bad state, regardless of
-//       the whether the desire to put the interface into a bad state was
-//       direct or the result of another error, the program must be terminated.
+//    e) Informing the interface while it is blocked waiting for incoming data
+//       and connections that a state change occurred.
+//          The interface has a self-pipe that it monitors for read readiness.
+//       Writes to this pipe are performed by request objects to inform the
+//       interface that a a connection was corrupted and that the interface
+//       was put into a bad state by a request. These mechanism is used to
+//       prevent the interface from blocking when local work is present or
+//       when blocking doesn't make sense because the interface became corrupt.
+//    f) Terminating the program:
+//       1) Obligatory termination: (as invariants cannot be maintained)
+//          a) If the interface cannot be put into a bad state, regardless of
+//             whether the desire to put the interface into a bad state was
+//             direct or the result of another error, the program must be 
+//             terminated.
+//          b) If the interface cannot be informed that a critical state change
+//             has occurred through a write to 
+//             interface_pipe_write_descriptor_, then the program must be
+//             terminated. Only a single "critical state change" is currently
+//             known: the corruption of a connection. If the interface blocked
+//             on incoming data or connections and the client does not have a
+//             response timeout, then the interface and client will wait for
+//             an indeterminate amount of time event though the connection
+//             should be closed by the interface.
+//       2) Voluntary termination:
+//          a) Corruption of the mechanism to inform the interface of state
+//             changes while it is blocked waiting for incoming data and
+//             connections is viewed as a serious error. It can lead to
+//             indeterminate wait times even though the interface may be in
+//             a bad state or may have connections to close. Termination is
+//             performed in these cases.  
 //
 // 2) Discipline for mutex acquisition and release:
 //    a) Immediately after acquisition of interface_state_mutex_, a request
@@ -430,8 +456,7 @@ bool FCGIRequest::AbortStatus()
       }
       catch(...) 
       {
-        // no-op. The interface is already in a bad state and no resources
-        // will be held by the request.
+        std::terminate();
       }
       throw;
     }
@@ -534,8 +559,7 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
       }
       catch(...) 
       {
-        // no-op. The interface is already in a bad state and no resources
-        // will be held by the request.
+        std::terminate();
       }
       throw;
     }
@@ -557,7 +581,7 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
         }
         catch(...)
         {
-          // no-op.
+          std::terminate();
         }
         throw;
       }
@@ -566,6 +590,13 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   return write_return;
 } // RELEASE interface_state_mutex_.
 
+// Implementation note:
+// Preconditions: 
+// 1) The interface associated with the request must exist.
+// 2) The interface associated with the request must be in a valid state.
+//
+// Synchronization: 
+// 1) FCGIServerInterface::interface_state_mutex_ must be held before a call.
 void FCGIRequest::InterfacePipeWrite()
 {
   // Inform the interface that a connection closure was requested.
@@ -576,7 +607,7 @@ void FCGIRequest::InterfacePipeWrite()
     continue;
   // Failure to write indicates that something is wrong with the
   // pipe and, hence, the interface.
-  if(write_return < 0)
+  if(write_return <= 0)
     throw std::logic_error {"The interface pipe could not be written to."};
 }
 
@@ -616,8 +647,7 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
       }
       catch(...) 
       {
-        // no-op. The interface is already in a bad state and no resources
-        // will be held by the request.
+        std::terminate();
       }
       throw;
     }
@@ -682,9 +712,15 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     }
     catch(...)
     {
-      if(insert)
-        std::terminate();
       interface_ptr_->bad_interface_state_detected_ = true;
+      try
+      {
+        InterfacePipeWrite();
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
       throw;
     }
   };
