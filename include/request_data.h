@@ -45,10 +45,7 @@ public:
     return role_;
   }
 
-  inline bool IsRequestComplete() const noexcept
-  {
-    return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ && FCGI_DATA_complete_;
-  }
+  bool IsRequestComplete() const noexcept;
 
   // Attempts to convert the FCGI_PARAMS byte sequence which is encoded in the
   // FastCGI name-value pair format into a std::map object with names as 
