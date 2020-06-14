@@ -7,6 +7,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <limits>
@@ -46,7 +47,7 @@ namespace fcgi_si_test {
 // type: The expected FastCGI record type of the record sequence.
 // id: The expected FastCGI request identifier of each record in the sequence.
 //
-// Requires:
+// Preconditions:
 // 1) The file offset of fd is assumed to be at the start of the record
 //    sequence.
 // 2) It is assumed that no other data is present in the file.
@@ -312,6 +313,7 @@ TEST(Utility, ExtractContent)
   //
   // Other modules whose testing depends on this module:
   // 1) fcgi_si::EncodeNameValuePairs
+  // 2) fcgi_si::PartitionByteSequence
 
   // Case 1: File descriptor equal to zero, empty file.
   bool case_single_iteration {true};
@@ -2782,4 +2784,85 @@ TEST(Utility, ToUnsignedCharacterVector)
       fcgi_si::ToUnsignedCharacterVector(std::numeric_limits<int>::max()),
       (std::vector<uint8_t> {'2','1','4','7','4','8','3','6','4','7'})
     );
+}
+
+TEST(Utility, PartitionByteSequence)
+{
+  // Testing explanation
+  //    Tests call PartitionByteSequence, use writev to write to a temporary
+  // file, and use fcgi_si_test::ExtractContent to retrieve the content of
+  // the written FastCGI record sequence. ExtractContent performs checks on the
+  // header values of type and request ID. The identity of the extracted
+  // content is checked. Since it is unspecified how much data from the
+  // range [begin_iter, end_iter) is encoded, the length of the extracted
+  // content is used to calculate a new iterator value. This value is compared
+  // to the iterator returned by PartitionByteSequence.
+  //
+  // Examined properties:
+  // 1) Value of type: a type from a client, a type from the application
+  //    server, and a type value that is not defined by the FastCGI
+  //    specification.
+  // 2) Value of FCGI_id: equal to 0, greater than zero but less than the
+  //    maximum value, equal to the maximum value.
+  // 3) Size of the content byte sequence:
+  //    a) No content, i.e. begin_iter == end_iter.
+  //    b) Nonzero but 1) much less than the maximum value of a FastCGI record
+  //       body and 2) not a multiple of 8 (so that padding is necessary).
+  //    c) Equal to the size of the maximum value that is less than the FastCGI
+  //       record body size and a multiple of 8 ((2^16 - 1) - 7 = 65528).
+  //    d) So large that a single call can likely not encode all of the content.
+  //       A content byte sequence with a length of 2^25 bytes will be used.
+  //       This value was derived from the assumption that the maximum number
+  //       of struct iovec instances which can be handled by a call to writev
+  //       is less than or equal to 1024. This is the current maximum on Linux.
+  // 4) Content value: the extracted byte sequence must match the original 
+  //    byte sequence.
+  // 5) Iterator value.
+  //
+  // Test cases:
+  // 1) begin_iter == end_iter, 
+  //    type == fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_id == 0.
+  // 2) std::distance(end_iter, begin_iter) == 3,
+  //    type == fcgi_si::FCGIType::kFCGI_STDIN, FCGI_id == 1.
+  // 3) std::distance(end_iter, begin_iter) == 25,
+  //    type == fcgi_si::FCGIType::kFCGI_STDOUT, FCGI_id == 65535 ==
+  //    std::numeric_limits<std::uint16_t>::max().
+  // 4) std::distance(end_iter, begin_iter) == 8,
+  //    type == static_cast<fcgi_si::FCGIType>(20), FCGI_id == 3.
+  // 5) std::distance(end_iter, begin_iter) == 65528,
+  //    type == fcgi_si::FCGIType::kFCGI_PARAMS, FCGI_id == 300.
+  // 6) std::distance(end_iter, begin_iter) == 2^25,
+  //    type == fcgi_si::FCGIType::kFCGI_STDOUT, FCGI_id == 3.
+  //
+  // Modules which testing depends on:
+  // 1) fcgi_si_test::ExtractContent
+  //
+  // Other modules whose testing depends on this module: none.
+
+  char temp_name[] = "/tmp/fcgi_siXXXXXX";
+  int temp_descriptor {mkstemp(temp_name)};
+  if(temp_descriptor < 0)
+    FAIL() << "An error occurred while trying to create a temporary file." <<
+      '\n' << strerror(errno);
+  if(unlink(temp_name) < 0)
+    FAIL() << "The temporary file could not be unlinked." << '\n' <<
+      strerror(errno);
+  
+  // Case 1: begin_iter == end_iter, 
+  // type == fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_id == 0.
+  {
+    std::vector<std::uint8_t> empty {};
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
+    std::vector<std::uint8_t>::iterator> pr {
+      fcgi_si::PartitionByteSequence(empty.begin(), empty.end(), 
+        fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, 0)};
+    int writev_return {writev(temp_descriptor, std::get<1>(pr).data(),
+      std::get<1>(pr).size())};
+    if(writev_return < 0)
+      ADD_FAILURE() << "A call to writev in Case 1 failed.";
+    std::tuple<bool, bool, bool, bool, std::vector<uint8_t>> ecr
+      fcgi_si_test::ExtractContent(temp_descriptor, 
+        fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, 0);
+    
+  }
 }

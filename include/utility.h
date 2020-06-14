@@ -214,11 +214,12 @@ ExtractBinaryNameValuePairs(const uint8_t* content_ptr,
 template <typename ByteIter>
 std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 
-// Determines a partition of the byte sequence defined by
-// [begin_iter, end_iter) whose parts can be sent as the content of FastCGI
-// records. This function is intended to be called in a loop if the byte
-// sequence is too long to be handled in one call. Each call produces headers
-// and scatter-gather write information.
+//    Determines a partition of the byte sequence defined by [begin_iter,
+// end_iter) whose parts can be sent as the content of FastCGI records. 
+// Produces headers and scatter-gather write information which produce a
+// sequence of FastCGI records.
+//    This function is intended to be called in a loop if the byte
+// sequence is too long to be handled in one call.
 //
 // Parameters:
 // begin_iter: An iterator which points to the first byte of the byte
@@ -238,8 +239,18 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 // 2) In the event of a throw, the call had no effect (strong exception 
 //    guarantee).
 //
+// Reference invalidation note:
+// 1) Modification or destruction of either the returned vector of octets
+//    (std::get<0>) or the byte sequence given by [begin_iter, end_iter)
+//    invalidates the returned sequence of struct iovec instances.
+//
 // Effects:
-// 1) Meaning of returned tuple elements:
+// 1) A sequence of struct iovec instances is returned. This sequence contains
+//    an array which can be used in a call to writev. When written with a
+//    scatter-gather write, a sequence of FastCGI records is produced whose
+//    content is a prefix of [begin_iter, end_iter). The fixed information
+//    contained in the record headers is given by type and FCGI_id.
+// 2) Meaning of returned tuple elements:
 //       Access: std::get<0>; Type: std::vector<uint8_t>; A vector of
 //    bytes which holds information which is implicitly referenced in
 //    the struct iovec instances returned by the call.

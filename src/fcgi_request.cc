@@ -7,6 +7,7 @@
 #include <cerrno>
 #include <cstdint>
 
+#include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -496,6 +497,8 @@ bool FCGIRequest::AbortStatus()
 bool FCGIRequest::EndRequestHelper(std::int32_t app_status, 
   std::uint8_t protocol_status)
 {
+  std::cout << "EndRequestHelper entered" << '\n';
+
   if(completed_ || associated_interface_id_ == 0U)
     return false;
 

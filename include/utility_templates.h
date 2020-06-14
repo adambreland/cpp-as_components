@@ -363,9 +363,10 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
   // Use the current Linux default if information cannot be obtained.
   if(remaining_iovec == -1)
       remaining_iovec = 1024;
-  remaining_iovec = std::min<long>(iovec_MAX, std::numeric_limits<int>::max());
+  remaining_iovec = std::min<long>(remaining_iovec, 
+    std::numeric_limits<int>::max());
 
-  std::ptrdiff_t remaining_content_length {&(*end_iter) - &(*end_iter)};
+  std::ptrdiff_t remaining_content_length {&(*end_iter) - &(*begin_iter)};
   ssize_t remaining_ssize_t {ssize_t_MAX};
   
   uint16_t current_record_content_length {};
