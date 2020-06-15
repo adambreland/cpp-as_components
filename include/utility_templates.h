@@ -365,42 +365,57 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
       remaining_iovec = 1024;
   remaining_iovec = std::min<long>(remaining_iovec, 
     std::numeric_limits<int>::max());
-
-  std::ptrdiff_t remaining_content_length {&(*end_iter) - &(*begin_iter)};
+  ssize_t remaining_content_length {std::distance(begin_iter, end_iter)};
   ssize_t remaining_ssize_t {ssize_t_MAX};
-  
-  uint16_t current_record_content_length {};
 
   // The first FCGI_HEADER_LEN (8) bytes are zero for padding.
   std::vector<uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
   std::vector<struct iovec> iovec_list {};
   ssize_t number_to_write {0};
 
+  // Handle the special case of no content.
+  if(begin_iter == end_iter)
+  {
+    std::vector<uint8_t>::iterator header_iter 
+      {noncontent_record_information.insert(noncontent_record_information.end(),
+        FCGI_HEADER_LEN, 0)};
+    PopulateHeader(&(*header_iter), type, FCGI_id, 0, 0);
+    iovec_list.push_back({&(*header_iter), FCGI_HEADER_LEN});
+    number_to_write += FCGI_HEADER_LEN;
+  }
+
+  // While records can be produced and need to be produced, produce a record
+  // with the largest content length up to the contingent maximum.
   while(true)
   {
     // Check if any content can be written in a new record.
-    if(remaining_content_length == 0 || remaining_ssize_t < 2*FCGI_HEADER_LEN ||
-        remaining_iovec < 2)
+    if((remaining_content_length == 0) || 
+       (remaining_ssize_t < 2*FCGI_HEADER_LEN) || (remaining_iovec < 2))
       break;
     // Check if unaligned content must be written so that a padding section is
     // necessary and if this can be done.
-    if(remaining_content_length < 8 && remaining_iovec == 2)
+    if((remaining_content_length < 8) && (remaining_iovec == 2))
       break;
 
-    uint16_t current_record_content_length {std::min<ssize_t>({
-      remaining_ssize_t - FCGI_HEADER_LEN, remaining_content_length, 
-        max_aligned_content_length})};
-    uint8_t padding_length {0};
+    uint16_t current_record_content_length {
+      std::min<ssize_t>({
+        remaining_ssize_t - FCGI_HEADER_LEN,
+        remaining_content_length,
+        max_aligned_content_length
+      })
+    };
+    uint8_t padding_length {0U};
       
     // Check if we must produce a record with aligned content.
     if(remaining_iovec == 2)
     {
-      current_record_content_length = 8*(current_record_content_length / 8);
+      current_record_content_length -= current_record_content_length % 8;
     }
     // Check if we need padding.
     if(uint8_t padding_length_complement = current_record_content_length % 8)
     {
-      padding_length = 8 - padding_length_complement;
+      padding_length = (padding_length_complement) ?
+        8 - padding_length_complement : 0U;
     }
     // Update non-content information.
     std::vector<uint8_t>::iterator header_iter 
@@ -408,11 +423,16 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
         FCGI_HEADER_LEN, 0)};
     PopulateHeader(&(*header_iter), type, FCGI_id,
       current_record_content_length, padding_length);
+      
     // Update iovec information.
     iovec_list.push_back({static_cast<void*>(&(*header_iter)),
       FCGI_HEADER_LEN});
-    iovec_list.push_back({static_cast<void*>(&(*begin_iter)), 
-      current_record_content_length});
+      // The const_cast is necessary as struct iovec contains a void* member,
+      // but a client may pass in a const_iterator.
+    iovec_list.push_back({
+      const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
+      current_record_content_length
+    });
     if(padding_length)
       iovec_list.push_back({static_cast<void*>(
         &(*noncontent_record_information.begin())), padding_length});

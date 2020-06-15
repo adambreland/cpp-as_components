@@ -10,7 +10,6 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <iostream>
 #include <utility>
 #include <vector>
 
@@ -24,8 +23,6 @@ template<typename ByteIter>
 bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
   FCGIType type)
 {
-  std::cout << "Write started" << '\n';
-
   if(completed_ || associated_interface_id_ == 0U)
     return false;
 
@@ -44,8 +41,6 @@ bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
       false
     );
     begin_iter = std::get<3>(partition_return);
-
-    std::cout << "ScattGatherWriteHelper returned" << '\n';
   }
   return write_success;
 }

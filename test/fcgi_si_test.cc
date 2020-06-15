@@ -5,6 +5,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -2240,7 +2241,7 @@ TEST(Utility, EncodeNameValuePairs)
   // The content length of the record is a multiple of eight bytes and,
   // as such, no padding is needed.
   {
-    std::string message {"Case 2"};
+    std::string message {"Case 2, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'}, {'v','l'}}};
     EncodeNameValuePairTester(
@@ -2258,7 +2259,7 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 3: A name-value pair that requires a single FastCGI record. This
   // record requires padding.
   {
-    std::string message {"Case 3"};
+    std::string message {"Case 3, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       {'v','a','l','u','e'}}};
@@ -2276,7 +2277,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 4: As in 3, but with a FCGI_id larger than 255.
   {
-    std::string message {"Case 4"};
+    std::string message {"Case 4, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
       {'v','a','l','u','e'}}};
@@ -2294,7 +2295,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 5: A name-value pair with an empty name and an empty value.
   {
-    std::string message {"Case 5"};
+    std::string message {"Case 5, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{}, {}}};
     EncodeNameValuePairTester(
@@ -2311,7 +2312,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 6: A name-value pair with a non-empty name and an empty value.
   {
-    std::string message {"Case 6"};
+    std::string message {"Case 6, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {}}};
     EncodeNameValuePairTester(
@@ -2328,7 +2329,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 7: Two name-value pairs where each is a duplicate of the other.
   {
-    std::string message {"Case 7"};
+    std::string message {"Case 7, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'o','n','e'}, {'t','w','o'}},
       {{'o','n','e'}, {'t','w','o'}}};
@@ -2347,7 +2348,7 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 8: Multiple name-value pairs that only require a single FastCGI
   // record. The total length of the record does not require padding.
   {
-    std::string message {"Case 8"};
+    std::string message {"Case 8, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
       {{3}, {8}}, {{4}, {16}}, {{5}, {32}}};
@@ -2365,7 +2366,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 9: As in 8, but padding is required.
   {
-    std::string message {"Case 9"};
+    std::string message {"Case 9, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{0}, {1}}, {{1}, {2}}, {{2}, {4}},
       {{3}, {8}}, {{4}, {16}}};
@@ -2385,7 +2386,7 @@ TEST(Utility, EncodeNameValuePairs)
   // the maximum size of a FastCGI record. Note that this also means that
   // four bytes are required to encode the length of this element.
   {
-    std::string message {"Case 10"};
+    std::string message {"Case 10, about line: "};
     message += std::to_string(__LINE__);
     std::vector<uint8_t> large_name(100000, 'a');
     std::vector<NameValuePair> pair_sequence {{std::move(large_name), {1}}};
@@ -2403,7 +2404,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 11: As in 9, but for value instead of name.
   {
-    std::string message {"Case 11"};
+    std::string message {"Case 11, about line: "};
     message += std::to_string(__LINE__);
     std::vector<uint8_t> large_value(100000, 10);
     std::vector<NameValuePair> pair_sequence {{{'n','a','m','e'},
@@ -2422,7 +2423,7 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 12: Multiple name-pairs that require more than one FastCGI record.
   {
-    std::string message {"Case 12"};
+    std::string message {"Case 12, about line: "};
     message += std::to_string(__LINE__);
     std::vector<uint8_t> large_name(100, 'Z');
     std::vector<uint8_t> large_value(100000, 10);
@@ -2444,7 +2445,7 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 13: Multiple name-value pairs where a single name is empty and
   // several values are empty.
   {
-    std::string message {"Case 13"};
+    std::string message {"Case 13, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'a'}, {}}, {{'b'}, {1}},
       {{'c'}, {2}}, {{}, {3}}, {{'e'}, {4}}, {{'f'}, {}}, {{'g'}, {}}};
@@ -2463,7 +2464,7 @@ TEST(Utility, EncodeNameValuePairs)
   // Case 14: Multiple name-value pairs with several cases where names are
   // repeated.
   {
-    std::string message {"Case 14"};
+    std::string message {"Case 14, about line: "};
     message += std::to_string(__LINE__);
     std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'a'}, {1}},
       {{'b'}, {2}}, {{'c'}, {3}}, {{'d'}, {4}}, {{'d'}, {5}}, {{'b'}, {6}}};
@@ -2848,21 +2849,196 @@ TEST(Utility, PartitionByteSequence)
     FAIL() << "The temporary file could not be unlinked." << '\n' <<
       strerror(errno);
   
+  auto PartitionByteSequenceTester = [temp_descriptor](
+    const std::string& message,
+    bool expect_terminal_empty_record,
+    const std::vector<std::uint8_t>& content_seq, 
+    fcgi_si::FCGIType type,
+    std::uint16_t FCGI_id
+  )->void
+  {
+    // Clear the file.
+    if(ftruncate(temp_descriptor, 0) < 0)
+    {
+      ADD_FAILURE() << "A call to ftruncate failed." << '\n' << message;
+      return;
+    }
+    off_t lseek_return {lseek(temp_descriptor, 0, SEEK_SET)};
+    if(lseek_return < 0)
+    {
+      ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
+      return;
+    }
+
+    // Call PartitionByteSequence and write the encoded record sequence.
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
+      std::size_t, std::vector<std::uint8_t>::const_iterator> pr {
+      fcgi_si::PartitionByteSequence(content_seq.begin(), content_seq.end(), 
+        type, FCGI_id)};
+    ssize_t writev_return {};
+
+    while(((writev_return = writev(temp_descriptor, std::get<1>(pr).data(),
+      std::get<1>(pr).size())) == -1) && (errno == EINTR))
+      continue;
+    if((writev_return < 0) || (static_cast<std::size_t>(writev_return) < 
+      std::get<2>(pr)))
+    {
+      ADD_FAILURE() << "A call to writev failed." << '\n' << message;
+      return;
+    }
+
+    // Extract the content and validate.
+    lseek_return = lseek(temp_descriptor, 0, SEEK_SET);
+    if(lseek_return < 0)
+    {
+      ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
+      return;
+    }
+    std::tuple<bool, bool, bool, bool, std::vector<uint8_t>> ecr
+      {fcgi_si_test::ExtractContent(temp_descriptor, type, FCGI_id)};
+    if(!std::get<0>(ecr))
+    {
+      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered "
+        "an error." << '\n' << message;
+      return;
+    }
+    if(!std::get<1>(ecr))
+    {      
+      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent determined that "
+        "a header error was present or an incomplete record was present." << 
+        '\n' << message << '\n' << "Length of the iovec list: " << 
+        std::get<1>(pr).size() << '\n' << "Number to write: " << std::get<2>(pr);
+      return;
+    }
+    if(( std::get<2>(ecr) && !expect_terminal_empty_record) || 
+       (!std::get<2>(ecr) &&  expect_terminal_empty_record))
+    {
+      ADD_FAILURE() << "A terminal empty record mismatch was present." << 
+        '\n' << message;
+      return;
+    }
+    // std::get<3>(ecr) tests record alignment on 8-byte boundaries.
+    // Such alignment is not specified by PartitionByteSequence.
+    if(content_seq.size() && (!std::get<4>(ecr).size()))
+    {
+      ADD_FAILURE() << "PartitionByteSequence caused nothing to be written " 
+        "when content was present." << '\n' << message;
+      return;
+    }
+    // Check for equality of the extracted byte sequence and the prefix of the
+    // content sequence indicated by the information returned by
+    // PartitionByteSequence.
+    std::vector<std::uint8_t>::difference_type returned_length
+      {std::distance(content_seq.begin(), std::get<3>(pr))};
+    if((returned_length > content_seq.size())       ||
+       (returned_length != std::get<4>(ecr).size()) ||
+       (std::mismatch(content_seq.begin(), std::get<3>(pr), 
+                      std::get<4>(ecr).begin())
+        != std::make_pair(std::get<3>(pr), 
+                          std::get<4>(ecr).begin() + returned_length)))
+    {
+      ADD_FAILURE() << "The extracted byte sequence did not match the prefix." 
+        << '\n' << message;
+      return;
+    }
+
+    return;
+  };
+
   // Case 1: begin_iter == end_iter, 
   // type == fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_id == 0.
   {
+    std::string message {"Case 1, about line: "};
+    message += std::to_string(__LINE__);
     std::vector<std::uint8_t> empty {};
-    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
-    std::vector<std::uint8_t>::iterator> pr {
-      fcgi_si::PartitionByteSequence(empty.begin(), empty.end(), 
-        fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, 0)};
-    int writev_return {writev(temp_descriptor, std::get<1>(pr).data(),
-      std::get<1>(pr).size())};
-    if(writev_return < 0)
-      ADD_FAILURE() << "A call to writev in Case 1 failed.";
-    std::tuple<bool, bool, bool, bool, std::vector<uint8_t>> ecr
-      fcgi_si_test::ExtractContent(temp_descriptor, 
-        fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT, 0);
-    
+    PartitionByteSequenceTester(
+      message,
+      true,
+      empty, 
+      fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT,
+      0
+    );
+  }
+
+  // Case 2: std::distance(end_iter, begin_iter) == 3,
+  // type == fcgi_si::FCGIType::kFCGI_STDIN, FCGI_id == 1.
+  {
+    std::string message {"Case 2, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {1,2,3};
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FCGIType::kFCGI_STDIN,
+      1
+    );
+  }
+
+  // Case 3: std::distance(end_iter, begin_iter) == 25,
+  // type == fcgi_si::FCGIType::kFCGI_STDOUT, FCGI_id == 65535 ==
+  // std::numeric_limits<std::uint16_t>::max(). 
+  {
+    std::string message {"Case 3, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 25; ++i)
+      content.push_back(i);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FCGIType::kFCGI_STDOUT,
+      std::numeric_limits<std::uint16_t>::max()
+    );
+  }
+
+  // Case 4: std::distance(end_iter, begin_iter) == 8,
+  // type == static_cast<fcgi_si::FCGIType>(20), FCGI_id == 3.
+  {
+    std::string message {"Case 4, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 8; ++i)
+      content.push_back(i);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      static_cast<fcgi_si::FCGIType>(20),
+      3
+    );
+  }
+
+  // Case 5: std::distance(end_iter, begin_iter) == 65528,
+  // type == fcgi_si::FCGIType::kFCGI_PARAMS, FCGI_id == 300.
+  {
+    std::string message {"Case 5, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 65528; ++i)
+      content.push_back(i); // mod 256 overflow.
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      300
+    );
+  }
+
+  // Case 6: std::distance(end_iter, begin_iter) == 2^25,
+  // type == fcgi_si::FCGIType::kFCGI_STDOUT, FCGI_id == 3.
+  {
+    std::string message {"Case 6, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content(1U << 25, 1U);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FCGIType::kFCGI_STDOUT,
+      3
+    );
   }
 }
