@@ -21,7 +21,11 @@
 
 #include "fcgi_si.h"
 
-namespace fcgi_si_test {
+// Key:
+// BAZEL_DEPENDENCY: This marks a feature which is provided by the Bazel
+//                   testing run-time environment. 
+
+namespace fcgi_si_test { 
 
 // Utility functions and testing of those functions for testing fcgi_si. 
 
@@ -1373,7 +1377,7 @@ TEST(Utility, ExtractContent)
   }
 }
 
-// fcgi_si content testing start
+// fcgi_si content testing start (utility.h)
 
 TEST(Utility, EncodeFourByteLength)
 {
@@ -2840,12 +2844,22 @@ TEST(Utility, PartitionByteSequence)
   //
   // Other modules whose testing depends on this module: none.
 
-  char temp_name[] = "/tmp/fcgi_siXXXXXX";
-  int temp_descriptor {mkstemp(temp_name)};
+  // Create a temporary file in the temporary directory offered by Bazel.
+  // BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
+  const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
+  if(!tmpdir_ptr)
+    FAIL() << "The directory for temporary files supplied by Bazel is missing.";
+  std::string temp_template {tmpdir_ptr};
+  temp_template += "/fcgi_si_TEST_XXXXXX";
+  std::unique_ptr<char []> char_array_uptr {new char[temp_template.size() + 1]};
+    // Initialize the new character array.
+  std::memcpy(char_array_uptr.get(), temp_template.data(), 
+    temp_template.size() + 1);
+  int temp_descriptor {mkstemp(char_array_uptr.get())};
   if(temp_descriptor < 0)
     FAIL() << "An error occurred while trying to create a temporary file." <<
       '\n' << strerror(errno);
-  if(unlink(temp_name) < 0)
+  if(unlink(char_array_uptr.get()) < 0)
     FAIL() << "The temporary file could not be unlinked." << '\n' <<
       strerror(errno);
   
@@ -3041,4 +3055,14 @@ TEST(Utility, PartitionByteSequence)
       3
     );
   }
+}
+
+// fcgi_si content (FCGIServerInterface)
+
+TEST(FCGIServerInterface, ConstructionExceptions)
+{
+  // Check that STDIN_FILENO is open
+  
+  // Close STDIN_FILENO and establish a socket which the FCGIServerInterface
+  // constructor will interact with.
 }

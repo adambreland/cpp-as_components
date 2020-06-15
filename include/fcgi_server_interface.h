@@ -221,6 +221,7 @@ class FCGIServerInterface {
   //                      b) The request has yet to be assigned to the
   //                         application by the generation of an FCGIRequest
   //                         object.
+  //                      The default value is EXIT_FAILURE.
   //
   // Preconditions:
   // 1) Signal handling: SIGPIPE must be handled by the application. Failure to

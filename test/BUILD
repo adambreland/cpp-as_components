@@ -5,5 +5,5 @@ cc_test(
         "@googletest//:gtest",
         "@googletest//:gtest_main"],
     srcs = ["//test:fcgi_si_test.cc"],
-    timeout = "long"
+    timeout = "short"
 )
