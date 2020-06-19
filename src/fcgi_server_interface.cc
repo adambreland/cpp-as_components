@@ -439,10 +439,11 @@ int FCGIServerInterface::AcceptConnection()
   int new_socket_type {getsockopt_int_buffer};
 
   // Check if the interface is overloaded, the maximum connection count was
-  // met, or is of an incorrect type. Reject by closing if so.
-  if(application_overload_ || 
-    record_status_map_.size() >= maximum_connection_count_ ||
-    new_socket_type != SOCK_STREAM)
+  // met, or the socket is of an incorrect type. Reject by closing if so.
+  if(application_overload_                                 || 
+    (record_status_map_.size() >= 
+     static_cast<unsigned int>(maximum_connection_count_)) ||
+    (new_socket_type != SOCK_STREAM))
   {
     return 0;
   }
@@ -1052,6 +1053,7 @@ void FCGIServerInterface::RemoveConnection(int connection)
     }
     else // No requests for the connection.
     {
+      // Synchronization note:
       // Order as given. If erasure is not ordered before the call of
       // close(connection), it is possible that erasure does not occur and
       // close(connection) will be called twice.
@@ -1295,6 +1297,9 @@ bool FCGIServerInterface::
 SendRecord(int connection, const std::uint8_t* buffer_ptr, 
   std::int_fast32_t count)
 {
+  if(count < 0)
+    throw std::logic_error {"A negative value was provided for count."};
+
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
     mutex_map_iter {write_mutex_map_.find(connection)};
   // Defensive check on write mutex existence for connection.
@@ -1338,9 +1343,23 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     buffer_ptr, count, &timeout)};
   
   // Check for errors which prevented a full write.
-  if(number_written < count)
+  if(number_written < static_cast<std::size_t>(count))
   {
+    // Indicate that the connection is corrupt if it is still open and some 
+    // data was written.
+    //
+    // Synchronization note: If the connection was corrupted by a partial write,
+    // indication of this corruption must be made before releasing the write
+    // mutex. This means that this if-statement must be before the next
+    // try-catch block. If insertion throws, the 
+    if((errno != EPIPE) && (number_written != 0U))
+      mutex_map_iter->second.second = true;
+
     // Add the connection to the non-shared closure set.
+    //
+    // Synchronization note: This try-catch block unlocks write_lock. It is
+    // placed after the above if-statement to ensure that connection corruption
+    // state is correctly set without a race condition.
     try
     {
       connections_to_close_set_.insert(connection);
@@ -1366,11 +1385,6 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
       throw;
     } // RELEASE interface_state_mutex_.
 
-    // Indicate that the connection is corrupt if it is still open and some 
-    // data was written.
-    if((errno != EPIPE) && (number_written != 0U))
-      mutex_map_iter->second.second = true;
-
     if((errno == EPIPE) || (errno == 0))
       return false;
     else // Any other error is considered exceptional.
@@ -1378,7 +1392,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "An error from a call to "
         "socket_functions::WriteOnSelect."};
-    } // Conditionally RELEASE the write mutex. 
+    } 
   }
   return true;
 } // RELEASE the write mutex for the connection.

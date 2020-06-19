@@ -33,7 +33,7 @@
 //          Requests are responsible for removing themselves from their
 //       interface. The interface will not remove an item from request_map_ if
 //       the associated request has been assigned to the application.
-//       (Assignment and FCGIRequest object construction are equivalent.)
+//       ("Assignment" and FCGIRequest object construction are equivalent.)
 //          Removal must occur when the request is no longer relevant to the
 //       interface. This occurs when:
 //       1) A call to Complete is made on the request.
@@ -88,15 +88,18 @@
 //          Anytime interface state should be updated but the update cannot be
 //       made due to an error, the interface should be put into a bad state
 //       by setting interface_ptr_->bad_interface_state_detected_. If the
-//       interface has been destroyed, has already been put into a bad state,
-//       or the connection of the request has been closed, then the bad state
-//       flag need not be set.
+//       interface has been destroyed or has already been put into a bad state,
+//       then the bad state flag need not be set. In cases where the interface
+//       update is adding the connection to application_closure_request_set_,
+//       the update is not actually needed if the connection was closed by the
+//       interface. As such, the interface need not be put into a bad state in
+//       this case.
 //    e) Informing the interface while it is blocked waiting for incoming data
-//       and connections that a state change occurred.
+//       and connections that an interface state change occurred.
 //          The interface has a self-pipe that it monitors for read readiness.
 //       Writes to this pipe are performed by request objects to inform the
 //       interface that a a connection was corrupted and that the interface
-//       was put into a bad state by a request. These mechanism is used to
+//       was put into a bad state by a request. This mechanism is used to
 //       prevent the interface from blocking when local work is present or
 //       when blocking doesn't make sense because the interface became corrupt.
 //    f) Terminating the program:
@@ -105,14 +108,17 @@
 //             whether the desire to put the interface into a bad state was
 //             direct or the result of another error, the program must be 
 //             terminated.
-//          b) If the interface cannot be informed that a critical state change
-//             has occurred through a write to 
+//          b)    If the interface cannot be informed that a critical state
+//             change has occurred through a write to 
 //             interface_pipe_write_descriptor_, then the program must be
 //             terminated. Only a single "critical state change" is currently
-//             known: the corruption of a connection. If the interface blocked
-//             on incoming data or connections and the client does not have a
-//             response timeout, then the interface and client will wait for
-//             an indeterminate amount of time event though the connection
+//             known: the corruption of a connection. 
+//                In this case, if the interface is blocked waiting for
+//             incoming data or connections and the client does not have a
+//             response time-out, then failure to be able to wake the interface
+//             about the connection corruption or an interface bad state
+//             transition may cause the interface and the client to wait for
+//             an indeterminate amount of time even though the connection
 //             should be closed by the interface.
 //       2) Voluntary termination:
 //          a) Corruption of the mechanism to inform the interface of state
@@ -184,12 +190,25 @@
 //    c) Of the methods of FCGIServerInterface, only RemoveRequest may be
 //       called. It must be called under mutex protection.
 //
-// 4) General notes:
+// 4) General implementation notes:
 //    a) The destructor of an FCGIRequest object acquires and releases
 //       FCGIServerInterface::interface_state_mutex_. This is not problematic
 //       when requests are destroyed within the scope of user code. It will
 //       lead to deadlock in implementation code if the destructor is executed
 //       in a scope which owns the interface mutex.
+//
+// 5) Discipline brief summary:
+//    a) Updating completed_ and was_aborted_ of an FCGIRequest object.
+//    b) Removing a request from the interface.
+//    c) Adding a connection to application_closure_request_set_.
+//    d) Marking a connection as corrupted.
+//    e) Writing to the interface self-pipe (i.e. waking the interface if it
+//       is asleep).
+//    f) Marking the interface as corrupted.
+//    g) Obeying mutex acquisition and release rules.
+//    h) Not accessing private interface state or methods even though
+//       a pointer to the interface is available and FCGIRequest is a friend.
+//    i) Terminating the program when invariants cannot be maintained.
 namespace fcgi_si {
 
 
@@ -619,16 +638,14 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   {
     completed_   = true;
     was_aborted_ = true;
-    throw std::runtime_error {"The FCGIServerInterface associated "
-      "with an FCGIRequest object was destroyed before the request."};
+    return false;
   }
   // Check if the interface is in a bad state.
   if(interface_ptr_->bad_interface_state_detected_)
   {
     completed_   = true;
     was_aborted_ = true;
-    throw std::runtime_error {"The FCGIServerInterface associated "
-      "with an FCGIRequest object was in a bad state."};
+    return false;
   }
   // Check if the interface has closed the connection.
   if(request_data_ptr_->connection_closed_by_interface_)
@@ -666,19 +683,52 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
 
   // An internal helper function used when application_closure_request_set_
   // of the interface must be accessed. This occurs when:
-  // 1) The connection was found to be closed and close_connection_ == true.
+  // 1) The connection was found to be closed by an attempt to write and 
+  //    close_connection_ == true. (Addition to the set is not strictly
+  //    necessary as closure would eventually be discovered by the interface.)
   // 2) The connection from the server to the client was corrupted by
-  //    an incomplete write.
+  //    an incomplete write during the current call to ScatterGatherWriteHelper.
+  // 3) A time-out occurred when blocked for writing. The client is regarded as
+  //    dead.
+  // 4) An error occurred when trying to wait for write readiness. Putting
+  //    the connection in application_closure_request_set_ is a pragmatic
+  //    approach to handling the error internally.
   //
-  // If insert == true, insertion is attempted.
-  // If insert == false, insertion is attempted if close_connection == true.
+  // Parameters:
+  // insert: If force_insert == true, insertion is attempted.
+  //         If force_insert == false, insertion is attempted if 
+  //         close_connection == true.
   //
-  // Returns false if the interface was found to be corrupted.
-  // Returns true if FCGIRequest object updates and conditional connection
-  // insertion were successful.
-  // May throw.
+  // Preconditions:
+  // 1) interface_state_mutex cannot be held locally. (That is,
+  //    interface_state_mutex cannot be held if interface_mutex_held is false.)
+  //
+  // Synchronization:
+  // 1) interface_state_mutex_ will be conditionally acquired depending on the
+  //    value of interface_mutex_held.
+  // 2) If interface_state_mutex_ was acquired, it was released upon normal
+  //    exit.
+  //
+  // Exceptions:
+  // 1) May throw exceptions derived from std::exception.
+  // 2) In the event of a throw:
+  //    a) completed_ and was_aborted_ were set.
+  //    b) The interface is in a bad state.
+  // 3) Program termination may occur if interface state cannot be updated
+  //    during a throw.
+  // 
+  // Effects:
+  // 1) If false was returned, InterfaceStateCheckForWritingUponMutexAcquisition
+  //    returned false.
+  // 2) If true was returned:
+  //    a) completed_ and was_aborted_ were set.
+  //    b) The request was removed from the interface.
+  //    c) Conditional connection insertion to application_closure_request_set_
+  //       was successful.
+  //    d) If connection insertion occurred, a write was performed on the
+  //       interface self-pipe.
   auto TryToAddToApplicationClosureRequestSet = 
-  [this, interface_mutex_held, &interface_state_lock](bool insert)->bool
+  [this, interface_mutex_held, &interface_state_lock](bool force_insert)->bool
   {
     // Conditionally ACQUIRE interface_state_mutex_.
     if(!interface_mutex_held)
@@ -691,8 +741,10 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       {
         std::terminate();
       }
+      // Conditionally RELEASE interface_state_mutex_.
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
       {
+        interface_state_lock.unlock();
         return false;
       }
     }
@@ -702,12 +754,15 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       completed_ = true;
       was_aborted_ = true;
       interface_ptr_->RemoveRequest(request_identifier_);
-      if(insert || close_connection_)
+      if(force_insert || close_connection_)
       {
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
         InterfacePipeWrite();
       }
+      // Conditionally RELEASE interface_state_mutex_.
+      if(interface_state_lock.owns_lock())
+        interface_state_lock.unlock();
       return true;
     }
     catch(...)
@@ -744,6 +799,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       // Note that the write mutex is not released once some data has been
       // written. As such, a throw from lock() does not risk corrupting
       // the connection.
+      // This is a case where a throw may occur but FCGIRequest object state
+      // is not updated.
       interface_state_lock.lock();
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
         return false;
@@ -754,6 +811,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     {
       // As above, no data will have been written to the connection. A throw
       // from lock() does not risk connection corruption.
+      // This is a case where a throw may occur but FCGIRequest object state
+      // is not updated.
       write_lock.lock();
       if(*bad_connection_state_ptr_)
       {
@@ -763,8 +822,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         completed_ = true;
         was_aborted_ = true;
         interface_ptr_->RemoveRequest(request_identifier_);
-        throw std::runtime_error {"A connection from the "
-          "interface to the client was found which had a corrupted state."};
+        return false;
       }
     }
     // *write_mutex_ptr_ is held.
@@ -778,6 +836,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::tuple<struct iovec*, int, std::size_t> write_return
       {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
         working_number_to_write)};
+    // Start return processing if-else-if ladder.
     if(std::get<2>(write_return) == 0) // All data was written.
     {
       // RELEASE *write_mutex_ptr_.
@@ -820,7 +879,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               // written, that data would be corrupt as a partial record was
               // written here. However, indicating that the connection should
               // be closed requires an update that must be done under the
-              // protection of interface_state_mutex_. But, this mutex cannot 
+              // protection of interface_state_mutex_. Yet, this mutex cannot 
               // be acquired if the write mutex is held. And, the write mutex
               // cannot be released without indicating some error as another
               // thread may hold interface_state_mutex_ to acquire the write
@@ -836,20 +895,21 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
                 *bad_connection_state_ptr_ = true;
                 write_lock.unlock();
               }
+
               // May ACQUIRE interface_state_mutex_.
-              if((select_return == 0) || 
-                 (working_number_to_write < number_to_write)) 
-              {
-                if(!TryToAddToApplicationClosureRequestSet(true))
-                  return false;
-              }
+              // Connection closure is attempted even if nothing was written
+              // and select had an error other than EINTR. This is done as
+              // the error can likely not be solved and will likely affect
+              // other writes to the connection. Also, the fact that blocking
+              // occurred at all on the connection is suspicious.
+              TryToAddToApplicationClosureRequestSet(true);
 
               if(select_return != 0) {
                 std::error_code ec {errno, std::system_category()};
                 throw std::system_error {ec, "select"};
               }
               else
-                return false; // A timeout is not exceptional.
+                return false; // A time-out is not exceptional.
             }
             // else: loop (EINTR is handled)
           }
@@ -878,18 +938,16 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       {
         // The same situation applies here as above. Writing some data and
         // exiting corrupts the connection.
-
         // Conditionally RELEASE *write_mutex_ptr_.
-        if(std::get<2>(write_return) < number_to_write) // Some but not all.
-        {
+        if(std::get<2>(write_return) < number_to_write)
           *bad_connection_state_ptr_ = true;
-          // *write_mutex_ptr_ MUST NOT be held to prevent potential deadlock.
-          // RELEASE *write_mutex_ptr_.
-          write_lock.unlock();
-          // May ACQUIRE interface_state_mutex_.
-          if(!TryToAddToApplicationClosureRequestSet(true))
-            return false;
-        }
+      
+        // *write_mutex_ptr_ MUST NOT be held to prevent potential deadlock.
+        // RELEASE *write_mutex_ptr_.
+        write_lock.unlock();
+        // May ACQUIRE interface_state_mutex_.
+        TryToAddToApplicationClosureRequestSet(true);
+
         std::error_code ec {errno, std::system_category()};
         throw std::system_error {ec, "write from a call to "
           "socket_functions::SocketWrite"};

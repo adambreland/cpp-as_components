@@ -348,7 +348,8 @@ class FCGIServerInterface {
   // Iterates over the referenced containers of descriptors. These descriptors
   // are scheduled for closure. Attempts to close the descriptors. This 
   // helper is intended to iterate over connections_to_close_set_ and
-  // application_closure_request_set_.
+  // application_closure_request_set_. (A template was used to allow the
+  // types of these sets to be easily changed in the future if this is desired.)
   // 
   // Parameters:
   // first_ptr, second_ptr:   Pointers to containers which contain connected
@@ -362,8 +363,8 @@ class FCGIServerInterface {
   //
   // Preconditions:  
   // 1) interface_state_mutex_ must be held prior to a call.
-  // 2) (Duck typing) C::iterator and C::value_type are types and C::erase is a
-  //    member function. All have the usual semantics.
+  // 2) (Duck typing) C::iterator and C::value_type are defined types and
+  //    C::erase is a member function. All have the usual semantics.
   // 3) C::value_type is int.
   // 4) C::iterator satisfies, at least, the requirements of 
   //    LegacyForwardIterator.
@@ -705,8 +706,9 @@ class FCGIServerInterface {
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
   // 2) Explicit throws:
-  //    a) std::logic_error if the interface state was found to be corrupt.
-  //    b) std::system_error if an unrecoverable system error occurred
+  //    a) std::logic_error if count is negative.
+  //    b) std::logic_error if connection was missing from the interface.
+  //    c) std::system_error if an unrecoverable system error occurred
   //       during the write. 
   // 3) After a throw, several changes in interface state may have occurred:
   //    a) The connection could have been added to connections_to_close_set_.

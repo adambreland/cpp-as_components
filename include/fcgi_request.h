@@ -187,8 +187,12 @@ class FCGIRequest {
   //       client.
   // 2) If false was returned.
   //    a) If the request had not been previously completed:
-  //       1) The connection was found to be closed. No further action need be
-  //          taken to service the request. The request should be destroyed.
+  //       1) The connection was found to be closed or the connection was found
+  //          to be corrupted. In the case of corruption, it is unknown how
+  //          the connection became corrupt. No further action need be taken to
+  //          service the request. The request should be destroyed. The
+  //          should be present in a closure set (in the case of corruption,
+  //          this may depend on the entity which corrupted the connection).
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
   //    b) If the request had been previously completed or the request was
@@ -317,7 +321,7 @@ class FCGIRequest {
   //       will have no effect.
   // 2) If the call returned false:
   //    a) If the request had not been completed at the time of the call:
-  //       1) It was discovered that the connection to the client is closed.
+  //            It was discovered that the connection to the client is closed.
   //          No further action is needed for this request.
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
@@ -355,14 +359,13 @@ class FCGIRequest {
   // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Exceptions:
-  // 1) May throw exceptions derived from std::exception. After a throw, it 
-  //    must be assumed that the request cannot be serviced and should be 
-  //    destroyed.
-  // 2) If an exception was thrown:
-  //    a) The request cannot be serviced. The request was completed and should
-  //       be destroyed.
-  //    b) Either the interface of the request has been destroyed or
+  // 1) May throw exceptions derived from std::exception.
+  // 2) After a throw, it  must be assumed that the request cannot be serviced.
+  //    a) The request was completed and should be destroyed.
+  //    b) The interface is in a bad state, i.e.
   //       bad_interface_state_detected_ == true.
+  // 3) Program termination may occur if interface state cannot be updated
+  //    during a throw.
   //
   // Effects:
   // 1) If true was returned:
@@ -372,14 +375,24 @@ class FCGIRequest {
   //       description, i.e. it is associated with the connected socket of the
   //       request.
   // 2) If false was returned:
-  //    a) The connection was closed by the interface.
-  //    b) The request was completed. completed_ and was_aborted_ were set.
-  //    c) The request was removed from the interface.
+  //    Any of the following interface states may have been found:
+  //    a) No interface exists.
+  //    b) An interface other than the interface which created the request
+  //       object exists.
+  //    c) The interface of the request is corrupt.
+  //    d) The interface closed the connection of the request.
+  //
+  //    In all of these cases:
+  //    a) The request was completed. completed_ and was_aborted_ were set.
+  //
+  //    If the proper interface was in a good state but closed the connection:
+  //    a) The request was removed from the interface.
   bool InterfaceStateCheckForWritingUponMutexAcquisition();
 
   //    Attempts to a perform a scatter-gather write on the socket given
-  // by request_identifier_.descriptor(). If errors occur during the write
-  // or if connection closure is discovered, interface invariants are
+  // by request_identifier_.descriptor(). Write blocking is subject to the
+  // time-out limit set by fcgi_si::write_block_timeout. If errors occur during
+  // the write or if connection closure is discovered, interface invariants are
   // maintained. If interface invariants may not be maintained, the program
   // is terminated.
   //    Note that scatter-gather I/O is useful in general for request servicing
@@ -418,9 +431,7 @@ class FCGIRequest {
   //       destroyed.
   //    c) The transition of completed_ from false to true may or may not
   //       have occurred.
-  //    d) Connection corruption invariants were maintained. The connection
-  //       may have been corrupted. If so, the descriptor of the connection was
-  //       added to application_closure_request_set_.
+  //    d) Connection corruption invariants were maintained.
   // 3) Program termination may occur if invariants cannot be maintained during
   //    exceptional behavior.
   //
@@ -434,16 +445,24 @@ class FCGIRequest {
   //    a) The message was sent successfully.
   //    b) No change in request state occurred.
   // 2) If false was returned:
-  //    Either it was discovered that the connection was closed or writing 
-  //    timed out relative to fcgi_si::write_block_timeout.
+  //    Either:
+  //    a) The connection was found to be closed.
+  //    b) InterfaceStateCheckForWritingUponMutexAcquisition returned false.
+  //    c) The connection was found to be in a corrupted state. 
+  //    d) A time-out relative to fcgi_si::write_block_timeout occurred.
+  //    
+  //    For any of these cases:
   //    a) The request should be destroyed.
   //    b) completed_ == true.
-  //    c) The request was removed from the interface.
-  //    d) Connection corruption invariants were maintained. The connection
+  //    c) Connection corruption invariants were maintained. The connection
   //       may have been corrupted. If so, the descriptor of the connection
   //       was added to application_closure_request_set_.
-  //    e) A timeout caused the connection to be added to
-  //       application_closure_request_set_.
+  //
+  //    If a time-out occurred, the connection was added to
+  //    application_closure_request_set_.
+  //
+  //    If the proper interface is in a good state, the request was removed
+  //    from the interface.
   bool ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     std::size_t number_to_write, bool interface_mutex_held);
 

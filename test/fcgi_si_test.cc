@@ -22,7 +22,7 @@
 #include "fcgi_si.h"
 
 // Key:
-// BAZEL_DEPENDENCY: This marks a feature which is provided by the Bazel
+// BAZEL DEPENDENCY: This marks a feature which is provided by the Bazel
 //                   testing run-time environment. 
 
 namespace fcgi_si_test { 
@@ -2889,8 +2889,8 @@ TEST(Utility, PartitionByteSequence)
       std::size_t, std::vector<std::uint8_t>::const_iterator> pr {
       fcgi_si::PartitionByteSequence(content_seq.begin(), content_seq.end(), 
         type, FCGI_id)};
-    ssize_t writev_return {};
 
+    ssize_t writev_return {};
     while(((writev_return = writev(temp_descriptor, std::get<1>(pr).data(),
       std::get<1>(pr).size())) == -1) && (errno == EINTR))
       continue;
@@ -2933,6 +2933,9 @@ TEST(Utility, PartitionByteSequence)
     }
     // std::get<3>(ecr) tests record alignment on 8-byte boundaries.
     // Such alignment is not specified by PartitionByteSequence.
+
+    // This check ensures that PartitionByteSequence encodes some content
+    // when content is given. The next check does not verify this property.
     if(content_seq.size() && (!std::get<4>(ecr).size()))
     {
       ADD_FAILURE() << "PartitionByteSequence caused nothing to be written " 
