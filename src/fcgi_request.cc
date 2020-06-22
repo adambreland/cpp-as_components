@@ -96,12 +96,19 @@
 //       this case.
 //    e) Informing the interface while it is blocked waiting for incoming data
 //       and connections that an interface state change occurred.
-//          The interface has a self-pipe that it monitors for read readiness.
-//       Writes to this pipe are performed by request objects to inform the
-//       interface that a a connection was corrupted and that the interface
-//       was put into a bad state by a request. This mechanism is used to
-//       prevent the interface from blocking when local work is present or
-//       when blocking doesn't make sense because the interface became corrupt.
+//       1) The interface has a self-pipe that it monitors for read readiness.
+//          Writes to this pipe are performed by request objects to inform the
+//          interface of two state changes:
+//          a) a connection was corrupted.
+//          b) that the interface was put into a bad state by a request.
+//          This mechanism is used to prevent the interface from blocking when
+//          local work is present or when blocking doesn't make sense because
+//          the interface was corrupted.
+//       2) Writes to the self-pipe will be associated with adding a descriptor
+//          to application_closure_request_set_ (a connection was corrupted) or
+//          setting bad_interface_state_detected_. The write must occur within
+//          the same period of mutex ownership that is used to perform these
+//          actions. Race conditions may occur otherwise.
 //    f) Terminating the program:
 //       1) Obligatory termination: (as invariants cannot be maintained)
 //          a) If the interface cannot be put into a bad state, regardless of

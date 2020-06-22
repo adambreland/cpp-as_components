@@ -339,10 +339,14 @@ class FCGIRequest {
   // Preconditions:
   // 1) The interface associated with the request must exist.
   // 2) The interface associated with the request must be in a valid state.
+  // 3) interface_state_mutex_ must be held prior to a call.
   //
   // Exceptions:
   // 1) Throws std::logic error if any error from a call to write prevented
   //    the write. errno error EINTR is handled.
+  //
+  // Synchronization:
+  // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Effects:
   // 1) A single null byte was written to the interface pipe

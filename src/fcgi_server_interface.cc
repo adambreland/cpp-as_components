@@ -1021,12 +1021,18 @@ void FCGIServerInterface::RemoveConnection(int connection)
 
   try
   {
-    bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
-    // ACQUIRE and RELEASE the write mutex of the connection to ensure that a 
-    // request does not hold it while the connection is being erased.
-    std::unique_lock<std::mutex> write_lock
-      {*(write_mutex_map_.at(connection).first)};
+    std::unique_lock<std::mutex> write_lock 
+      {*(write_mutex_map_.at(connection).first), std::defer_lock};
+    // Attempt to ACQUIRE the write mutex of the connection. If acquired, 
+    // RELEASE. This process ensures that a request does not hold the write
+    // lock while the connection is being erased. This in ensured as the
+    // interface mutex is held over the entire process.
+    bool locked {write_lock.try_lock()};
+    if(!locked)
+      return false;
     write_lock.unlock();
+
+    bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
     // Close the connection in one of two ways.
     if(assigned_requests)
     {
@@ -1065,6 +1071,7 @@ void FCGIServerInterface::RemoveConnection(int connection)
         throw std::system_error {ec, "close"};
       }
     }
+    return true;
   }
   catch(...)
   {

@@ -12,7 +12,8 @@ namespace fcgi_si {
 // occurs in. In this sense, it is equivalent to performing a set union on the
 // two lists and then iterating over the union.
 // 
-// This function also clears both lists during the single processing pass.
+// This function also tries to clear both lists during the single processing
+// pass.
 template <typename C>
 void FCGIServerInterface::
 ConnectionClosureProcessing(C* first_ptr, typename C ::iterator first_iter,
@@ -27,53 +28,76 @@ ConnectionClosureProcessing(C* first_ptr, typename C ::iterator first_iter,
 
   try
   {
-    while(first_iter != first_end_iter || second_iter != second_end_iter)
+    while((first_iter != first_end_iter) || (second_iter != second_end_iter))
     {
       if(first_iter == first_end_iter)
       {
         while(second_iter != second_end_iter)
         {
-          RemoveConnection(*second_iter);
-          typename C ::iterator second_copy_for_erasure_iter {second_iter};
-          ++second_iter;
-          second_ptr->erase(second_copy_for_erasure_iter);
+          if(RemoveConnection(*second_iter))
+          {
+            typename C ::iterator second_copy_for_erasure_iter {second_iter};
+            ++second_iter;
+            second_ptr->erase(second_copy_for_erasure_iter);
+          }
+          else
+            ++second_iter;
         }
       }
       else if(second_iter == second_end_iter)
       {
         while(first_iter != first_end_iter)
         {
-          RemoveConnection(*first_iter);
-          typename C ::iterator first_copy_for_erasure_iter  {first_iter};
-          ++first_iter;
-          first_ptr->erase(first_copy_for_erasure_iter);
+          if(RemoveConnection(*first_iter))
+          {
+            typename C ::iterator first_copy_for_erasure_iter  {first_iter};
+            ++first_iter;
+            first_ptr->erase(first_copy_for_erasure_iter);
+          }
+          else
+            ++first_iter;
         }
       }
       else
       {
         if(*first_iter == *second_iter)
         {
-          RemoveConnection(*first_iter);
-          typename C ::iterator first_copy_for_erasure_iter  {first_iter};
-          typename C ::iterator second_copy_for_erasure_iter {second_iter};
-          ++first_iter;
-          ++second_iter;
-          first_ptr->erase(first_copy_for_erasure_iter);
-          second_ptr->erase(second_copy_for_erasure_iter);
+          if(RemoveConnection(*first_iter))
+          {
+            typename C ::iterator first_copy_for_erasure_iter  {first_iter};
+            typename C ::iterator second_copy_for_erasure_iter {second_iter};
+            ++first_iter;
+            ++second_iter;
+            first_ptr->erase(first_copy_for_erasure_iter);
+            second_ptr->erase(second_copy_for_erasure_iter);
+          }
+          else
+          {
+            ++first_iter;
+            ++second_iter;
+          }
         }
         else if(*first_iter < *second_iter)
         {
-          RemoveConnection(*first_iter);
-          typename C ::iterator first_copy_for_erasure_iter  {first_iter};
-          ++first_iter;
-          first_ptr->erase(first_copy_for_erasure_iter);
+          if(RemoveConnection(*first_iter))
+          {
+            typename C ::iterator first_copy_for_erasure_iter  {first_iter};
+            ++first_iter;
+            first_ptr->erase(first_copy_for_erasure_iter);
+          }
+          else
+            ++first_iter;
         }
         else // *first_iter > *second_iter
         {
-          RemoveConnection(*second_iter);
-          typename C ::iterator second_copy_for_erasure_iter {second_iter};
-          ++second_iter;
-          second_ptr->erase(second_copy_for_erasure_iter);
+          if(RemoveConnection(*second_iter)_
+          {
+            typename C ::iterator second_copy_for_erasure_iter {second_iter};
+            ++second_iter;
+            second_ptr->erase(second_copy_for_erasure_iter);
+          }
+          else
+            ++second_iter;
         }
       }
     }

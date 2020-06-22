@@ -388,7 +388,7 @@ class FCGIServerInterface {
   //    atomic fashion. This allows the connection to be closed while 
   //    preventing the reuse of the descriptor by the interface while 
   //    requests which use that descriptor are still present.
-  // 4) For every request which is associated with one of the descriptors in 
+  // 4) For every request which was associated with one of the descriptors in 
   //    the sets, the connection_closed_by_interface_ flag of the RequestData 
   //    object of the request was set.
   // 5) write_mutex_map_ and record_status_map_ are updated to reflect the
@@ -427,23 +427,29 @@ class FCGIServerInterface {
   //       destroyed.
   //    d) bad_interface_state_detected_ == true
   //
+  // Synchronization:
+  // 1) Attempts to acquire the write mutex associated with connection.
+  //
   // Effects:
-  // 1) Requests in request_map_ which were associated with connection and
-  //    which were not assigned were removed from request_map_.
-  // 2) Requests in request_map_ which were associated with connection and
-  //    which were assigned had the connection_closed_by_interface_ flag of
-  //    their RequestData object set.
-  // 3) If no assigned requests were present, the connection was closed.
-  // 4) If assigned requests were present:
-  //    a) The descriptor was added to dummy_descriptor_set_.
-  //    b) The connected socket associated with the descriptor was closed.
-  //    c) The descriptor is associated with the file description of 
-  //       FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
-  //       will not be reused until properly processed as a member of 
-  //       dummy_descriptor_set_.
-  // 5) The element associated with the key connection was removed from
-  //    write_mutex_map_ and record_status_map_.  
-  void RemoveConnection(int connection);
+  // 1) If false was returned, the write mutex could not be obtained without
+  //    blocking. The connection and related state are unchanged.
+  // 2) If true was returned, the follow apply:
+  //    a) Requests in request_map_ which were associated with connection and
+  //       which were not assigned were removed from request_map_.
+  //    b) Requests in request_map_ which were associated with connection and
+  //       which were assigned had the connection_closed_by_interface_ flag of
+  //       their RequestData object set.
+  //    c) If no assigned requests were present, the connection was closed.
+  //    d) If assigned requests were present:
+  //       1) The descriptor was added to dummy_descriptor_set_.
+  //       2) The connected socket associated with the descriptor was closed.
+  //       3) The descriptor is associated with the file description of 
+  //          FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
+  //          will not be reused until properly processed as a member of 
+  //          dummy_descriptor_set_.
+  //    e) The element associated with the key connection was removed from
+  //       write_mutex_map_ and record_status_map_.  
+bool RemoveConnection(int connection);
 
   // Attempts to remove the request pointed to by request_map_iter from
   // request_map_ while also updating request_count_map_.
