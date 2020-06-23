@@ -22,10 +22,51 @@
 #include "fcgi_si.h"
 
 // Key:
-// BAZEL DEPENDENCY: This marks a feature which is provided by the Bazel
+// BAZEL DEPENDENCY  This marks a feature which is provided by the Bazel
 //                   testing run-time environment. 
 
-namespace fcgi_si_test { 
+namespace fcgi_si_test {
+
+// Create a temporary file in the temporary directory offered by Bazel.
+// The descriptor value is written to the int pointer to by descriptor_ptr.
+// BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
+void CreateBazelTemporaryFile(int* descriptor_ptr)
+{
+  static const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
+  if(!tmpdir_ptr)
+    FAIL() << "The directory for temporary files supplied by Bazel is missing.";
+  std::string temp_template {tmpdir_ptr};
+  temp_template += "/fcgi_si_TEST_XXXXXX";
+  std::unique_ptr<char []> char_array_uptr {new char[temp_template.size() + 1]};
+    // Initialize the new character array.
+  std::memcpy(char_array_uptr.get(), temp_template.data(), 
+    temp_template.size() + 1);
+  int temp_descriptor {mkstemp(char_array_uptr.get())};
+  if(temp_descriptor < 0)
+    FAIL() << "An error occurred while trying to create a temporary file." <<
+      '\n' << strerror(errno);
+  if(unlink(char_array_uptr.get()) < 0)
+    FAIL() << "The temporary file could not be unlinked." << '\n' <<
+      strerror(errno);
+  *descriptor_ptr = temp_descriptor;
+}
+
+bool PrepareTemporaryFile(int descriptor)
+{
+  // Truncate the temporary file and seek to the beginning.
+  if(ftruncate(descriptor, 0) < 0)
+  {
+    ADD_FAILURE() << "A call to ftruncate failed.";
+    return false;
+  }
+  off_t lseek_return {lseek(descriptor, 0, SEEK_SET)};
+  if(lseek_return < 0)
+  {
+    ADD_FAILURE() << "A call to lseek failed.";
+    return false;
+  }
+  return true;
+}
 
 // Utility functions and testing of those functions for testing fcgi_si. 
 
@@ -256,60 +297,58 @@ TEST(Utility, ExtractContent)
   // Examined properties:
   //  1) Content byte sequence value.
   //  2) Value of FastCGI request identifier (0, 1, small but larger than 1,
-  //      and the maximum value 2^16 - 1 == uint16_t(-1)).
+  //     and the maximum value 2^16 - 1 == uint16_t(-1)).
   //  3) Presence or absence of unaligned records.
-  //  4) Value of the file descriptor (zero and non-zero).
-  //  5) Record type: discrete or stream.
-  //  6) For stream types, presence and absence of a terminal record with a
+  //  4) Record type: discrete or stream.
+  //  5) For stream types, presence and absence of a terminal record with a
   //     content length of zero.
-  //  7) Presence or absence of padding.
-  //  8) Presence or absence of an unrecoverable read error (such as a bad
+  //  6) Presence or absence of padding.
+  //  7) Presence or absence of an unrecoverable read error (such as a bad
   //     file descriptor).
-  //  9) Presence or absence of a header error. Two errors categories: type
+  //  8) Presence or absence of a header error. Two errors categories: type
   //     and FastCGI request identifier.
-  // 10) Presence or absence of an incomplete section. Three sections produce
-  //    three error categories.
+  //  9) Presence or absence of an incomplete section. Three sections produce
+  //     three error categories.
   //
   // Test cases:
-  //  1) File descriptor equal to zero, empty file.
-  //  2) Small file descriptor value, single header with a zero content length
+  //  1) Small file descriptor value, single header with a zero content length
   //     and no padding. The FastCGI request identifier value is one.
   //     (Equivalent to an empty record stream termination.)
-  //  3) Small file descriptor value, single record with non-zero content
+  //  2) Small file descriptor value, single record with non-zero content
   //     length, no padding, and no terminal empty record. The FastCGI
   //     request identifier value is the largest possible value.
   //     (Special discrete record - FCGI_BEGIN_REQUEST.)
-  //  4) As in 3, but with an unaligned record and a FastCGI request identifier
+  //  3) As in 2, but with an unaligned record and a FastCGI request identifier
   //     value of zero.
-  //  5) As in 3, but with padding and a FastCGI request identifier value of
+  //  4) As in 2, but with padding and a FastCGI request identifier value of
   //     10. (Regular discrete record.)
-  //  6) Small file descriptor value, a record with non-zero content length,
+  //  5) Small file descriptor value, a record with non-zero content length,
   //     padding, and a terminal empty record. The FastCGI request identifier
   //     value is ten. (A single-record, terminated stream.)
-  //  7) Small file descriptor value, multiple records with non-zero content
+  //  6) Small file descriptor value, multiple records with non-zero content
   //     lengths and padding as necessary to reach a multiple of eight. Not
   //     terminated. The FastCGI request identifier value is one.
   //     (A non-terminated stream with multiple records.)
-  //  8) As in 6, but terminated and the FastCGI request identifier value is
+  //  7) As in 5, but terminated and the FastCGI request identifier value is
   //     one. (A typical, multi-record stream sequence.)
   // Note: The FastCGI request identifier value is one for all remaining cases.
   // Note: The remaining cases test function response to erroneous input.
-  //  9) A bad file descriptor as an unrecoverable read error.
-  // 10) As in 7, but with a header type error in the middle.
-  // 11) As in 7, but with a header FastCGI request identifier error in the
+  //  8) A bad file descriptor as an unrecoverable read error.
+  //  9) As in 6, but with a header type error in the middle.
+  // 10) As in 6, but with a header FastCGI request identifier error in the
   //     middle.
-  // 12) A header with a non-zero content length and non-zero padding but
+  // 11) A header with a non-zero content length and non-zero padding but
   //     no more data. A small file descriptor value. (An incomplete record.)
-  // 13) A small file descriptor value and a sequence of records with non-zero
+  // 12) A small file descriptor value and a sequence of records with non-zero
   //     content lengths and with padding. The sequence ends with a header with
   //     a non-zero content length and padding but no additional data.
-  // 14) A small file descriptor value and a sequence of records with non-zero
+  // 13) A small file descriptor value and a sequence of records with non-zero
   //     content lengths and with padding. The sequence ends with a header that
   //     is not complete.
-  // 15) As in 12, but with a final record for which the content has a length
+  // 14) As in 11, but with a final record for which the content has a length
   //     that is less than the content length given in the final header. No
   //     additional data is present.
-  // 16) As in 12, but with a final record whose padding has a length that is
+  // 15) As in 11, but with a final record whose padding has a length that is
   //     less than the padding length given in the final header. No additional
   //     data is present.
   //
@@ -320,80 +359,23 @@ TEST(Utility, ExtractContent)
   // 1) fcgi_si::EncodeNameValuePairs
   // 2) fcgi_si::PartitionByteSequence
 
-  // Case 1: File descriptor equal to zero, empty file.
+  // Create a temporary file for use during this test.
+  // BAZEL DEPENDENCY
+  int temp_fd {};
+  fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+
   bool case_single_iteration {true};
-  while(case_single_iteration)
-  {
-    // Enforce a single iteration.
-    case_single_iteration = false;
-    // Duplicate stdin so that it can be restored later.
-    int saved_stdin {dup(STDIN_FILENO)};
-    if(saved_stdin == -1)
-    {
-      ADD_FAILURE() << "A call to dup failed.";
-      break;
-    }
-    if(close(STDIN_FILENO) == -1)
-    {
-      ADD_FAILURE() << "A call to close failed.";
-      int restore {dup2(saved_stdin, STDIN_FILENO)};
-      close(saved_stdin);
-      if(restore == -1)
-        FAIL() << "A call to dup2 failed. stdin could not be restored.";
-      break;
-    }
-    // Create a temporary file with no data.
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
-      int restore {dup2(saved_stdin, STDIN_FILENO)};
-      close(saved_stdin);
-      if(restore == -1)
-        FAIL() << "A call to dup2 failed. stdin could not be restored.";
-      break;
-    }
 
-    auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1)};
-    close(temp_fd);
-    int restore {dup2(saved_stdin, STDIN_FILENO)};
-    close(saved_stdin);
-    if(restore == -1)
-      FAIL() << "A call to dup2 failed. stdin could not be restored.";
-
-    if(std::get<0>(extract_content_result))
-    {
-      EXPECT_TRUE(std::get<1>(extract_content_result))  <<
-        "Header and section errors.";
-      EXPECT_FALSE(std::get<2>(extract_content_result)) <<
-        "Sequence termination flag.";
-      EXPECT_TRUE(std::get<3>(extract_content_result))  <<
-        "Record alignment flag.";
-      EXPECT_EQ(std::vector<uint8_t> {}, std::get<4>(extract_content_result))
-        << "Content byte sequence.";
-    }
-    else
-    {
-      ADD_FAILURE() << "A call to ::fcgi_si_test::ExtractContent "
-        "encountered a read error.";
-      break;
-    }
-  }
-
-  // Case 2: Small file descriptor value, a single header with zero content
+  // Case 1: Small file descriptor value, a single header with zero content
   // length and no padding.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+    
     uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(local_header, fcgi_si::FCGIType::kFCGI_DATA,
       1, 0, 0);
@@ -403,20 +385,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -436,19 +415,16 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 3: Small file descriptor value, single record with non-zero content
+  // Case 2: Small file descriptor value, single record with non-zero content
   // length, no padding, and no terminal empty record.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+    
     // Populate an FCGI_BEGIN_REQUEST record.
     uint8_t record[2*fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(record,
@@ -463,20 +439,17 @@ TEST(Utility, ExtractContent)
       2*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
     if(write_return < 2*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, uint16_t(-1))};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -496,18 +469,15 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 4: As in 3, but with an unaligned record.
+  // Case 3: As in 2, but with an unaligned record.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+    
     // Populate an FCGI_BEGIN_REQUEST record.
     uint8_t record[fcgi_si::FCGI_HEADER_LEN + 4] = {};
     fcgi_si::PopulateHeader(record,
@@ -524,20 +494,17 @@ TEST(Utility, ExtractContent)
       fcgi_si::FCGI_HEADER_LEN + 4)) == -1 && errno == EINTR)
     if(write_return < (fcgi_si::FCGI_HEADER_LEN + 4))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_PARAMS, 0)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -557,18 +524,15 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 5: As in 3, but with padding. (Regular discrete record.)
+  // Case 4: As in 2, but with padding. (Regular discrete record.)
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+    
     uint8_t record[2*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 10, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]     = 1;
@@ -583,20 +547,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 2*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 10)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -616,7 +577,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 6: Small file descriptor value, a record with non-zero content
+  // Case 5: Small file descriptor value, a record with non-zero content
   // length, padding, and a terminal empty record. (A single-record, terminated
   // stream.)
   case_single_iteration = true;
@@ -624,12 +585,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[3*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 10, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]     = 1;
@@ -646,20 +604,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 3*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 10)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -679,7 +634,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 7: Small file descriptor value, multiple records with non-zero
+  // Case 6: Small file descriptor value, multiple records with non-zero
   // content lengths and padding as necessary to reach a multiple of eight. Not
   // terminated.
   case_single_iteration = true;
@@ -687,12 +642,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+    
     uint8_t record[6*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -722,20 +674,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 6*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -755,18 +704,15 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 8: As in 6, but terminated. (A typical, multi-record stream sequence.)
+  // Case 7: As in 5, but terminated. (A typical, multi-record stream sequence.)
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -798,20 +744,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -831,34 +774,35 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 9: A bad file descriptor as an unrecoverable read error.
+  // Case 8: A bad file descriptor as an unrecoverable read error.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
-    int file_descriptor_limit {dup(0)};
+    // A file descriptor which is not allocated is generated by calling
+    // dup on the temporary file and adding 1000. It is assumed that no
+    // file descriptor will be allocated with this value.
+    int file_descriptor_limit {dup(temp_fd)};
     if(file_descriptor_limit == -1)
     {
       ADD_FAILURE() << "A call to dup failed.";
       break;
     }
-    auto result {fcgi_si_test::ExtractContent(file_descriptor_limit + 1,
+    auto result {fcgi_si_test::ExtractContent(file_descriptor_limit + 1000,
       fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1)};
     EXPECT_FALSE(std::get<0>(result));
+    close(file_descriptor_limit);
   }
 
-  // Case 10: As in 7, but with a header type error in the middle.
+  // Case 9: As in 6, but with a header type error in the middle.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -890,20 +834,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -923,19 +864,16 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 11: As in 7, but with a header FastCGI request identifier error in the
+  // Case 10: As in 6, but with a header FastCGI request identifier error in the
   // middle.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -967,20 +905,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1000,19 +935,16 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 12: A header with a non-zero content length and non-zero padding, but
+  // Case 11: A header with a non-zero content length and non-zero padding, but
   // no more data. (An incomplete record.) A small file descriptor value.
   case_single_iteration = true;
   while(case_single_iteration)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_PARAMS, 1, 50, 6);
     ssize_t write_return {0};
@@ -1021,20 +953,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_PARAMS, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1054,7 +983,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 13: A small file descriptor value and a sequence of records with
+  // Case 12: A small file descriptor value and a sequence of records with
   // non-zero content lengths and with padding. The sequence ends with a header
   // with a non-zero content length and padding but no more data.
   case_single_iteration = true;
@@ -1062,12 +991,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -1099,20 +1025,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < 7*fcgi_si::FCGI_HEADER_LEN)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1132,7 +1055,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 14: A small file descriptor value and a sequence of records with
+  // Case 13: A small file descriptor value and a sequence of records with
   // non-zero content lengths and with padding. The sequence ends with a header
   // that is not complete.
   case_single_iteration = true;
@@ -1140,12 +1063,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[6*fcgi_si::FCGI_HEADER_LEN + 3];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -1180,20 +1100,17 @@ TEST(Utility, ExtractContent)
       6*fcgi_si::FCGI_HEADER_LEN + 3)};
     if(write_return < (6*fcgi_si::FCGI_HEADER_LEN + 3))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1213,7 +1130,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 15:  As in 12, but with a final record for which the content has a
+  // Case 14:  As in 11, but with a final record for which the content has a
   // length that is less than the content length given in the final header. No
   // additional data is present.
   case_single_iteration = true;
@@ -1221,12 +1138,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 1];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -1259,20 +1173,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < (7*fcgi_si::FCGI_HEADER_LEN + 1))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1292,7 +1203,7 @@ TEST(Utility, ExtractContent)
     }
   }
 
-  // Case 16: As in 12, but with a final record whose padding has a length that
+  // Case 15: As in 11, but with a final record whose padding has a length that
   // is less than the padding length given in the final header. No additional
   // data is present.
   case_single_iteration = true;
@@ -1300,12 +1211,9 @@ TEST(Utility, ExtractContent)
   {
     case_single_iteration = false;
 
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file.";
+    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
       break;
-    }
+
     uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 5];
     fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
@@ -1342,20 +1250,17 @@ TEST(Utility, ExtractContent)
       continue;
     if(write_return < (7*fcgi_si::FCGI_HEADER_LEN + 5))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to write failed or returned a short-count.";
       break;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed.";
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
       fcgi_si::FCGIType::kFCGI_DATA, 1)};
-    close(temp_fd);
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -1375,6 +1280,7 @@ TEST(Utility, ExtractContent)
       break;
     }
   }
+  close(temp_fd);
 }
 
 // fcgi_si content testing start (utility.h)
@@ -2109,9 +2015,12 @@ TEST(Utility, EncodeNameValuePairs)
     return true;
   };
 
+  int temp_fd {};
+  fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+
   // A lambda function which takes parameters which define a test case and
   // goes through the testing procedure described in the testing explanation.
-  auto EncodeNameValuePairTester = [](
+  auto EncodeNameValuePairTester = [temp_fd](
     std::string message,
     const std::vector<NameValuePair>& pair_sequence,
     fcgi_si::FCGIType type,
@@ -2162,13 +2071,12 @@ TEST(Utility, EncodeNameValuePairs)
         << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
-    int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-    if(temp_fd == -1)
-    {
-      ADD_FAILURE() << "A call to open failed to make a temporary file."
-      << '\n' << message;
-      return;
-    }
+
+    // Prepare the temporary file.
+    bool prepared {fcgi_si_test::PrepareTemporaryFile(temp_fd)};
+    if(!prepared)
+      FAIL() << "A temporary file could not be prepared.";
+
     ssize_t write_return {0};
     while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
       std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
@@ -2182,7 +2090,6 @@ TEST(Utility, EncodeNameValuePairs)
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
       return;
     }
@@ -2190,14 +2097,12 @@ TEST(Utility, EncodeNameValuePairs)
       fcgi_si::FCGIType::kFCGI_PARAMS, FCGI_id)};
     if(!std::get<0>(extract_content_result))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered an "
         "unrecoverable read error." << '\n' << message;
       return;
     }
     if(!std::get<1>(extract_content_result))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
         "std::get<1> that a header error or a partial section was encountered."
         << '\n' << message;
@@ -2205,7 +2110,6 @@ TEST(Utility, EncodeNameValuePairs)
     }
     if(std::get<2>(extract_content_result))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
         "std::get<2> that the record sequence was terminated."
         << '\n' << message;
@@ -2213,7 +2117,6 @@ TEST(Utility, EncodeNameValuePairs)
     }
     if(!std::get<3>(extract_content_result))
     {
-      close(temp_fd);
       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
         "std::get<3> that an unaligned record was present."
         << '\n' << message;
@@ -2606,12 +2509,11 @@ TEST(Utility, EncodeNameValuePairs)
       NameValuePair copied_pair {{'a'}, {1}};
       std::vector<NameValuePair> many_pairs(iovec_max + 10, copied_pair);
       std::size_t offset {0};
-      int temp_fd {open(".", O_RDWR | O_TMPFILE, S_IRWXU)};
-      if(temp_fd == -1)
-      {
-        ADD_FAILURE() << "A call to open failed to make a temporary file.";
-        break;
-      }
+      
+      bool prepared {fcgi_si_test::PrepareTemporaryFile(temp_fd)};
+      if(!prepared)
+        FAIL() << "A temporary file could not be prepared.";
+
       bool terminal_error {false};
       ssize_t write_return {0};
       for(auto pair_iter {many_pairs.begin()}; pair_iter != many_pairs.end();
@@ -2640,7 +2542,6 @@ TEST(Utility, EncodeNameValuePairs)
       }
       if(terminal_error)
       {
-        close(temp_fd);
         break;
       }
 
@@ -2694,7 +2595,6 @@ TEST(Utility, EncodeNameValuePairs)
       if(lseek_return == -1)
       {
         ADD_FAILURE() << "A call to lseek encountered an error.";
-        close(temp_fd);
         break;
       }
       auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
@@ -2703,14 +2603,12 @@ TEST(Utility, EncodeNameValuePairs)
       {
         ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered an "
           "unrecoverable read error as reported by std::get<0>.";
-        close(temp_fd);
         break;
       }
       if(!std::get<1>(extract_content_result))
       {
         ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered a "
           "header error or an incomplete section as reported by std::get<1>.";
-        close(temp_fd);
         break;
       }
       if(std::get<2>(extract_content_result))
@@ -2722,7 +2620,6 @@ TEST(Utility, EncodeNameValuePairs)
       {
         ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent detected an "
           "unaligned record as reported by std::get<3>.";
-        close(temp_fd);
         break;
       }
       std::vector<NameValuePair> pair_result_sequence {
@@ -2731,9 +2628,9 @@ TEST(Utility, EncodeNameValuePairs)
           std::get<4>(extract_content_result).size())
       };
       EXPECT_EQ(many_pairs, pair_result_sequence);
-      close(temp_fd);
     }
   }
+  close(temp_fd);
 }
 
 TEST(Utility, ToUnsignedCharacterVector)
@@ -2844,24 +2741,9 @@ TEST(Utility, PartitionByteSequence)
   //
   // Other modules whose testing depends on this module: none.
 
-  // Create a temporary file in the temporary directory offered by Bazel.
-  // BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
-  const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
-  if(!tmpdir_ptr)
-    FAIL() << "The directory for temporary files supplied by Bazel is missing.";
-  std::string temp_template {tmpdir_ptr};
-  temp_template += "/fcgi_si_TEST_XXXXXX";
-  std::unique_ptr<char []> char_array_uptr {new char[temp_template.size() + 1]};
-    // Initialize the new character array.
-  std::memcpy(char_array_uptr.get(), temp_template.data(), 
-    temp_template.size() + 1);
-  int temp_descriptor {mkstemp(char_array_uptr.get())};
-  if(temp_descriptor < 0)
-    FAIL() << "An error occurred while trying to create a temporary file." <<
-      '\n' << strerror(errno);
-  if(unlink(char_array_uptr.get()) < 0)
-    FAIL() << "The temporary file could not be unlinked." << '\n' <<
-      strerror(errno);
+  // BAZEL DEPENDENCY
+  int temp_descriptor {};
+  fcgi_si_test::CreateBazelTemporaryFile(&temp_descriptor);
   
   auto PartitionByteSequenceTester = [temp_descriptor](
     const std::string& message,
@@ -3058,6 +2940,7 @@ TEST(Utility, PartitionByteSequence)
       3
     );
   }
+  close(temp_descriptor);
 }
 
 // fcgi_si content (FCGIServerInterface)
