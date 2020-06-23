@@ -99,8 +99,9 @@
 //       1) The interface has a self-pipe that it monitors for read readiness.
 //          Writes to this pipe are performed by request objects to inform the
 //          interface of two state changes:
-//          a) a connection was corrupted.
-//          b) that the interface was put into a bad state by a request.
+//          a) Corruption of a connection.
+//          b) The transition of the interface from a good to a bad state
+//             because of the action of a request.
 //          This mechanism is used to prevent the interface from blocking when
 //          local work is present or when blocking doesn't make sense because
 //          the interface was corrupted.
@@ -108,7 +109,22 @@
 //          to application_closure_request_set_ (a connection was corrupted) or
 //          setting bad_interface_state_detected_. The write must occur within
 //          the same period of mutex ownership that is used to perform these
-//          actions. Race conditions may occur otherwise.
+//          actions. In other words, the changes in shared state caused by
+//          these actions must appear to the interface to be atomic. Incorrect
+//          behavior from race conditions may occur otherwise.
+//       3)    A write mutex cannot be held by a request once the connection
+//          associated with the write mutex has been "atomically" added to
+//          application_closure_request_set_ from the perspective of entities
+//          which obey the appropriate inferface mutex acquisition and release
+//          rules for shared interface state.
+//             To ensure this, when a request intends to add a connection to
+//          application_closure_request_set_ for any reason, it must acquire
+//          the write mutex associated with the connection after acquisition of
+//          the interface mutex before modifying the closure set. This means
+//          that the write mutex may need to be released, the interface mutex
+//          acquired, and then the write mutex reacquired before a modification
+//          of the closure set can occur. This is because the pattern "has
+//          write mutex, wanted interface mutex" is forbidden. 
 //    f) Terminating the program:
 //       1) Obligatory termination: (as invariants cannot be maintained)
 //          a) If the interface cannot be put into a bad state, regardless of
@@ -413,10 +429,14 @@ FCGIRequest::~FCGIRequest()
         if(close_connection_ 
            && !(request_data_ptr_->connection_closed_by_interface_))
         {
+          // ACQUIRE the write mutex. (Once acquired, no request thread will
+          // acquire the write mutex after the current thread releases the 
+          // interface mutex.)
+          std::lock_guard<std::mutex> {*write_mutex_ptr_};
           interface_ptr_->application_closure_request_set_.insert(
             request_identifier_.descriptor());
           InterfacePipeWrite();
-        }
+        } // RELEASE the write mutex.
         interface_ptr_->RemoveRequest(request_identifier_);
       }
       catch(...) 
@@ -567,9 +587,8 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   // Update interface state and FCGIRequest state.
   //
   // If write_return is false, ScatterGatherWriteHelper updated interface
-  // state by removing the request. Also, the connection is closed. The
-  // descriptor does not need to be conditionally added to
-  // application_closure_request_set_.
+  // state by removing the request. The descriptor does not need to be
+  // conditionally added to application_closure_request_set_.
   if(write_return)
   {
     completed_ = true;
@@ -593,11 +612,14 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
     {
       try
       {
-        // It's possible that the the descriptor is already in the set.
+        // ACQUIRE the write mutex. (Once acquired, no request thread will
+        // acquire the write mutex after the current thread releases the 
+        // interface mutex.)
+        std::lock_guard<std::mutex> {*write_mutex_ptr_};
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
         InterfacePipeWrite();
-      }
+      } // RELEASE the write mutex.
       catch(...)
       {
         interface_ptr_->bad_interface_state_detected_ = true;
@@ -637,6 +659,9 @@ void FCGIRequest::InterfacePipeWrite()
     throw std::logic_error {"The interface pipe could not be written to."};
 }
 
+// Implementation notes:
+// Synchronization:
+// 1) interface_state_mutex_ must be held prior to a call.
 bool FCGIRequest::
 InterfaceStateCheckForWritingUponMutexAcquisition()
 {
@@ -655,7 +680,11 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
     return false;
   }
   // Check if the interface has closed the connection.
-  if(request_data_ptr_->connection_closed_by_interface_)
+  // Check if the connection is scheduled for closure.
+  if(request_data_ptr_->connection_closed_by_interface_ ||
+     (interface_ptr_->application_closure_request_set_.
+        find(request_identifier_.descriptor()) != 
+      interface_ptr_->application_closure_request_set_.end()))
   {
     completed_   = true;
     was_aborted_ = true;
@@ -688,6 +717,13 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   std::unique_lock<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
 
+  // write_lock has the following property in the loop below:
+  // The mutex is always held when writing and, once some data has been written,
+  // the mutex is never released. This allows the write mutex to be released
+  // while the thread sleeps in select in the case that writing blocks and
+  // nothing was written.
+  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock};
+
   // An internal helper function used when application_closure_request_set_
   // of the interface must be accessed. This occurs when:
   // 1) The connection was found to be closed by an attempt to write and 
@@ -715,6 +751,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   //    value of interface_mutex_held.
   // 2) If interface_state_mutex_ was acquired, it was released upon normal
   //    exit.
+  // 3) May acquire and release the write mutex of the request.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
@@ -735,7 +772,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   //    d) If connection insertion occurred, a write was performed on the
   //       interface self-pipe.
   auto TryToAddToApplicationClosureRequestSet = 
-  [this, interface_mutex_held, &interface_state_lock](bool force_insert)->bool
+  [this, interface_mutex_held, &interface_state_lock, &write_lock]
+  (bool force_insert)->bool
   {
     // Conditionally ACQUIRE interface_state_mutex_.
     if(!interface_mutex_held)
@@ -763,9 +801,14 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       interface_ptr_->RemoveRequest(request_identifier_);
       if(force_insert || close_connection_)
       {
+        // ACQUIRE the write mutex to ensure that request threads will not
+        // hold the write mutex in the future.
+        write_lock.lock();
         interface_ptr_->application_closure_request_set_.insert(
           request_identifier_.descriptor());
         InterfacePipeWrite();
+        // RELEASE the write mutex.
+        write_lock.unlock();
       }
       // Conditionally RELEASE interface_state_mutex_.
       if(interface_state_lock.owns_lock())
@@ -788,13 +831,6 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   };
   
   std::size_t working_number_to_write {number_to_write};
-  // write_lock has the following property in the loop below:
-  // The mutex is always held when writing and, once some data has been written,
-  // the mutex is never released. This allows the write mutex to be released
-  // while the thread sleeps in select in the case that writing blocks and
-  // nothing was written.
-  std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_,
-    std::defer_lock_t {}};
   int fd {request_identifier_.descriptor()};
   while(working_number_to_write > 0) // Start write loop.
   {

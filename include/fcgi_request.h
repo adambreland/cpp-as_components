@@ -191,7 +191,7 @@ class FCGIRequest {
   //          to be corrupted. In the case of corruption, it is unknown how
   //          the connection became corrupt. No further action need be taken to
   //          service the request. The request should be destroyed. The
-  //          should be present in a closure set (in the case of corruption,
+  //          should be present in the closure set (in the case of corruption,
   //          this may depend on the entity which corrupted the connection).
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
@@ -370,6 +370,9 @@ class FCGIRequest {
   //       bad_interface_state_detected_ == true.
   // 3) Program termination may occur if interface state cannot be updated
   //    during a throw.
+  //
+  // Synchronization:
+  // 1) interface_state_mutex_ must be held prior to a call.
   //
   // Effects:
   // 1) If true was returned:

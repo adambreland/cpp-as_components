@@ -345,59 +345,6 @@ class FCGIServerInterface {
   void AddRequest(RequestIdentifier request_id, std::uint16_t role,
     bool close_connection);
 
-  // Iterates over the referenced containers of descriptors. These descriptors
-  // are scheduled for closure. Attempts to close the descriptors. This 
-  // helper is intended to iterate over connections_to_close_set_ and
-  // application_closure_request_set_. (A template was used to allow the
-  // types of these sets to be easily changed in the future if this is desired.)
-  // 
-  // Parameters:
-  // first_ptr, second_ptr:   Pointers to containers which contain connected
-  //                          socket descriptors.
-  // first_iter, second_iter: Iterators which point to the starting descriptors
-  //                          of *first_ptr and *second_ptr, respectively.
-  // first_end_iter:          A pointer to one-past-the-last element of
-  //                          *first_ptr which will be processed.
-  // second_end_iter:         A pointer to one-past-the-last element of
-  //                          *second_ptr which will be processed.
-  //
-  // Preconditions:  
-  // 1) interface_state_mutex_ must be held prior to a call.
-  // 2) (Duck typing) C::iterator and C::value_type are defined types and
-  //    C::erase is a member function. All have the usual semantics.
-  // 3) C::value_type is int.
-  // 4) C::iterator satisfies, at least, the requirements of 
-  //    LegacyForwardIterator.
-  // 
-  // Exceptions:
-  // 1) A call may cause program termination if an exception occurs which could
-  //    result in a file descriptor leak or spurious closure by the interface.
-  // 2) May throw exceptions derived from std::exception.
-  // 3) In the event of a throw:
-  //    a) the interface is in a state which allows safe execution of the 
-  //       interface destructor (basic exception guarantee).
-  //    b) bad_interface_state_detected_ == true
-  //
-  // Effects:
-  // 1) Both of the referenced containers were emptied.
-  // 2) The connected sockets represented by the descriptors in the union
-  //    of the containers were closed.
-  // 3) If a connection had assigned requests, the descriptor of the
-  //    connection was added to dummy_descriptor_set_ and the descriptor
-  //    was associated with the description of FCGI_LISTENSOCK_FILENO in an
-  //    atomic fashion. This allows the connection to be closed while 
-  //    preventing the reuse of the descriptor by the interface while 
-  //    requests which use that descriptor are still present.
-  // 4) For every request which was associated with one of the descriptors in 
-  //    the sets, the connection_closed_by_interface_ flag of the RequestData 
-  //    object of the request was set.
-  // 5) write_mutex_map_ and record_status_map_ are updated to reflect the
-  //    closure of the connections.
-  template <typename C>
-  void ConnectionClosureProcessing(C* first_ptr, typename C ::iterator 
-    first_iter, typename C ::iterator first_end_iter, C* second_ptr, 
-    typename C ::iterator second_iter, typename C ::iterator second_end_iter);
-
   // Attempts to remove the descriptor given by connection from
   // record_status_map_ and write_mutex_map_ while conditionally updating
   // dummy_descriptor_set_.
@@ -717,7 +664,7 @@ bool RemoveConnection(int connection);
   //    c) std::system_error if an unrecoverable system error occurred
   //       during the write. 
   // 3) After a throw, several changes in interface state may have occurred:
-  //    a) The connection could have been added to connections_to_close_set_.
+  //    a) The connection could have been added to the closure set.
   //    b) The connection could have been corrupted. The corruption flag is
   //       set in this case.
   //    c) The interface may be in a bad state.
@@ -733,7 +680,8 @@ bool RemoveConnection(int connection);
   //    b) The connection was found to be corrupted.
   //    c) The most recent blocking call exceeded the
   //       fcgi_si::write_block_timeout limit.
-  //    In all cases, the descriptor connection is present in a closure set.
+  //    In all cases, the descriptor connection should be present in the
+  //    closure set.
   bool SendRecord(int connection, const std::uint8_t* buffer_ptr,
     std::int_fast32_t count);
 
@@ -765,11 +713,6 @@ bool RemoveConnection(int connection);
   // connection. Per the FastCGI protocol, information from the client is a
   // sequence of complete FastCGI records.
   std::map<int, RecordStatus> record_status_map_ {};
-
-  // A set for connections which were found to have been closed by the peer or
-  // which were corrupted by the interface through a partial write.
-  // Connection closure occurs in a cleanup step in AcceptRequests.
-  std::set<int> connections_to_close_set_ {};
 
   std::set<int> dummy_descriptor_set_ {};
 
@@ -819,14 +762,12 @@ bool RemoveConnection(int connection);
 
   // A flag which indicates that the interface has become corrupt. Ideally,
   // this flag would only be set due to underlying system errors and not
-  // because of bugs.
+  // because of bugs which are detected by defensive checks.
   bool bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////
 };
 
 } // namespace fcgi_si.
-
-#include "include/fcgi_server_interface_templates.h"
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_

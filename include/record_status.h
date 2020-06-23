@@ -121,7 +121,7 @@ private:
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
   // 2) In the event of a throw, either the connection was added to
-  //    connections_to_close_set_ or the interface was put into a bad state.
+  //    the closure set or the interface was put into a bad state.
   // 3) An internal exception may result in program termination.
   //
   // Effects:

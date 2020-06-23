@@ -75,10 +75,9 @@
 //       connection is corrupted. The write cannot proceed.
 //
 // 3) Invariants on state:
-//    a) The sets dummy_descriptor_set_ and 
-//       application_closure_request_set_ U connections_to_close_set_ (set
-//       union) should be disjoint before and after the connection cleanup
-//       process of AcceptRequests.
+//    a) The sets dummy_descriptor_set_ and application_closure_request_set_
+//       should be disjoint before and after the connection cleanup process of
+//       AcceptRequests.
 //    b) The interface destructor should always be able to safely destroy the
 //       interface by:
 //       1) Closing the connections in either of write_mutex_map_ or
@@ -703,17 +702,28 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     // Update interface state to allow FCGIRequest objects to inspect for
     // connection closure. 
     //
-    // Note that dummy_descriptor_set_ is disjoint from the union of
-    // connections_to_close_set_ and application_closure_request_set_. This
-    // is necessary as the presence of a descriptor in both categories of
-    // descriptors may result in double closure.
+    // Note that dummy_descriptor_set_ is disjoint from 
+    // application_closure_request_set_. This is necessary as the presence of a
+    // descriptor in both categories of descriptors may result in double
+    // closure.
     //
     // TODO Formally prove this property and include proof in supporting
     // documentation.
-    ConnectionClosureProcessing(&connections_to_close_set_,
-      connections_to_close_set_.begin(), connections_to_close_set_.end(),
-      &application_closure_request_set_, application_closure_request_set_.begin(),
-      application_closure_request_set_.end());
+    try
+    {
+      for(int connection : application_closure_request_set_)
+      {
+        bool connection_removed {RemoveConnection(connection)};
+        if(!connection_removed)
+          throw std::logic_error {"A connection could not be removed because "
+            "a write mutex was erroneously held."};
+      }
+    }
+    catch(...)
+    {
+      bad_interface_state_detected_ = true;
+      throw;
+    }
   } // RELEASE interface_state_mutex_;
 
   // DESCRIPTOR MONITORING
@@ -912,7 +922,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
       {
         try
         {
-          connections_to_close_set_.insert(current_connection);
+          application_closure_request_set_.insert(current_connection);
         }
         catch(...)
         {
@@ -979,7 +989,7 @@ bool FCGIServerInterface::interface_status() const
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void FCGIServerInterface::RemoveConnection(int connection)
+bool FCGIServerInterface::RemoveConnection(int connection)
 {
   // Care must be taken to prevent descriptor leaks or double closures.
 
@@ -1021,16 +1031,16 @@ void FCGIServerInterface::RemoveConnection(int connection)
 
   try
   {
-    std::unique_lock<std::mutex> write_lock 
+    std::unique_lock<std::mutex> unique_write_lock 
       {*(write_mutex_map_.at(connection).first), std::defer_lock};
     // Attempt to ACQUIRE the write mutex of the connection. If acquired, 
     // RELEASE. This process ensures that a request does not hold the write
     // lock while the connection is being erased. This in ensured as the
     // interface mutex is held over the entire process.
-    bool locked {write_lock.try_lock()};
+    bool locked {unique_write_lock.try_lock()};
     if(!locked)
       return false;
-    write_lock.unlock();
+    unique_write_lock.unlock();
 
     bool assigned_requests {RequestCleanupDuringConnectionClosure(connection)};
     // Close the connection in one of two ways.
@@ -1307,13 +1317,14 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
   if(count < 0)
     throw std::logic_error {"A negative value was provided for count."};
 
+  std::unique_lock<std::mutex> unique_interface_state_lock
+    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
     mutex_map_iter {write_mutex_map_.find(connection)};
   // Defensive check on write mutex existence for connection.
   if(mutex_map_iter == write_mutex_map_.end())
   {
-    std::unique_lock<std::mutex> unique_interface_state_lock
-      {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
     try
     {
       // ACQUIRE interface_state_mutex_.
@@ -1326,19 +1337,18 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     bad_interface_state_detected_ = true;
     throw std::logic_error {"An expected connection was missing from "
       "write_mutex_map_."};
-  } // RELEASE interface_state_mutex_.
+  } // RELEASE interface_state_mutex_ on throw.
 
   // ACQUIRE the write mutex for the connection.
-  std::unique_lock<std::mutex> write_lock {*(mutex_map_iter->second.first)};
+  std::unique_lock<std::mutex> unique_write_lock
+    {*(mutex_map_iter->second.first)};
   
   // Check if the connection is corrupt.
-  if(mutex_map_iter->second.second) {
-    // This insertion is defensive. Part of the discipline for writing to a
-    // connection is adding the descriptor to a closure set in the event of
-    // corruption.
-    connections_to_close_set_.insert(connection);
+  if(mutex_map_iter->second.second)
+    // Insertion to application_closure_request_set_ is not necessary. Part of
+    // the discipline for writing to a connection is adding the descriptor to
+    // the closure set in the event of corruption.
     return false;
-  }
 
   // TODO Have writes on a connection which would be performed by the interface
   // object be performed instead by a worker thread. It is expedient but
@@ -1354,43 +1364,37 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
   {
     // Indicate that the connection is corrupt if it is still open and some 
     // data was written.
-    //
-    // Synchronization note: If the connection was corrupted by a partial write,
-    // indication of this corruption must be made before releasing the write
-    // mutex. This means that this if-statement must be before the next
-    // try-catch block. If insertion throws, the 
-    if((errno != EPIPE) && (number_written != 0U))
+    if(number_written != 0U)
       mutex_map_iter->second.second = true;
+    // RELEASE the write mutex for the connection (as the pattern "has write
+    // mutex, wants interface mutex" is forbidden).
+    unique_write_lock.unlock();
 
-    // Add the connection to the non-shared closure set.
-    //
-    // Synchronization note: This try-catch block unlocks write_lock. It is
-    // placed after the above if-statement to ensure that connection corruption
-    // state is correctly set without a race condition.
+    // Add the connection to the closure set.
     try
     {
-      connections_to_close_set_.insert(connection);
+      // ACQUIRE interface_state_mutex_.
+      unique_interface_state_lock.lock();
     }
     catch(...)
     {
-      // RELEASE the write mutex for the connection as the interface mutex
-      // will be acquired and the pattern "wants interface mutex, owns write
-      // mutex" is forbidden.
-      write_lock.unlock();
-      std::unique_lock<std::mutex> unique_interface_state_lock
-        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
-      try
-      {
-        // ACQUIRE interface_state_mutex_.
-        unique_interface_state_lock.lock();
-      }
-      catch(...)
-      {
-        std::terminate();
-      }
+      std::terminate();
+    }
+    try
+    {
+      // ACQUIRE the write lock. This prevents a request thread from holding
+      // the write lock once the connection has been added to the closure set
+      // and the current thread releases the interface mutex.
+      unique_write_lock.lock();
+      application_closure_request_set_.insert(connection);
+      // RELEASE the write lock.
+      unique_write_lock.unlock();
+    }
+    catch(...)
+    {
       bad_interface_state_detected_ = true;
       throw;
-    } // RELEASE interface_state_mutex_.
+    }
 
     if((errno == EPIPE) || (errno == 0))
       return false;
