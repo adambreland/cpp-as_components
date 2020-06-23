@@ -14,8 +14,10 @@
 namespace fcgi_si {
 
 // Protocol Constants
-  // General
+  /* General
 constexpr int                          FCGI_LISTENSOCK_FILENO         {0};
+     This value is not strictly used for the listening socket descriptor
+     value. */
 constexpr std::int_fast32_t            FCGI_HEADER_LEN                {8};
 constexpr std::uint8_t                 FCGI_VERSION_1                 {1};
 constexpr std::uint16_t                FCGI_NULL_REQUEST_ID           {0};

@@ -33,9 +33,12 @@ namespace fcgi_si {
 // and will block until new connection requests or request data are present.
 //
 // Configuration:
-//    FCGI_LISTENSOCK_FILENO: The interface expects, as per the FastCGI 
-// protocol, that STDIN_FILENO is bound to a listening socket before
-// construction begins. FCGI_LISTENSOCK_FILENO is an alias for STDIN_FILENO.
+//    FCGI_LISTENSOCK_FILENO: The FastCGI standard specifies that the listening
+// socket descriptor of an interface be equal to STDIN_FILENO == 0 == 
+// FCGI_LISTENSOCK_FILENO. This requirement is not enforced by
+// FCGIServerInterface. The descriptor of the listening socket is provided
+// to the interface constructor as an argument. This descriptor and the file
+// description it is associated with is not managed by the interface.
 //
 //    The interface is configured with:
 // a) A maximum number of concurrent connections.
@@ -140,7 +143,7 @@ class FCGIServerInterface {
   //       was met, new connections were immediately closed.
   //    c) Connections were validated for socket domain and socket type. The
   //       reference domain and type were those determined from 
-  //       FCGI_LISTENSOCK_FILENO during interface construction.
+  //       listening_socket during interface construction.
   // 8) Connections which were scheduled to be closed were closed. Connection
   //    closure scheduling occurs in two instances:
   //    a) On the completion of a request for which the FCGI_KEEP_CONN flag was
@@ -154,7 +157,7 @@ class FCGIServerInterface {
   std::vector<FCGIRequest> AcceptRequests();
 
   // Gets the current number of connected sockets which were accepted by
-  // the listening socket associated with FCGI_LISTENSOCK_FILENO.
+  // the listening socket associated with listening_socket.
   //
   // Preconditions: none.
   inline std::size_t connection_count() const noexcept
@@ -211,7 +214,7 @@ class FCGIServerInterface {
   // Parameters:
   // max_connections:     The maximum number of currently-active socket 
   //                      connections of those which were accepted by the
-  //                      listening socket given by FCGI_LISTENSOCK_FILENO.
+  //                      listening socket.
   // max_requests:        The maximum number of active requests for a
   //                      socket connection.
   // app_status_on_abort: The application status which will be returned by the
@@ -236,10 +239,9 @@ class FCGIServerInterface {
   // 3) (Configuration errors) An exception is thrown if:
   //    a) Either of max_connections or max_requests is less than or equal to
   //       zero.
-  //    b) The socket type of the socket associated with FCGI_LISTENSOCK_FILENO
-  //       is not SOCK_STREAM.
-  //    c) The socket associated with FCGI_LISTENSOCK_FILENO is not listening.
-  //    d) The socket domain of the listening socket is AF_INET or AF_INET6,
+  //    b) The socket type of listening_socket is not SOCK_STREAM.
+  //    c) The socket provided by listening_socket is not listening.
+  //    d) The socket domain of listening_socket is AF_INET or AF_INET6,
   //       FCGI_WEB_SERVER_ADDRS is bound to a non-empty value, and no
   //       valid addresses are found when that value is processed. An address
   //       is valid if inet_pton finds the address to be valid when given the
@@ -255,8 +257,8 @@ class FCGIServerInterface {
   //    objects. The new interface is safe to use in the presence of 
   //    FCGIRequest objects which were recently generated from a previous
   //    interface.
-  FCGIServerInterface(int max_connections, int max_requests,
-    std::int32_t app_status_on_abort = EXIT_FAILURE);
+  FCGIServerInterface(int listening_descriptor, int max_connections,
+    int max_requests, std::int32_t app_status_on_abort = EXIT_FAILURE);
 
   // No copy, move, or default construction.
   FCGIServerInterface() = delete;
@@ -284,8 +286,7 @@ class FCGIServerInterface {
   // Parameters: none.
   //
   // Preconditions:
-  // 1) The file descriptor given by FCGI_LISTENSOCK_FILENO is associated with
-  //    a listening socket.
+  // 1) The socket given by listening_socket_ is a listeningsocket.
   //
   // Synchronization:
   // 1) May implicitly acquire and release interface_state_mutex_.
@@ -306,7 +307,7 @@ class FCGIServerInterface {
   //    d) Whether or not the socket domain and type match socket_domain_ and
   //       socket_type_, respectively.
   //    Failure to meet any criterion results in connection rejection.       
-  // 2) If a connection request was pending on FCGI_LISTENSOCK_FILENO and the
+  // 2) If a connection request was pending on listening_socket_ and the
   //    connection was validated after being accepted:
   //    a) A new connected socket with a descriptor equal to the returned value
   //       is present.
@@ -391,9 +392,8 @@ class FCGIServerInterface {
   //       1) The descriptor was added to dummy_descriptor_set_.
   //       2) The connected socket associated with the descriptor was closed.
   //       3) The descriptor is associated with the file description of 
-  //          FCGI_LISTENSOCK_FILENO a.k.a. STDIN_FILENO so that the descriptor
-  //          will not be reused until properly processed as a member of 
-  //          dummy_descriptor_set_.
+  //          listening_socket_ so that the descriptor will not be reused until
+  //          properly processed as a member of dummy_descriptor_set_.
   //    e) The element associated with the key connection was removed from
   //       write_mutex_map_ and record_status_map_.  
 bool RemoveConnection(int connection);
@@ -688,6 +688,7 @@ bool RemoveConnection(int connection);
   // DATA MEMBERS
 
   // Configuration parameters:
+  int listening_descriptor_;
     // The default application exit status that will be sent when requests
     // are rejected by the interface without involvement of the application.
   std::int32_t app_status_on_abort_;
@@ -704,8 +705,8 @@ bool RemoveConnection(int connection);
   // File descriptors of the self-pipe which is used for wake ups on state
   // changes from blocking during I/O multiplexing for incoming connections 
   // and data.
-  int self_pipe_read_descriptor {};
-  int self_pipe_write_descriptor {};
+  int self_pipe_read_descriptor_ {};
+  int self_pipe_write_descriptor_ {};
 
   // This map takes the file descriptor of a connection and accesses the
   // RecordStatus object of the connection. A RecordStatus object summarizes the 

@@ -96,9 +96,10 @@ unsigned long FCGIServerInterface::interface_identifier_ {0U};
 unsigned long FCGIServerInterface::previous_interface_identifier_ {0U};
 
 FCGIServerInterface::
-FCGIServerInterface(int max_connections, int max_requests, 
-  std::int32_t app_status_on_abort)
-: app_status_on_abort_ {app_status_on_abort},
+FCGIServerInterface(int listening_descriptor, int max_connections,
+  int max_requests, std::int32_t app_status_on_abort)
+: listening_descriptor_ {listening_descriptor},
+  app_status_on_abort_ {app_status_on_abort},
   maximum_connection_count_ {max_connections},
   maximum_request_count_per_connection_ {max_requests},
   socket_domain_ {}
@@ -129,14 +130,14 @@ FCGIServerInterface(int max_connections, int max_requests,
 
   // Ensure that the supplied listening socket is non-blocking. This property
   // is assumed in the design of the AcceptRequests loop.
-  int flags = fcntl(FCGI_LISTENSOCK_FILENO, F_GETFL);
+  int flags = fcntl(listening_descriptor_, F_GETFL);
   if(flags == -1)
   {
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "fcntl with F_GETFL"};
   }
   flags |= O_NONBLOCK;
-  if(fcntl(FCGI_LISTENSOCK_FILENO, F_SETFL, flags) == -1)
+  if(fcntl(listening_descriptor_, F_SETFL, flags) == -1)
   {
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "fcntl with F_SETFL"};
@@ -151,7 +152,7 @@ FCGIServerInterface(int max_connections, int max_requests,
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
   int getsockopt_return {};
 
-  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(listening_descriptor_,
     SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1) && (errno == EINTR))
   {
@@ -166,7 +167,7 @@ FCGIServerInterface(int max_connections, int max_requests,
   socket_domain_ = socket_domain;
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(listening_descriptor_,
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
     == -1) && (errno == EINTR))
   {
@@ -182,7 +183,7 @@ FCGIServerInterface(int max_connections, int max_requests,
       "of an FCGIServerInterface object was not a stream socket."};
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(FCGI_LISTENSOCK_FILENO,
+  while(((getsockopt_return = getsockopt(listening_descriptor_,
     SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer,
       &getsockopt_int_buffer_size)) == -1) && (errno == EINTR))
   {
@@ -288,8 +289,8 @@ FCGIServerInterface(int max_connections, int max_requests,
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "pipe"};
   }
-  self_pipe_read_descriptor  = pipe_fd_array[0];
-  self_pipe_write_descriptor = pipe_fd_array[1];
+  self_pipe_read_descriptor_  = pipe_fd_array[0];
+  self_pipe_write_descriptor_ = pipe_fd_array[1];
   for(int i {0}; i < 2; ++i) {
     int f_getfl_return {fcntl(pipe_fd_array[i], F_GETFL)};
     f_getfl_return |= O_NONBLOCK;
@@ -297,8 +298,8 @@ FCGIServerInterface(int max_connections, int max_requests,
     if((f_getfl_return == -1) || (f_setfl_return == -1)) 
     {
       interface_identifier_ = 0U;
-      close(self_pipe_read_descriptor);
-      close(self_pipe_write_descriptor);
+      close(self_pipe_read_descriptor_);
+      close(self_pipe_write_descriptor_);
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "fcntl"};
     }
@@ -318,8 +319,8 @@ FCGIServerInterface::~FCGIServerInterface()
     std::lock_guard<std::mutex> interface_state_lock
       {FCGIServerInterface::interface_state_mutex_};
     
-    close(self_pipe_read_descriptor);
-    close(self_pipe_write_descriptor);
+    close(self_pipe_read_descriptor_);
+    close(self_pipe_write_descriptor_);
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
     // FCGIRequest objects for write mutexes ensures that no write mutex will
@@ -399,7 +400,7 @@ int FCGIServerInterface::AcceptConnection()
   socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
   int accept_return {};
 
-  while((accept_return = accept(FCGI_LISTENSOCK_FILENO, address_ptr, 
+  while((accept_return = accept(listening_descriptor_, address_ptr, 
     &new_connection_address_length)) == -1 && (errno == EINTR || 
     errno == ECONNABORTED))
   {
@@ -684,7 +685,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     int read_return {};
     constexpr int bl {32};
     std::uint8_t read_buffer[bl];
-    while((read_return = read(self_pipe_read_descriptor, read_buffer, bl)) > 0)
+    while((read_return = read(self_pipe_read_descriptor_, read_buffer, bl)) > 0)
       continue;
     if(read_return == 0) 
     {
@@ -735,9 +736,10 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 
   fd_set read_set;
   FD_ZERO(&read_set);
-  FD_SET(FCGI_LISTENSOCK_FILENO, &read_set);
-  FD_SET(self_pipe_read_descriptor, &read_set);
-  int number_for_select {self_pipe_read_descriptor + 1};
+  FD_SET(listening_descriptor_, &read_set);
+  FD_SET(self_pipe_read_descriptor_, &read_set);
+  int number_for_select 
+    {std::max<int>(listening_descriptor_, self_pipe_read_descriptor_) + 1};
   // Reverse to access highest fd immediately.
   auto map_reverse_iter = record_status_map_.rbegin();
   if(map_reverse_iter != record_status_map_.rend())
@@ -862,7 +864,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
             FCGIRequest request {request_id,
               FCGIServerInterface::interface_identifier_, this, 
               request_data_ptr, write_mutex_ptr, write_mutex_bad_state_ptr, 
-              self_pipe_write_descriptor};
+              self_pipe_write_descriptor_};
             try
             {
               requests.push_back(std::move(request));
@@ -1052,7 +1054,7 @@ bool FCGIServerInterface::RemoveConnection(int connection)
       // TODO Should a way to check for errors on the implicit closure of
       // connection be implemented?
       int dup2_return {};
-      while((dup2_return = dup2(FCGI_LISTENSOCK_FILENO, connection)) == -1)
+      while((dup2_return = dup2(listening_descriptor_, connection)) == -1)
       {
         if(errno == EINTR || errno == EBUSY)
           continue;
