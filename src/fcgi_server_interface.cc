@@ -1312,6 +1312,15 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
   return SendRecord(connection, result.data(), result.size());
 }
 
+// Implementation note:
+// The write mutex is acquired if the interface must schedule the connection
+// which is asociated with the write mutex for closure. This is done to allow
+// destruction of the write mutex without a prior, potentially-blocking call to
+// acquire the write mutex. It is planned that writes by the interface will
+// eventually be made by a separate thread on behalf of the interface.
+// Non-blocking write mutex destruction combined with interface writes being
+// made by a separate thread would allow the interface thread to never block on
+// write mutex acquisition during normal operation.
 bool FCGIServerInterface::
 SendRecord(int connection, const std::uint8_t* buffer_ptr, 
   std::int_fast32_t count)

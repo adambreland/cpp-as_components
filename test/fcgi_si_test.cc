@@ -1,5 +1,9 @@
+#include <arpa/inet.h>
 #include <fcntl.h>
+#include <netinet/in.h>
+#include <stdlib.h>         // <cstdlib> does not define setenv. 
 #include <sys/sendfile.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -29,6 +33,7 @@ namespace fcgi_si_test {
 
 // Create a temporary file in the temporary directory offered by Bazel.
 // The descriptor value is written to the int pointer to by descriptor_ptr.
+//
 // BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
 void CreateBazelTemporaryFile(int* descriptor_ptr)
 {
@@ -46,8 +51,12 @@ void CreateBazelTemporaryFile(int* descriptor_ptr)
     FAIL() << "An error occurred while trying to create a temporary file." <<
       '\n' << strerror(errno);
   if(unlink(char_array_uptr.get()) < 0)
+  {
+    std::string errno_message {strerror(errno)};
+    close(temp_descriptor);
     FAIL() << "The temporary file could not be unlinked." << '\n' <<
-      strerror(errno);
+      errno_message;
+  }
   *descriptor_ptr = temp_descriptor;
 }
 
@@ -2947,8 +2956,200 @@ TEST(Utility, PartitionByteSequence)
 
 TEST(FCGIServerInterface, ConstructionExceptions)
 {
-  // Check that STDIN_FILENO is open
-  
-  // Close STDIN_FILENO and establish a socket which the FCGIServerInterface
-  // constructor will interact with.
+  // Examined properties:
+  // (Let "positive" mean an exception was thrown.)
+  // Properties which should cause a throw during construction:
+  // ("true positive" or "false negative" determination: EXPECT_THROW)
+  // 1) Invalid socket properties:
+  //    a) listening_descriptor does not refer to a socket.
+  //    b) The socket type is not SOCK_STREAM.
+  //    c) The socket is not listening.
+  // 2) Invalid properties related to FCGI_WEB_SERVER_ADDRS.
+  //    a) FCGI_WEB_SERVER_ADDRS is bound and non-empty, the domain of the
+  //       socket is an internet domain, and no valid internet addresses are
+  //       present after the value of FCGI_WEB_SERVER_ADDRS was processed as
+  //       a comma-separated list of the appropriate internet addresses.
+  // 3) Invalid value of max_connections: less than zero, zero.
+  // 4) Invalid value of max_requests: less than zero, zero.
+  // 5) Singleton violation: an interface is present and a call to construct
+  //    another interface is made.
+  // 
+  // Properties which should not cause a throw:
+  // ("false positive" or "true negative" determination: EXPECT_NO_THROW)
+  // 1) Value of listening_descriptor: zero, non-zero.
+  // 2) Maximum value of max_connections.
+  // 3) Maximum value of max_requests.
+  // 4) A non-default value for app_status_on_abort.
+  // 5) An internet domain socket which either has FCGI_WEB_SERVER_ADDRS
+  //    unbound or bound and empty.
+  // 6) A Unix domain socket:
+  //    a) Where FCGI_WEB_SERVER_ADDRS is unbound.
+  //    b) Where FCGI_WEB_SERVER_ADDRS is bound to internet addresses.
+  //
+  // Test cases:
+  // Throw expected:
+  //  1) listening_descriptor refers to a file which is not a socket.
+  //  2) listening_descriptor refers to a datagram socket (SOCK_DGRAM).
+  //  3) listening_descriotor refers to a socket which not set to the listening
+  //     state.
+  //  4) The socket is of domain AF_INET and only IPv6 addresses are present.
+  //  5) The socket is of domain AF_INET6 and only IPv4 addresses are present.
+  //  6) The socket is of domain AF_INET and a combination of invalid IPv4
+  //     addresses and IPv6 addresses are present. "Invalid" means malformed.
+  //  7) The socket is of domain AF_INET and only a comma is present.
+  //  8) max_connections == -1.
+  //  9) max_connections == 0.
+  // 10) max_requests == -1.
+  // 11) max_requests == 0. 
+  // 12) An interface already exists and another call to the constructor is
+  //     made. The arguments to the second call are the same as the first.
+  // Throw not expected:
+  // 13) listening_descriptor == 0. The descriptor is a valid socket.
+  //     FCGI_WEB_SERVER_ADDRS is unbound.
+  // 14) listening_descriptor != 0. The descriptor is a valid socket.
+  //     FCGI_WEB_SERVER_ADDRS is bound and empty.
+  // 15) max_connections == std::numeric_limits<int>::max() &&
+  //     max_requests    == std::numeric_limits<int>::max()
+  //     Also, a non-default value is provided for app_status_on_abort.
+  // 16) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is unbound.
+  // 17) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is bound and has
+  //     IPv4 address 127.0.0.1.
+  //
+  // Modules which testing depends on: none.
+  //
+  // Other modules whose testing depends on this module: none.
+
+  // Ensure that FCGI_WEB_SERVER_ADDRS is bound and empty to establish a
+  // consistent start state.
+  if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
+    FAIL() << "setenv failed" << '\n' << strerror(errno);
+
+  // Case 1: listening_descriptor refers to a file which is not a socket.
+  // Create a temporary regular file.
+  {
+    int temp_fd {};
+    fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+    EXPECT_THROW(fcgi_si::FCGIServerInterface(temp_fd, 1, 1), std::exception);
+    close(temp_fd);
+  }
+
+  // Case 2: listening_descriptor refers to a datagram socket (SOCK_DGRAM).
+  {
+    int socket_fd {socket(AF_INET, SOCK_DGRAM, 0)};
+    if(socket_fd < 0)
+    {
+      ADD_FAILURE() << "A call to socket failed in case 2." << '\n' 
+        << strerror(errno);
+    }
+    else
+    {
+      struct sockaddr_in sa {};
+      sa.sin_family = AF_INET;
+      sa.sin_port = htons(0U); // Use an available ephemeral port.
+      sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+      if(bind(socket_fd, static_cast<struct sockaddr*>(static_cast<void*>(&sa)),
+        sizeof(struct sockaddr_in)) < 0)
+      { 
+        int errno_value {errno};
+        close(socket_fd);
+        ADD_FAILURE() << "A call to bind failed in case 2." << '\n' 
+          << strerror(errno_value);
+      }
+      else
+      {
+        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+          std::exception);
+        close(socket_fd);
+      }
+    }
+  }
+    
+  // Case 3: listening_descriotor refers to a socket which not set to the
+  // listening state.
+  {
+    int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
+    if(socket_fd < 0)
+    {
+      ADD_FAILURE() << "A call to socket failed in case 3." << '\n' 
+        << strerror(errno);
+    }
+    else
+    {
+      struct sockaddr_in sa {};
+      sa.sin_family = AF_INET;
+      sa.sin_port = htons(0U); // Use an available ephemeral port.
+      sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+      if(bind(socket_fd, static_cast<struct sockaddr*>(static_cast<void*>(&sa)),
+        sizeof(struct sockaddr_in)) < 0)
+      { 
+        int errno_value {errno};
+        close(socket_fd);
+        ADD_FAILURE() << "A call to bind failed in case 3." << '\n' 
+          << strerror(errno_value);
+      }
+      else
+      {
+        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+          std::exception);
+        close(socket_fd);
+      }
+    }
+  }
+
+  // Case 4: The socket is of domain AF_INET and only IPv6 addresses are
+  // present.
+  {
+    if(setenv("FCGI_WEB_SERVER_ADDRS", "::1", 1) < 0)
+      ADD_FAILURE() << "setenv failed in case 4." << '\n' << strerror(errno);
+    else
+    {
+      int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
+      if(socket_fd < 0)
+      {
+        ADD_FAILURE() << "A call to socket failed in case 4." << '\n' 
+          << strerror(errno);
+      }
+      else
+      {
+        if(listen(socket_fd, 5) < 0)
+        {
+          int errno_value {errno};
+          close(socket_fd);
+          ADD_FAILURE() << "A call to listen failed in case 4." << '\n'
+            << strerror(errno_value);
+        }
+        else
+        {
+          EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+            std::exception);
+          close(socket_fd);
+        }
+      }
+    }
+  }
+
+  // Case 5: 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }

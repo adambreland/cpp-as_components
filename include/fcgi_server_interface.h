@@ -18,19 +18,19 @@
 namespace fcgi_si {
 
 //    FCGIServerInterface is a singleton class which implements the majority of
-// the FastCGI protocol for application servers. This class and its
-// associated class FCGIRequest are intended to support multi-threaded
-// applications. FCGIRequest objects are produced by the AcceptRequests
-// method of FCGIServerInterface. A request object may be moved to a worker
-// thread and serviced from it. Methods of FCGIRequest allow request response
-// to be performed without explicit synchronization between threads.
-//    The thread which houses the instance of FCGIServerInterface is intended
-// to execute calls to AcceptRequest in a loop. The FCGIRequest objects
-// produced by these calls may be moved to a concurrent queue or otherwise
-// exposed to worker threads. The interface fully supports multiple concurrent
-// connections and request multiplexing over a single connection as specified
-// by the FastCGI protocol. AcceptRequests uses I/O multiplexing on connections
-// and will block until new connection requests or request data are present.
+// the FastCGI protocol for application servers. This class and its associated
+// class FCGIRequest support multi-threaded applications. FCGIRequest objects
+// are produced by the AcceptRequests method of FCGIServerInterface. The thread
+// which houses the instance of FCGIServerInterface is intended to execute
+// calls to AcceptRequest in a loop. A request object produced by a call may be
+// moved to a worker thread and serviced from it. The methods of FCGIRequest
+// allow the response to a request to be made without explicit synchronization
+// between threads.
+//    As specified by the FastCGI protocol, the interface fully supports:
+// 1) multiple concurrent connections
+// 2) request multiplexing over a single connection
+// AcceptRequests uses I/O multiplexing on connections and will block until new
+// connection requests or request data are present.
 //
 // Configuration:
 //    FCGI_LISTENSOCK_FILENO: The FastCGI standard specifies that the listening
@@ -38,13 +38,15 @@ namespace fcgi_si {
 // FCGI_LISTENSOCK_FILENO. This requirement is not enforced by
 // FCGIServerInterface. The descriptor of the listening socket is provided
 // to the interface constructor as an argument. This descriptor and the file
-// description it is associated with is not managed by the interface.
+// description it is associated with are not managed by the interface (though
+// it will be made non-blocking).
 //
 //    The interface is configured with:
 // a) A maximum number of concurrent connections.
 // b) A maximum number of active requests for a connection.
 // c) A default response if a request is aborted by a client before notice of
-//    receipt of the request was given by the interface to the application.
+//    receipt of the request was given by the interface to the application
+//    (construction of an FCGIRequest object).
 // d) For internet domain sockets (AF_INET and AF_INET6), the environment
 //    variable FCGI_WEB_SERVER_ADDRS is inspected during interface construction
 //    to generate a list of authorized IP addresses.
@@ -57,16 +59,15 @@ namespace fcgi_si {
 // Bad state:
 //    During use, the interface or FCGIRequest objects produced by the
 // interface may encounter errors which corrupt the state of the interface.
-// In this case, the interface assumes a bad state. The current state of the
+// When this occurs, the interface assumes a bad state. The current state of the
 // interface may be queried by calling interface_status. Once in a bad state,
 // the interface should be destroyed.
-//    Synchronization between the destruction of an interface and the
-// destruction of FCGIRequest objects produced by the interface need not be
-// explicitly handled.
+//    Synchronization of the destruction of an interface and the destruction of
+// FCGIRequest objects produced by the interface need not be explicitly handled.
 //
 // Synchronization:
-//    It is expected that all methods of FCGIServerInterface are called on
-// the interface from the same thread which houses the interface. In other
+//    It is expected that all public methods of FCGIServerInterface are called
+// on the interface from the same thread which houses the interface. In other
 // words, interface method calls are not thread safe. In particular, putting
 // the interface into or removing the interface from an overloaded state
 // should be performed synchronously with the thread which houses the interface.
@@ -212,19 +213,21 @@ class FCGIServerInterface {
   }
 
   // Parameters:
-  // max_connections:     The maximum number of currently-active socket 
-  //                      connections of those which were accepted by the
-  //                      listening socket.
-  // max_requests:        The maximum number of active requests for a
-  //                      socket connection.
-  // app_status_on_abort: The application status which will be returned by the
-  //                      interface in the case that:
-  //                      a) An abort is requested by the client with an 
-  //                         FCGI_ABORT_REQUEST record. 
-  //                      b) The request has yet to be assigned to the
-  //                         application by the generation of an FCGIRequest
-  //                         object.
-  //                      The default value is EXIT_FAILURE.
+  // listening_descriptor: The descriptor of the listening socket to be
+  //                       used by the interface to accept connections.
+  // max_connections:      The maximum number of currently-active socket 
+  //                       connections of those which were accepted by the
+  //                       listening socket.
+  // max_requests:         The maximum number of active requests for a
+  //                       socket connection.
+  // app_status_on_abort:  The application status which will be returned by the
+  //                       interface in the case that both:
+  //                       a) An abort is requested by a client with an 
+  //                          FCGI_ABORT_REQUEST record. 
+  //                       b) The request has yet to be assigned to the
+  //                          application by the generation of an FCGIRequest
+  //                          object.
+  //                       The default value is EXIT_FAILURE.
   //
   // Preconditions:
   // 1) Signal handling: SIGPIPE must be handled by the application. Failure to
@@ -239,15 +242,18 @@ class FCGIServerInterface {
   // 3) (Configuration errors) An exception is thrown if:
   //    a) Either of max_connections or max_requests is less than or equal to
   //       zero.
-  //    b) The socket type of listening_socket is not SOCK_STREAM.
-  //    c) The socket provided by listening_socket is not listening.
-  //    d) The socket domain of listening_socket is AF_INET or AF_INET6,
+  //    b) listening_socket does not refer to a socket.
+  //    c) The socket type of listening_socket is not SOCK_STREAM.
+  //    d) The socket provided by listening_socket is not listening.
+  //    e) The socket domain of listening_socket is AF_INET or AF_INET6,
   //       FCGI_WEB_SERVER_ADDRS is bound to a non-empty value, and no
   //       valid addresses are found when that value is processed. An address
   //       is valid if inet_pton finds the address to be valid when given the
   //       appropriate socket domain.
-  //    e) During construction, another FCGIServerInterface object exists.
-  //       Only a single FCGIServerInterface may be active at a time.
+  // 4) An exception if thrown if, during construction, another
+  //    FCGIServerInterface object exists.
+  // 5) The file description of listening_descriptor may or may not have been
+  //    made non-blocking.
   //
   // Effects:
   // 1) The FCGIServerInterface object is ready to be used in a loop which
@@ -255,8 +261,9 @@ class FCGIServerInterface {
   //    connections and send request data.
   // 2) The new interface object is differentiated from recent, previous 
   //    objects. The new interface is safe to use in the presence of 
-  //    FCGIRequest objects which were recently generated from a previous
-  //    interface.
+  //    FCGIRequest objects which were generated from a previous interface.
+  // 3) The file description of listening_descriptor was made non-blocking
+  //    (O_NONBLOCK). No other open file status flags were changed.
   FCGIServerInterface(int listening_descriptor, int max_connections,
     int max_requests, std::int32_t app_status_on_abort = EXIT_FAILURE);
 
