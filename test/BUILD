@@ -1,9 +1,34 @@
+cc_library(
+    name       = "fcgi_si_testing_utilities",
+    deps       = ["@googletest//:gtest"],
+    srcs       = ["//test:fcgi_si_testing_utilities.cc"],
+    hdrs       = ["//:include/protocol_constants.h", 
+                  "//test:fcgi_si_testing_utilities.h"],
+    copts      = ["-iquote .", "-Wextra"],
+    visibility = ["//visibility:public"]
+)
+
 cc_test(
-    name = "fcgi_si_test",
-    deps =
-        ["//:fcgi_si",
-        "@googletest//:gtest",
-        "@googletest//:gtest_main"],
-    srcs = ["//test:fcgi_si_test.cc"],
-    timeout = "short"
+    name       = "fcgi_si_testing_utilities_test",
+    deps       = ["//test:fcgi_si_testing_utilities", "//:fcgi_si_utilities",
+                  "@googletest//:gtest", "@googletest//:gtest_main"],
+    srcs       = ["//test:fcgi_si_testing_utilities_test.cc"],
+    copts      = ["-iquote .", "-Wextra"]
+)
+
+cc_test(
+    name       = "fcgi_si_utilities_test",
+    deps       = ["//:fcgi_si_utilities", "//test:fcgi_si_testing_utilities", 
+                  "@googletest//:gtest", "@googletest//:gtest_main"],
+    srcs       = ["//test:fcgi_si_utilities_test.cc"],
+    copts      = ["-iquote .", "-Wextra"]
+)
+
+cc_test(
+    name       = "fcgi_si_test",
+    deps       = ["//:fcgi_si", "//test:fcgi_si_testing_utilities",
+                  "@googletest//:gtest", "@googletest//:gtest_main"],
+    srcs       = ["//test:fcgi_si_test.cc"],
+    copts      = ["-iquote .", "-Wextra"],
+    timeout    = "short"
 )
