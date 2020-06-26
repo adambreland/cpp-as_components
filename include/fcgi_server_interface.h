@@ -17,6 +17,7 @@
 
 namespace fcgi_si {
 
+// Description:
 //    FCGIServerInterface is a singleton class which implements the majority of
 // the FastCGI protocol for application servers. This class and its associated
 // class FCGIRequest support multi-threaded applications. FCGIRequest objects
@@ -26,11 +27,24 @@ namespace fcgi_si {
 // moved to a worker thread and serviced from it. The methods of FCGIRequest
 // allow the response to a request to be made without explicit synchronization
 // between threads.
+//
 //    As specified by the FastCGI protocol, the interface fully supports:
 // 1) multiple concurrent connections
 // 2) request multiplexing over a single connection
 // AcceptRequests uses I/O multiplexing on connections and will block until new
 // connection requests or request data are present.
+//
+//    FCGIServerInterface does not validate request information relative to
+// FastCGI role expectations. For example, the equality of the number of bytes
+// of FCGI_STDIN input and the CONTENT_LENGTH environment variable represented
+// as a FCGI_PARAMS name-value pair is not verified for the Responder role.
+//    The interface considers a request for a Responder and Authorizer to be
+// complete when either:
+// 1) No FCGI_DATA records have been received and FCGI_PARAMS and FCGI_STDIN
+//    are complete.
+// 2) All of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
+// The interface considers a request for a Filter and any unknown role to be
+// complete when all of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
 //
 // Configuration:
 //    FCGI_LISTENSOCK_FILENO: The FastCGI standard specifies that the listening

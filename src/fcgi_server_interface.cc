@@ -986,7 +986,7 @@ bool FCGIServerInterface::interface_status() const
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
     {FCGIServerInterface::interface_state_mutex_};
-  return bad_interface_state_detected_;
+  return !bad_interface_state_detected_;
 } // RELEASE interface_state_mutex_.
 
 // Synchronization:

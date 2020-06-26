@@ -1,10 +1,13 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <stdlib.h>         // <cstdlib> does not define setenv. 
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -20,8 +23,9 @@
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the
 //                        Bazel testing run-time environment. 
 
-TEST(FCGIServerInterface, ConstructionExceptions)
+TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
+  // Testing explanation
   // Examined properties:
   // (Let "positive" mean an exception was thrown.)
   // Properties which should cause a throw during construction:
@@ -293,8 +297,41 @@ TEST(FCGIServerInterface, ConstructionExceptions)
 
   // Throw not expected:
 
-  auto ValidSocketCase = [](int domain, int max_connections, int max_requests,
-    std::int32_t app_status_on_abort, int test_case)->void
+  auto InterfaceGettersAndSetters = [](int socket_fd, int max_connections, 
+    int max_requests, std::int32_t app_status_on_abort, 
+    std::string case_suffix)->void
+  {
+    EXPECT_NO_THROW(
+    {
+      fcgi_si::FCGIServerInterface interface(socket_fd, max_connections,
+        max_requests, app_status_on_abort);
+      int f_getfl_return {fcntl(socket_fd, F_GETFL)};
+      if(f_getfl_return == -1)
+      {
+        ADD_FAILURE() << "A call to fcntl to inspect the blocking file status "
+          "of the listening socket failed in" << case_suffix;
+      }
+      else
+      {
+        if(!(f_getfl_return & O_NONBLOCK))
+          ADD_FAILURE() << "The listening socket was not made non-blocking "
+            "in" << case_suffix;
+      }
+      EXPECT_EQ(interface.connection_count(), 0U) << "connection_count "
+        "did not return zero upon construction in" << case_suffix;
+      EXPECT_EQ(interface.get_overload(), false) << "The interface was "
+        "in a overloaded state upon construction in" << case_suffix; 
+      EXPECT_EQ(interface.interface_status(), true) << "The interface "
+        "was in a bad state upon construction in" << case_suffix;
+      interface.set_overload(true);
+      EXPECT_EQ(interface.get_overload(), true) << "A call of "
+        "set_overload(true) did not do so in" << case_suffix;
+    }) << "Construction or a setter or getter threw in" << case_suffix;
+  };
+
+  auto ValidSocketCase = [&InterfaceGettersAndSetters](int domain,
+    int max_connections, int max_requests, std::int32_t app_status_on_abort, 
+    int test_case)->void
   {
     std::string case_suffix {" case "};
     case_suffix += std::to_string(test_case);
@@ -317,8 +354,8 @@ TEST(FCGIServerInterface, ConstructionExceptions)
       }
       else
       {
-        EXPECT_NO_THROW(fcgi_si::FCGIServerInterface(socket_fd, max_connections,
-          max_requests, app_status_on_abort));
+        InterfaceGettersAndSetters(socket_fd, max_connections, max_requests,
+          app_status_on_abort, case_suffix);
         close(socket_fd);
       }
     }
@@ -352,7 +389,7 @@ TEST(FCGIServerInterface, ConstructionExceptions)
     ValidSocketCase(AF_INET, max, max, -10, 15);
   }
 
-  auto UnixValidSocketCase = [](int test_case)->void
+  auto UnixValidSocketCase = [&InterfaceGettersAndSetters](int test_case)->void
   {
     std::string case_suffix {" case "};
     case_suffix += std::to_string(test_case);
@@ -395,7 +432,8 @@ TEST(FCGIServerInterface, ConstructionExceptions)
         }
         else
         {
-          EXPECT_NO_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1));
+          InterfaceGettersAndSetters(socket_fd, 1, 1, EXIT_FAILURE,
+            case_suffix);
           close(socket_fd);
           if(unlink(unix_socket_path.data()) < 0)
             FAIL() << "The test Unix domain socket file could not be unlinked."
@@ -429,4 +467,130 @@ TEST(FCGIServerInterface, ConstructionExceptions)
       ClearFCGIWebServerAddrs();
     }
   }
+}
+
+TEST(FCGIServerInterface, FCGIGetValues)
+{
+  // Testing explanation
+  //    The FastCGI protocol requires applications to respond to
+  // FCGI_GET_VALUES management requests. Such a request includes a collection
+  // of name-value pairs which are encoded in the FastCGI name-value pair
+  // encoding. The values of these names are empty. Three names are defined by
+  // the protocol: FCGI_MAX_CONNS, FCGI_MAX_REQUESTS, and FCGI_MPXS_CONNS. Any
+  // name that is included in a request which is not understood by the
+  // application should be omitted in the application's response.
+  //    FCGI_GET_VALUES will usually occur immediately after a connection is
+  // made. This test examines the behavior of the interface in that situation.
+  //
+  // Examined properties:
+  // 1) Presence of unknown names.
+  // 2) Position of unknown names in the FastCGi name-value pair byte sequence.
+  //    a) In the beginning.
+  //    b) In the middle with a known name after an unknown name.
+  // 3) 
+  // 4) Subsets of the known names.
+  // 5)  
+  //
+  // Test cases:
+  //
+  // 
+  // Modules which testing depends on:
+  // 1) 
+  // 2)
+  //
+  // Other modules whose testing depends on this module: none.
+
+
+}
+
+// A signal handler and associated variable for use in 
+// TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection).
+std::atomic<bool> alarm_flag {false};
+
+void AlarmInterruptHandler(int sig)
+{
+  alarm_flag = true;
+}
+
+TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
+{
+  // Testing explanation
+  // Examined properties:
+  // 1) Rejection of connections in excess of the limit set by the
+  //    max_connections constructor argument.
+  // 2) Rejection of connections when the interface was put into an overloaded
+  //    state.
+  // 3) Rejection of connections based on the presence of the address of the
+  //    client in the list of addresses given by FCGI_WEB_SERVER_ADDRS.
+  //
+  // Test cases:
+  // 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty.
+  // 2) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
+  // 3) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
+  //    connection was made, and the interface was placed in an overloaded
+  //    state.
+  // 4) FCGI_WEB_SERVER_ADDRS contains the loopback addresses 127.0.0.1 and
+  //    127.0.0.2. A client with address 127.0.0.2 attempts to make a
+  //    connection and it succeeds. A client with address 127.0.0.3 attempts
+  //    to make a connection and it fails.
+
+  // Ensure that operations on std::atomic<bool> are lock-free and can be
+  // used in a signal handler.
+  if(!std::atomic<bool>{}.is_lock_free())
+    FAIL() << "Operations on std::atomic<bool> are not lock free.";
+
+  // Save the previous signal handler information for SIGALRM so that it can
+  // be restored.
+  struct sigaction previous_sigalrm_disposition {};
+  sigset_t empty_signal_set {};
+  if(sigemptyset(&empty_signal_set) == -1)
+    FAIL() << "A call to sigemptyset failed." << '\n' << strerror(errno);
+  struct sigaction new_sigalrm_disposition {};
+  new_sigalrm_disposition.sa_handler = &AlarmInterruptHandler;
+  new_sigalrm_disposition.sa_mask = empty_signal_set;
+  new_sigalrm_disposition.sa_flags = 0;
+  if(sigaction(SIGALRM, &new_sigalrm_disposition, 
+    &previous_sigalrm_disposition) == -1)
+    FAIL() << "A call to sigaction failed" << '\n' << strerror(errno);
+
+  // Case 1: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty.
+  while(true)
+  {
+    if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
+    {
+      ADD_FAILURE() << "FCGI_WEB_SERVER_ADDRS could not be cleared in case 1."
+        << '\n' << strerror(errno);
+      break;
+    }
+    // Create a listening socket and extract the ephemeral port.
+    int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
+    if(socket_fd < 0)
+    {
+      ADD_FAILURE() << "A call to socket failed in case 1" << '\n' 
+        << strerror(errno);
+      break;
+    }
+    struct sockaddr_in socket_addr {};
+    socklen_t socklen {sizeof(sockaddr_in)};
+    if(getsockname(socket_fd, 
+        static_cast<struct sockaddr*>(static_cast<void*>(&socket_addr)), 
+        &socklen) < 0)
+    {
+      ADD_FAILURE() << "A call to getsockname failed in case 1." << '\n'
+        << strerror(errno);
+      break;
+    }
+    // Construct the interface, create a new socket which connects to it,
+    // and have another socket try to connect and verify rejection.
+    // EXPECT_NO_THROW(
+    // {
+    //   fcgi_si::FCGIServerInterface interface(socket_fd, 1, 1);
+    //   int client_socket(socket());
+    // });
+    break;
+  }
+
+  // Restore the previous signal disposition for SIGALRM.
+  if(sigaction(SIGALRM, &previous_sigalrm_disposition, nullptr) == -1)
+    exit(EXIT_FAILURE);
 }

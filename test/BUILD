@@ -4,8 +4,7 @@ cc_library(
     srcs       = ["//test:fcgi_si_testing_utilities.cc"],
     hdrs       = ["//:include/protocol_constants.h", 
                   "//test:fcgi_si_testing_utilities.h"],
-    copts      = ["-iquote .", "-Wextra"],
-    visibility = ["//visibility:public"]
+    copts      = ["-iquote .", "-Wextra"]
 )
 
 cc_test(
