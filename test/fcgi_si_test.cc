@@ -9,15 +9,21 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
 #include <string>
+#include <tuple>
+#include <vector>
+
+#include <iostream>
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
 #include "fcgi_si.h"
 #include "test/fcgi_si_testing_utilities.h"
+#include "external/socket_functions/include/socket_functions.h"
 
 // Key:
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the
@@ -53,7 +59,16 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   //    unbound or bound and empty.
   // 5) A Unix domain socket:
   //    a) Where FCGI_WEB_SERVER_ADDRS is unbound.
-  //    b) Where FCGI_WEB_SERVER_ADDRS is bound to internet addresses.
+  //    b) Where FCGI_WEB_SERVER_ADDRS is bound to i-nternet addresses.
+  //
+  // Additional properties for valid cases:
+  // 1) Non-blocking status of file description after use for interface
+  //    construction.
+  // 2) Initial value returned by connection_count: zero.
+  // 3) Initial value returned by get_overload: false.
+  // 4) Initial value returned by interface_status: true.
+  // 5) Action of set_overload: After the call set_overload(true), a call to
+  //    get_overload should return true.
   //
   // Test cases:
   // Throw expected:
@@ -73,6 +88,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // 11) max_requests == 0. 
   // 12) An interface already exists and another call to the constructor is
   //     made. The arguments to the second call are the same as the first.
+  //
   // Throw not expected:
   // 13) FCGI_WEB_SERVER_ADDRS is unbound. The descriptor is a valid socket.
   // 14) FCGI_WEB_SERVER_ADDRS is bound and empty. The descriptor is a valid
@@ -484,23 +500,236 @@ TEST(FCGIServerInterface, FCGIGetValues)
   //
   // Examined properties:
   // 1) Presence of unknown names.
-  // 2) Position of unknown names in the FastCGi name-value pair byte sequence.
+  // 2) Position of unknown names in the FastCGI name-value pair byte sequence.
   //    a) In the beginning.
   //    b) In the middle with a known name after an unknown name.
-  // 3) 
+  // 3) Unknown name which requires four bytes to be encoded in the FastCGI
+  //    name-value pair encoding.
   // 4) Subsets of the known names.
-  // 5)  
+  // 5) An empty request.
   //
-  // Test cases:
-  //
+  // Test cases: All cases use an interface which accepts a single request
+  // and a single connection at a time.
+  // 1) An empty request.
+  // 2) Only known names. All three known names.
+  // 3) Only known names. A single known name. Three variations for each of
+  //    the known names.
+  // 4) Unknown name present. A single-byte unknown name in the first position.
+  //    All three known names follow.
+  // 5) Unknown name present. A four-byte unknown name in the first position.
+  //    All three known names follow.
+  // 6) Unknown name present. A known name, then a single-byte unknown name,
+  //    then a known name.
+  // 7) Unknown name present. A known name, then a four-byte unknown name, then
+  //    a known name.
+  // 8) All unknown names.
   // 
   // Modules which testing depends on:
-  // 1) 
-  // 2)
+  // 1) fcgi_si::EncodeNameValuePairs
+  // 2) fcgi_si::PopulateHeader
+  // 3) socket_functions::SocketWrite
+  // 4) socket_functions::SocketRead
   //
   // Other modules whose testing depends on this module: none.
 
+  auto CreateInterface = []()->
+    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+  {
+    std::unique_ptr<fcgi_si::FCGIServerInterface> interface_ptr {};
+    int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
+    if(socket_fd < 0)
+    {
+      ADD_FAILURE() << "A call to socket failed." << '\n' << strerror(errno);
+      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
+    }
 
+    if(listen(socket_fd, 5) < 0)
+    {
+      ADD_FAILURE() << "A call to listen failed." << '\n' << strerror(errno);
+      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
+    }
+
+    struct sockaddr_in socket_addr {};
+    socklen_t socklen {sizeof(sockaddr_in)};
+    if(getsockname(
+      socket_fd, 
+      static_cast<struct sockaddr*>(static_cast<void*>(&socket_addr)), 
+      &socklen
+    ) < 0)
+    {
+      ADD_FAILURE() << "A call to getsockname failed." << '\n' << strerror(errno);
+      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
+    }
+
+    interface_ptr = std::unique_ptr<fcgi_si::FCGIServerInterface> 
+      {new fcgi_si::FCGIServerInterface {socket_fd, 1, 1}};
+    
+    return std::make_tuple(std::move(interface_ptr), socket_fd, 
+      ntohs(socket_addr.sin_port));
+  };
+
+  auto FCGIGetValuesTest = [&CreateInterface](std::uint8_t* input_ptr, 
+    int input_length,
+    const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
+      expected_result, int test_case)->void
+  {
+
+    // Generate string " case test_case." for case x.
+    std::string case_suffix {" case "};
+    case_suffix += std::to_string(test_case);
+    case_suffix += ".";
+
+    int client_socket_fd {-1};
+    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+    inter_tuple {CreateInterface()};
+
+    auto SocketClosure = [&inter_tuple, client_socket_fd]()->void
+    {
+      if(std::get<1>(inter_tuple) >= 0)
+        close(std::get<1>(inter_tuple));
+      if(client_socket_fd >= 0)
+        close(client_socket_fd);
+    };
+
+    if(!std::get<0>(inter_tuple))
+    {
+      ADD_FAILURE() << "Construction of the interface failed in" << case_suffix;
+      SocketClosure();
+      return;
+    }
+
+    client_socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(client_socket_fd < 0)
+    {
+      ADD_FAILURE() << "Creation of a socket for the client failed in" << 
+        case_suffix << '\n' << strerror(errno);
+      SocketClosure();
+      return;
+    }
+
+    int f_getfl_return {fcntl(client_socket_fd, F_GETFL)};
+    if(f_getfl_return == -1)
+    {
+      ADD_FAILURE() << "A call to fcntl with F_GETFL for the client socket "
+        "failed in" << case_suffix << '\n' << strerror(errno);
+      SocketClosure();
+      return;
+    }
+    f_getfl_return |= O_NONBLOCK;
+    if(fcntl(client_socket_fd, F_SETFL, f_getfl_return) == -1)
+    {
+      ADD_FAILURE() << "A call to fcntl with F_SETFL for the client socket "
+        "failed in" << case_suffix << '\n' << strerror(errno);
+      SocketClosure();
+      return;
+    }
+    
+    struct sockaddr_in interface_addr {};
+    interface_addr.sin_family = AF_INET;
+    interface_addr.sin_port = htons(std::get<2>(inter_tuple));
+    interface_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if(connect(
+      client_socket_fd, 
+      static_cast<struct sockaddr*>(static_cast<void*>(&interface_addr)),
+      sizeof(struct sockaddr_in)) != -1 || errno != EINPROGRESS)
+    {
+      ADD_FAILURE() << "A call to connect failed in" << case_suffix
+        << '\n' << strerror(errno);
+      SocketClosure();
+      return;
+    }
+
+    // Allow the interface to process the connection.
+    std::vector<fcgi_si::FCGIRequest> accept_return 
+      {std::get<0>(inter_tuple)->AcceptRequests()};
+    if(accept_return.size())
+    {
+      ADD_FAILURE() << "A request was returned when none was expected in"
+        << case_suffix;
+      SocketClosure();
+      return;
+    }
+
+    // The connection should have completed.
+
+    if(input_length > socket_functions::SocketWrite(
+      client_socket_fd, input_ptr, input_length))
+    {
+      ADD_FAILURE() << "An error occurred while writing to the interface in"
+        << case_suffix;
+      SocketClosure();
+      return;
+    }
+
+    // Allow the interface to process the FCGI_GET_VALUES request (record).
+    std::vector<fcgi_si::FCGIRequest> get_values_accept_return 
+      {std::get<0>(inter_tuple)->AcceptRequests()};
+    if(get_values_accept_return.size())
+    {
+      ADD_FAILURE() << "A request was returned when none was expected in"
+        << case_suffix;
+      SocketClosure();
+      return;
+    }
+
+    std::uint8_t read_buffer[128U];
+    std::vector<std::uint8_t> returned_result {};
+    bool read {true};
+    while(read)
+    {
+      std::size_t read_return 
+        {socket_functions::SocketRead(client_socket_fd, read_buffer, 128U)};
+      returned_result.insert(returned_result.end(), read_buffer, 
+        read_buffer + read_return);
+      if(read_return < 128U)
+      {
+        read = false;
+        if((errno != EAGAIN) && (errno != EWOULDBLOCK))
+        {
+          ADD_FAILURE() << "An error occurred while reading the response from "
+            "the interface in" << case_suffix << '\n' << strerror(errno);
+          SocketClosure();
+          return;
+        }
+      }
+    }
+
+    std::cout << int(returned_result.size()) << '\n';
+
+    if((returned_result.size() < fcgi_si::FCGI_HEADER_LEN) || 
+       (returned_result[1] != static_cast<std::uint8_t>(
+         fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT)))
+    {
+      ADD_FAILURE() << "The output from the interface was incorrect in" 
+        << case_suffix;
+      SocketClosure();
+      return;
+    }
+    std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
+    returned_pairs {fcgi_si::ExtractBinaryNameValuePairs(
+      returned_result.data() + fcgi_si::FCGI_HEADER_LEN,
+      returned_result.size() - fcgi_si::FCGI_HEADER_LEN)};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> result {};
+    for(std::pair<std::vector<uint8_t>, std::vector<uint8_t>> pair : 
+      returned_pairs)
+      result.insert(pair);
+    if(result != expected_result)
+    {
+      ADD_FAILURE() << "The output from the interface was incorrect in" 
+        << case_suffix;
+      SocketClosure();
+      return;
+    }
+  };
+
+  // Case 1: Empty FCGI_GET_VALUES record
+  {
+    std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN];
+      fcgi_si::PopulateHeader(header, fcgi_si::FCGIType::kFCGI_GET_VALUES,
+        0U, 0U, 0U);
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map {};
+    FCGIGetValuesTest(header, fcgi_si::FCGI_HEADER_LEN, pair_map, 1);
+  }
 }
 
 // A signal handler and associated variable for use in 
@@ -554,7 +783,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     FAIL() << "A call to sigaction failed" << '\n' << strerror(errno);
 
   // Case 1: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty.
-  while(true)
+  do
   {
     if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
     {
@@ -587,8 +816,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     //   fcgi_si::FCGIServerInterface interface(socket_fd, 1, 1);
     //   int client_socket(socket());
     // });
-    break;
-  }
+  } while(false);
 
   // Restore the previous signal disposition for SIGALRM.
   if(sigaction(SIGALRM, &previous_sigalrm_disposition, nullptr) == -1)

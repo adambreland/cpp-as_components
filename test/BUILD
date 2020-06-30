@@ -26,7 +26,8 @@ cc_test(
 cc_test(
     name       = "fcgi_si_test",
     deps       = ["//:fcgi_si", "//test:fcgi_si_testing_utilities",
-                  "@googletest//:gtest", "@googletest//:gtest_main"],
+                  "@socket_functions//:socket_functions", "@googletest//:gtest", 
+                  "@googletest//:gtest_main"],
     srcs       = ["//test:fcgi_si_test.cc"],
     copts      = ["-iquote .", "-Wextra"],
     timeout    = "short"

@@ -1230,11 +1230,8 @@ TEST(Utility, EncodeNameValuePairs)
 
   // Case 17: More than the current iovec limit of name-value pairs.
   {
-    bool case_single_iteration {true};
-    while(case_single_iteration)
+    do
     {
-      case_single_iteration = false;
-
       long iovec_max {sysconf(_SC_IOV_MAX)};
       if(iovec_max == -1)
         iovec_max = 1024;
@@ -1361,7 +1358,7 @@ TEST(Utility, EncodeNameValuePairs)
           std::get<4>(extract_content_result).size())
       };
       EXPECT_EQ(many_pairs, pair_result_sequence);
-    }
+    } while(false);
   }
   close(temp_fd);
 }
