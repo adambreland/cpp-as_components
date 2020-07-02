@@ -198,12 +198,12 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
     throw std::runtime_error {"The socket used for construction "
       "of an FCGIServerInterface object\nwas not a listening socket."};
 
-  // For internet domains, check for IP addresses which the parent process
-  // deemed authorized. If FCGI_WEB_SERVER_ADDRS is unbound or bound to an
-  // empty value, any address is authorized. If no valid addresses are found
-  // after processing a list, an error is thrown. Otherwise, a list of
-  // well-formed addresses which have been converted to a normalized
-  // presentation format is stored in the FCGIServerInterface object.
+  // For internet domains, check for IP addresses which are deemed authorized.
+  // If FCGI_WEB_SERVER_ADDRS is unbound or bound to an empty value, any
+  // address is authorized. If no valid addresses are found after processing a
+  // list, an error is thrown. Otherwise, a list of well-formed addresses which
+  // have been converted to a normalized presentation format is stored in the
+  // FCGIServerInterface object.
   if(socket_domain == AF_INET || socket_domain == AF_INET6)
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
@@ -394,14 +394,21 @@ int FCGIServerInterface::AcceptConnection()
     int descriptor_ {-1};
   };
 
-  struct sockaddr_storage new_connection_address;
-  struct sockaddr* address_ptr
-    {static_cast<struct sockaddr*>(static_cast<void*>(&new_connection_address))};
-  socklen_t new_connection_address_length = sizeof(struct sockaddr_storage);
+  struct sockaddr_storage new_connection_address {};
+  struct sockaddr* address_ptr {nullptr};
+  socklen_t new_connection_address_length {};
+  socklen_t* length_ptr {nullptr};
+  if((socket_domain_ == AF_INET) || (socket_domain_ == AF_INET6))
+  {
+    address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
+      &new_connection_address));
+    new_connection_address_length = sizeof(struct sockaddr_storage);
+    length_ptr = &new_connection_address_length;
+  }  
+  
   int accept_return {};
-
   while((accept_return = accept(listening_descriptor_, address_ptr, 
-    &new_connection_address_length)) == -1 && (errno == EINTR || 
+    length_ptr)) == -1 && (errno == EINTR || 
     errno == ECONNABORTED))
   {
     new_connection_address_length = sizeof(struct sockaddr_storage);
@@ -752,9 +759,9 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
   }
 
   int select_return {};
-  while((select_return =
+  while(((select_return =
     select(number_for_select, &read_set, nullptr, nullptr, nullptr))
-    == -1 && (errno == EINTR || errno == EAGAIN))
+    == -1) && (errno == EINTR || errno == EAGAIN))
     continue;
   if(select_return == -1)
   {
@@ -884,8 +891,12 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     }
     // Accept new connections if some are present.
     if(connections_read < select_return)
+    {
       while(AcceptConnection() != -1)
+      {
         continue;
+      }
+    }
   }
   catch(...)
   {

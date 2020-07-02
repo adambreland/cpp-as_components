@@ -4,6 +4,7 @@
 #include <signal.h>
 #include <stdlib.h>         // <cstdlib> does not define setenv. 
 #include <sys/socket.h>
+#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -17,8 +18,6 @@
 #include <tuple>
 #include <vector>
 
-#include <iostream>
-
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
 #include "fcgi_si.h"
@@ -28,6 +27,161 @@
 // Key:
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the
 //                        Bazel testing run-time environment. 
+
+std::string CaseSuffix(int test_case)
+{
+  std::string case_suffix {" case "};
+  case_suffix += std::to_string(test_case);
+  case_suffix += ".";
+  return case_suffix;
+}
+
+void SIGALRMHandlerInstaller()
+{
+  sigset_t empty_signal_set {};
+  if(sigemptyset(&empty_signal_set) == -1)
+    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
+  struct sigaction new_sigalrm_disposition {};
+  new_sigalrm_disposition.sa_handler = SIG_DFL;
+  new_sigalrm_disposition.sa_mask = empty_signal_set;
+  new_sigalrm_disposition.sa_flags = 0;
+  if(sigaction(SIGALRM, &new_sigalrm_disposition, nullptr) == -1)
+    FAIL() << "A call to sigaction failed" << '\n' << std::strerror(errno);
+}
+
+// Creates a listening socket for an interface and constructs an interface
+// instance on the heap. Access is provided by a returned unique_ptr to the
+// interface. The provided domain is used when the listening socket is created.
+//
+// Exceptions:
+// 1) Throws any exceptions thrown by the constructor of
+//    fcgi_si::FCGIServerInterface. If a throw occurs, the interface socket
+//    file descriptor was closed.
+//
+// Resource allocation:
+// 1) If successfully constructed, a listening socket is created. This socket
+//    should be closed when the interface instance is no longer needed to
+//    prevent a file descriptor leak.
+//
+// Effects:
+// 1) If construction was successful:
+//    a) std::get<0> accesses a unique_ptr which points to the interface.
+//    b) std::get<1> accesses the descriptor value of the listening socket of
+//       the interface. 
+//    c) std::get<2> accesses the port of the listening socket of the interface.
+//       The value is in network byte order. When a UNIX domain socket was
+//       created, zero is present.
+//    d) std::get<3> accesses the file path of the UNIX domain socket. When
+//       an internet domain socket was created, the string is empty.
+// 2) If construction was not successful, the unique_ptr accessed by 
+//    std::get<0> holds nullptr. If a socket was created, its descriptor
+//    was closed.
+std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t, 
+  std::string>
+CreateInterface(int domain, int max_connections, int max_requests,
+  int app_status)
+{
+  std::unique_ptr<fcgi_si::FCGIServerInterface> interface_uptr {};
+  std::string unix_path {};
+  int socket_fd {socket(domain, SOCK_STREAM, 0)};
+
+  auto CleanupForReturn = [&interface_uptr, &unix_path, socket_fd]
+    (std::string message, int errno_value)->
+      std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t, 
+        std::string>
+  {
+    if(errno_value)
+      ADD_FAILURE() << message << '\n' << std::strerror(errno_value);
+    else
+      ADD_FAILURE() << message;
+    if(socket_fd != -1)
+      close(socket_fd);
+    return std::make_tuple(std::move(interface_uptr), socket_fd, 0U, 
+      std::move(unix_path));
+  };
+
+  if(socket_fd < 0)
+    return CleanupForReturn("A call to socket failed.", errno);
+
+  if(domain == AF_UNIX)
+  {
+    unix_path = "/tmp/fcgi_si_test_UNIX_interface_socket";
+    struct sockaddr_un AF_UNIX_addr {};
+    AF_UNIX_addr.sun_family = AF_UNIX;
+    std::strcpy(AF_UNIX_addr.sun_path, unix_path.data());
+    if(bind(socket_fd, 
+      static_cast<struct sockaddr*>(static_cast<void*>(&AF_UNIX_addr)),
+      sizeof(struct sockaddr_un)) == -1)
+      return CleanupForReturn("A call to bind for a UNIX socket failed.",
+        errno);
+    if(unlink(unix_path.data()) == -1)
+      return CleanupForReturn("A call to unlink for a UNIX socket failed.",
+        errno);
+  }  
+
+  if(listen(socket_fd, 5) < 0)
+    return CleanupForReturn("A call to listen failed.", errno);
+
+  // Generic state to be used to extract the address of the listening
+  // socket when an internet domain is used.
+  struct sockaddr* address_ptr {nullptr};
+  socklen_t*       length_ptr  {nullptr};
+  
+  // State for internet domain sockets.
+  // AF_INET
+  struct sockaddr_in AF_INET_addr {};
+  socklen_t AF_INET_socklen {sizeof(sockaddr_in)};
+
+  // AF_INET6
+  struct sockaddr_in6 AF_INET6_addr {};
+  socklen_t AF_INET6_socklen {sizeof(sockaddr_in6)};
+
+  if(domain != AF_UNIX)
+  {
+    if((domain == AF_INET) || (domain == AF_INET6))
+    {
+      if(domain == AF_INET)
+      {
+        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
+          &AF_INET_addr));
+        length_ptr = &AF_INET_socklen;
+      }
+      else if(domain == AF_INET6)
+      {
+        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
+          &AF_INET6_addr));
+        length_ptr = &AF_INET6_socklen;
+      }
+      if(getsockname(socket_fd, address_ptr, length_ptr) < 0)
+        return CleanupForReturn("A call to getsockname failed.", errno);
+    }
+    else
+      return CleanupForReturn("An invalid domain was given.", 0);
+  }
+
+  try
+  {
+    interface_uptr = std::unique_ptr<fcgi_si::FCGIServerInterface> 
+      {new fcgi_si::FCGIServerInterface {socket_fd, max_connections, 
+        max_requests, app_status}};
+  }
+  catch(...)
+  {
+    close(socket_fd);
+    throw;
+  }
+  
+  return std::make_tuple(
+    std::move(interface_uptr), 
+    socket_fd, 
+    (domain == AF_UNIX) ? 
+      0U : 
+      ((domain == AF_INET) ? 
+        AF_INET_addr.sin_port :
+        AF_INET6_addr.sin6_port), 
+    std::move(unix_path)
+  );
+}
 
 TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
@@ -107,7 +261,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   auto ClearFCGIWebServerAddrs = []()->void
   {
     if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
-      FAIL() << "setenv failed" << '\n' << strerror(errno);
+      FAIL() << "setenv failed" << '\n' << std::strerror(errno);
   };
 
   // Ensure that FCGI_WEB_SERVER_ADDRS is bound and empty to establish a
@@ -130,7 +284,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in case 2." << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
@@ -143,7 +297,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
         sizeof(struct sockaddr_in)) < 0)
       { 
         ADD_FAILURE() << "A call to bind failed in case 2." << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -162,7 +316,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in case 3." << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
@@ -175,7 +329,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
         sizeof(struct sockaddr_in)) < 0)
       { 
         ADD_FAILURE() << "A call to bind failed in case 3." << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -191,20 +345,18 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     [&ClearFCGIWebServerAddrs](const char* address_list_ptr, int domain, 
       int test_case)->void
   {
-    std::string case_suffix {" case "};
-    case_suffix += std::to_string(test_case);
-    case_suffix += ".";
+    std::string case_suffix {CaseSuffix(test_case)};
 
     if(setenv("FCGI_WEB_SERVER_ADDRS", address_list_ptr, 1) < 0)
       ADD_FAILURE() << "setenv failed in" << case_suffix << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     else
     {
       int socket_fd {socket(domain, SOCK_STREAM, 0)};
       if(socket_fd < 0)
       {
         ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         ClearFCGIWebServerAddrs();
       }
       else
@@ -212,7 +364,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
         if(listen(socket_fd, 5) < 0)
         {
           ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n'
-            << strerror(errno);
+            << std::strerror(errno);
           close(socket_fd);
           ClearFCGIWebServerAddrs();
         }
@@ -245,22 +397,20 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   auto MaxConnectionsMaxRequestsCase = [](int max_connections,
     int max_requests, int test_case)->void
   {
-    std::string case_suffix {" case "};
-    case_suffix += std::to_string(test_case);
-    case_suffix += ".";
+    std::string case_suffix {CaseSuffix(test_case)};
 
     int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
       if(listen(socket_fd, 5) < 0)
       { 
         ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -291,14 +441,14 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in case 12." << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
       if(listen(socket_fd, 5) < 0)
       { 
         ADD_FAILURE() << "A call to listen failed in case 12." << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -349,15 +499,13 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     int max_connections, int max_requests, std::int32_t app_status_on_abort, 
     int test_case)->void
   {
-    std::string case_suffix {" case "};
-    case_suffix += std::to_string(test_case);
-    case_suffix += ".";
+    std::string case_suffix {CaseSuffix(test_case)};
 
     int socket_fd {socket(domain, SOCK_STREAM, 0)};
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
@@ -365,7 +513,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       if(listen(socket_fd, 5) < 0)
       { 
         ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n' 
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -407,9 +555,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 
   auto UnixValidSocketCase = [&InterfaceGettersAndSetters](int test_case)->void
   {
-    std::string case_suffix {" case "};
-    case_suffix += std::to_string(test_case);
-    case_suffix += ".";
+    std::string case_suffix {CaseSuffix(test_case)};
 
     // The Bazel temporary directory has a path which is too long for
     // Unix domain sockets. This due to the struct sockaddr_un limit
@@ -423,7 +569,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     if(socket_fd < 0)
     {
       ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
-        << strerror(errno);
+        << std::strerror(errno);
     }
     else
     {
@@ -432,7 +578,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
         sizeof(struct sockaddr_un)) < 0)
       {
         ADD_FAILURE() << "A call to bind failed in" << case_suffix << '\n'
-          << strerror(errno);
+          << std::strerror(errno);
         close(socket_fd);
       }
       else
@@ -440,11 +586,11 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
         if(listen(socket_fd, 5) < 0)
         { 
           ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n' 
-            << strerror(errno);
+            << std::strerror(errno);
           close(socket_fd);
           if(unlink(unix_socket_path.data()) < 0)
             FAIL() << "The test Unix domain socket file could not be unlinked."
-              << '\n' << strerror(errno); 
+              << '\n' << std::strerror(errno); 
         }
         else
         {
@@ -453,7 +599,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
           close(socket_fd);
           if(unlink(unix_socket_path.data()) < 0)
             FAIL() << "The test Unix domain socket file could not be unlinked."
-              << '\n' << strerror(errno);
+              << '\n' << std::strerror(errno);
         }
       }
     }
@@ -463,7 +609,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   {
     if(unsetenv("FCGI_WEB_SERVER_ADDRS") < 0)
       ADD_FAILURE() << "FCGI_WEB_SERVER_ADDRS could not be removed from the "
-        "environment in case 16." << '\n' << strerror(errno);
+        "environment in case 16." << '\n' << std::strerror(errno);
     else
     {
       UnixValidSocketCase(16);
@@ -476,7 +622,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   {
     if(setenv("FCGI_WEB_SERVER_ADDRS", "127.0.0.1", 1))
       ADD_FAILURE() << "A call to setenv failed in case 17." << '\n'
-        << strerror(errno);
+        << std::strerror(errno);
     else
     {
       UnixValidSocketCase(17);
@@ -507,6 +653,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
   //    name-value pair encoding.
   // 4) Subsets of the known names.
   // 5) An empty request.
+  // 6) Presence of an empty name.
   //
   // Test cases: All cases use an interface which accepts a single request
   // and a single connection at a time.
@@ -515,7 +662,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // 3) Only known names. A single known name. Three variations for each of
   //    the known names.
   // 4) Unknown name present. A single-byte unknown name in the first position.
-  //    All three known names follow.
+  //    All three known names follow. Then an empty name.
   // 5) Unknown name present. A four-byte unknown name in the first position.
   //    All three known names follow.
   // 6) Unknown name present. A known name, then a single-byte unknown name,
@@ -526,62 +673,35 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // 
   // Modules which testing depends on:
   // 1) fcgi_si::EncodeNameValuePairs
-  // 2) fcgi_si::PopulateHeader
-  // 3) socket_functions::SocketWrite
-  // 4) socket_functions::SocketRead
+  // 2) fcgi_si::ExtractBinaryNameValuePairs
+  // 3) fcgi_si::PopulateHeader
+  // 4) socket_functions::ScatterGatherSocketWrite
+  // 5) socket_functions::SocketRead
   //
   // Other modules whose testing depends on this module: none.
 
-  auto CreateInterface = []()->
-    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+  SIGALRMHandlerInstaller();
+
+  // Lambda functions for test case implementations.
+  struct ScatterGatherSocketWriteArgs
   {
-    std::unique_ptr<fcgi_si::FCGIServerInterface> interface_ptr {};
-    int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
-    if(socket_fd < 0)
-    {
-      ADD_FAILURE() << "A call to socket failed." << '\n' << strerror(errno);
-      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
-    }
-
-    if(listen(socket_fd, 5) < 0)
-    {
-      ADD_FAILURE() << "A call to listen failed." << '\n' << strerror(errno);
-      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
-    }
-
-    struct sockaddr_in socket_addr {};
-    socklen_t socklen {sizeof(sockaddr_in)};
-    if(getsockname(
-      socket_fd, 
-      static_cast<struct sockaddr*>(static_cast<void*>(&socket_addr)), 
-      &socklen
-    ) < 0)
-    {
-      ADD_FAILURE() << "A call to getsockname failed." << '\n' << strerror(errno);
-      return std::make_tuple(std::move(interface_ptr), socket_fd, 0U);
-    }
-
-    interface_ptr = std::unique_ptr<fcgi_si::FCGIServerInterface> 
-      {new fcgi_si::FCGIServerInterface {socket_fd, 1, 1}};
-    
-    return std::make_tuple(std::move(interface_ptr), socket_fd, 
-      ntohs(socket_addr.sin_port));
+    struct iovec* iovec_ptr;
+    int iovec_count;
+    std::size_t number_to_write;
   };
 
-  auto FCGIGetValuesTest = [&CreateInterface](std::uint8_t* input_ptr, 
-    int input_length,
+  auto FCGIGetValuesTest = [](ScatterGatherSocketWriteArgs a,
     const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
       expected_result, int test_case)->void
   {
 
     // Generate string " case test_case." for case x.
-    std::string case_suffix {" case "};
-    case_suffix += std::to_string(test_case);
-    case_suffix += ".";
+    std::string case_suffix {CaseSuffix(test_case)};
 
     int client_socket_fd {-1};
-    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
-    inter_tuple {CreateInterface()};
+    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t,
+      std::string>
+    inter_tuple {CreateInterface(AF_INET, 1, 1, EXIT_FAILURE)};
 
     auto SocketClosure = [&inter_tuple, client_socket_fd]()->void
     {
@@ -594,7 +714,6 @@ TEST(FCGIServerInterface, FCGIGetValues)
     if(!std::get<0>(inter_tuple))
     {
       ADD_FAILURE() << "Construction of the interface failed in" << case_suffix;
-      SocketClosure();
       return;
     }
 
@@ -602,7 +721,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     if(client_socket_fd < 0)
     {
       ADD_FAILURE() << "Creation of a socket for the client failed in" << 
-        case_suffix << '\n' << strerror(errno);
+        case_suffix << '\n' << std::strerror(errno);
       SocketClosure();
       return;
     }
@@ -611,7 +730,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     if(f_getfl_return == -1)
     {
       ADD_FAILURE() << "A call to fcntl with F_GETFL for the client socket "
-        "failed in" << case_suffix << '\n' << strerror(errno);
+        "failed in" << case_suffix << '\n' << std::strerror(errno);
       SocketClosure();
       return;
     }
@@ -619,14 +738,14 @@ TEST(FCGIServerInterface, FCGIGetValues)
     if(fcntl(client_socket_fd, F_SETFL, f_getfl_return) == -1)
     {
       ADD_FAILURE() << "A call to fcntl with F_SETFL for the client socket "
-        "failed in" << case_suffix << '\n' << strerror(errno);
+        "failed in" << case_suffix << '\n' << std::strerror(errno);
       SocketClosure();
       return;
     }
     
     struct sockaddr_in interface_addr {};
     interface_addr.sin_family = AF_INET;
-    interface_addr.sin_port = htons(std::get<2>(inter_tuple));
+    interface_addr.sin_port = std::get<2>(inter_tuple);
     interface_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if(connect(
       client_socket_fd, 
@@ -634,14 +753,19 @@ TEST(FCGIServerInterface, FCGIGetValues)
       sizeof(struct sockaddr_in)) != -1 || errno != EINPROGRESS)
     {
       ADD_FAILURE() << "A call to connect failed in" << case_suffix
-        << '\n' << strerror(errno);
+        << '\n' << std::strerror(errno);
       SocketClosure();
       return;
     }
 
     // Allow the interface to process the connection.
+    // Set an alarm and clear it when AcceptRequests returns. The SIGALRM
+    // handler installed at the start of the test will cause normal program
+    // termination if the alarm goes off.
+    alarm(1U);
     std::vector<fcgi_si::FCGIRequest> accept_return 
       {std::get<0>(inter_tuple)->AcceptRequests()};
+    alarm(0U);
     if(accept_return.size())
     {
       ADD_FAILURE() << "A request was returned when none was expected in"
@@ -650,20 +774,22 @@ TEST(FCGIServerInterface, FCGIGetValues)
       return;
     }
 
-    // The connection should have completed.
+    // The connection process should have completed.
 
-    if(input_length > socket_functions::SocketWrite(
-      client_socket_fd, input_ptr, input_length))
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+      client_socket_fd, a.iovec_ptr, a.iovec_count, a.number_to_write)) != 0U)
     {
       ADD_FAILURE() << "An error occurred while writing to the interface in"
-        << case_suffix;
+        << case_suffix << '\n' << std::strerror(errno);
       SocketClosure();
       return;
     }
 
     // Allow the interface to process the FCGI_GET_VALUES request (record).
+    alarm(1U);
     std::vector<fcgi_si::FCGIRequest> get_values_accept_return 
       {std::get<0>(inter_tuple)->AcceptRequests()};
+    alarm(0U);
     if(get_values_accept_return.size())
     {
       ADD_FAILURE() << "A request was returned when none was expected in"
@@ -687,14 +813,12 @@ TEST(FCGIServerInterface, FCGIGetValues)
         if((errno != EAGAIN) && (errno != EWOULDBLOCK))
         {
           ADD_FAILURE() << "An error occurred while reading the response from "
-            "the interface in" << case_suffix << '\n' << strerror(errno);
+            "the interface in" << case_suffix << '\n' << std::strerror(errno);
           SocketClosure();
           return;
         }
       }
     }
-
-    std::cout << int(returned_result.size()) << '\n';
 
     if((returned_result.size() < fcgi_si::FCGI_HEADER_LEN) || 
        (returned_result[1] != static_cast<std::uint8_t>(
@@ -705,14 +829,43 @@ TEST(FCGIServerInterface, FCGIGetValues)
       SocketClosure();
       return;
     }
+    // As uint16_t is shorter than int in most cases, integral promotion to int
+    // causes a narrowing warning if conversion to uint16_t is performed 
+    // directly on the arguments to << and +.
+    std::uint16_t record_length 
+    {
+      std::uint16_t(
+         (std::int_fast32_t(returned_result[fcgi_si::kHeaderContentLengthB1Index]) << 8) +
+          std::int_fast32_t(returned_result[fcgi_si::kHeaderContentLengthB0Index])
+      )
+    };
+    if((returned_result.size() - fcgi_si::FCGI_HEADER_LEN) < record_length)
+    {
+      ADD_FAILURE() << "A discrepancy between the specified content length and "
+        "the actual content length of the FCGI_GET_VALUES_RESULT record was "
+        "present in" << case_suffix;
+      SocketClosure();
+      return;
+    }
     std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-    returned_pairs {fcgi_si::ExtractBinaryNameValuePairs(
-      returned_result.data() + fcgi_si::FCGI_HEADER_LEN,
-      returned_result.size() - fcgi_si::FCGI_HEADER_LEN)};
+    returned_pairs {};
+    if(record_length > 0)
+    {
+      returned_pairs = fcgi_si::ExtractBinaryNameValuePairs(
+        returned_result.data() + fcgi_si::FCGI_HEADER_LEN,
+        record_length);
+      if(returned_pairs.size() == 0)
+      {
+        ADD_FAILURE() << "An encoding error was present in the binary name-"
+          "value pair content returned by the interface in" << case_suffix;
+        SocketClosure();
+        return;
+      }
+    }
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> result {};
     for(std::pair<std::vector<uint8_t>, std::vector<uint8_t>> pair : 
       returned_pairs)
-      result.insert(pair);
+      result.insert(std::move(pair));
     if(result != expected_result)
     {
       ADD_FAILURE() << "The output from the interface was incorrect in" 
@@ -722,103 +875,526 @@ TEST(FCGIServerInterface, FCGIGetValues)
     }
   };
 
+  using pair_vector = std::vector<std::pair<std::vector<std::uint8_t>, 
+    std::vector<std::uint8_t>>>;
+
   // Case 1: Empty FCGI_GET_VALUES record
   {
-    std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN];
+    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN];
       fcgi_si::PopulateHeader(header, fcgi_si::FCGIType::kFCGI_GET_VALUES,
         0U, 0U, 0U);
+    struct iovec iovec_array[1] = {};
+    iovec_array[0].iov_base = &header;
+    iovec_array[0].iov_len  = fcgi_si::FCGI_HEADER_LEN;
+    ScatterGatherSocketWriteArgs args {};
+    args.iovec_ptr       = iovec_array;
+    args.iovec_count     = 1;
+    args.number_to_write = fcgi_si::FCGI_HEADER_LEN;
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map {};
-    FCGIGetValuesTest(header, fcgi_si::FCGI_HEADER_LEN, pair_map, 1);
+    FCGIGetValuesTest(args, pair_map, 1);
   }
-}
+  
+  auto TestCaseRunner = [&FCGIGetValuesTest](pair_vector input_pairs, 
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> input_map,
+    int test_case)
+  {
+    std::tuple<bool, std::size_t, std::vector<iovec>, 
+      const std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
+    returned_encoding_information {fcgi_si::EncodeNameValuePairs(
+      input_pairs.begin(), input_pairs.end(), fcgi_si::FCGIType::kFCGI_GET_VALUES,
+      0U, 0U)};
+    if((!std::get<0>(returned_encoding_information)) || 
+       (std::get<4>(returned_encoding_information) != 0U))
+    {
+      ADD_FAILURE() << "The name-value pairs given to EncodeNameValuePairs "
+        "caused an error.";
+      return;
+    }
+    ScatterGatherSocketWriteArgs args {};
+    args.iovec_ptr       = std::get<2>(returned_encoding_information).data();
+    args.iovec_count     = std::get<2>(returned_encoding_information).size();
+    args.number_to_write = std::get<1>(returned_encoding_information);
 
-// A signal handler and associated variable for use in 
-// TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection).
-std::atomic<bool> alarm_flag {false};
+    FCGIGetValuesTest(args, input_map, test_case);
+  };
 
-void AlarmInterruptHandler(int sig)
-{
-  alarm_flag = true;
+  // Case 2: Only known names. All three known names.
+  {
+    pair_vector nv_pairs 
+      {{fcgi_si::FCGI_MAX_CONNS, {}}, 
+       {fcgi_si::FCGI_MAX_REQS, {}}, 
+       {fcgi_si::FCGI_MPXS_CONNS, {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+      {{fcgi_si::FCGI_MAX_CONNS, {'1'}},
+       {fcgi_si::FCGI_MAX_REQS, {'1'}},
+       {fcgi_si::FCGI_MPXS_CONNS, {'0'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 2);
+  }
+
+  // Case 3: Only known names. A single known name. Three variations for each of
+  // the known names.
+  {
+    // FCGI_MAX_CONNS
+    pair_vector nv_pairs {{fcgi_si::FCGI_MAX_CONNS, {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+      {{fcgi_si::FCGI_MAX_CONNS, {'1'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 3);
+
+    // FCGI_MAX_REQS
+    nv_pairs.clear();
+    nv_pairs.push_back({fcgi_si::FCGI_MAX_REQS, {}});
+    pair_map.clear();
+    pair_map.insert({fcgi_si::FCGI_MAX_REQS, {'1'}});
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 3);
+
+    // FCGI_MPXS_CONNS
+    nv_pairs.clear();
+    nv_pairs.push_back({fcgi_si::FCGI_MPXS_CONNS, {}});
+    pair_map.clear();
+    pair_map.insert({fcgi_si::FCGI_MPXS_CONNS, {'0'}});
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 3);
+  }
+
+  // Case 4: Unknown name present. A single-byte unknown name in the
+  // first position. All three known names follow.
+  {
+    pair_vector nv_pairs 
+      {{{'R', 'O', 'L', 'E'}, {}},
+       {fcgi_si::FCGI_MAX_CONNS, {}}, 
+       {fcgi_si::FCGI_MAX_REQS, {}}, 
+       {fcgi_si::FCGI_MPXS_CONNS, {}},
+       {{}, {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+      {{fcgi_si::FCGI_MAX_CONNS, {'1'}},
+       {fcgi_si::FCGI_MAX_REQS, {'1'}},
+       {fcgi_si::FCGI_MPXS_CONNS, {'0'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 4);
+  }
+
+  // Case 5: Unknown name present. A four-byte unknown name in the first 
+  // position. All three known names follow.
+  {
+    pair_vector nv_pairs 
+      {{std::vector<std::uint8_t>(200, 'A'), {}},
+       {fcgi_si::FCGI_MAX_CONNS, {}}, 
+       {fcgi_si::FCGI_MAX_REQS, {}}, 
+       {fcgi_si::FCGI_MPXS_CONNS, {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+      {{fcgi_si::FCGI_MAX_CONNS, {'1'}},
+       {fcgi_si::FCGI_MAX_REQS, {'1'}},
+       {fcgi_si::FCGI_MPXS_CONNS, {'0'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 5);
+  }
+  
+  // Case 6: Unknown name present. A known name, then a single-byte unknown
+  // name, then a known name.
+  {
+    pair_vector nv_pairs 
+      {{fcgi_si::FCGI_MAX_CONNS, {}},
+       {{'S','E','R','V','E','R'}, {}},
+       {fcgi_si::FCGI_MAX_REQS, {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+      {{fcgi_si::FCGI_MAX_CONNS, {'1'}},
+       {fcgi_si::FCGI_MAX_REQS, {'1'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 6);
+  }
+  
+  // Case 7: Unknown name present. A known name, then a four-byte unknown name,
+  // then a known name.
+  {
+    pair_vector nv_pairs 
+      {{fcgi_si::FCGI_MAX_CONNS, {}},
+       {std::vector<std::uint8_t>(200, 'A'), {}},
+      {fcgi_si::FCGI_MPXS_CONNS, {'0'}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map
+    {{fcgi_si::FCGI_MAX_CONNS, {'1'}},
+      {fcgi_si::FCGI_MPXS_CONNS, {'0'}}};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 7);
+  }
+
+  // 8) All unknown names.
+  {
+    pair_vector nv_pairs
+      {{{'S','E','R','V','E','R'}, {}},
+       {{'R', 'O', 'L', 'E'}, {}},
+       {std::vector<std::uint8_t>(200, 'A'), {}}};
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map {};
+    TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 8);
+  }
 }
 
 TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
 {
   // Testing explanation
   // Examined properties:
-  // 1) Rejection of connections in excess of the limit set by the
+  // 1) Socket domain: AF_UNIX, AF_INET, and AF_INET6
+  // 2) Rejection of connections in excess of the limit set by the
   //    max_connections constructor argument.
-  // 2) Rejection of connections when the interface was put into an overloaded
+  // 3) Rejection of connections when the interface was put into an overloaded
   //    state.
-  // 3) Rejection of connections based on the presence of the address of the
-  //    client in the list of addresses given by FCGI_WEB_SERVER_ADDRS.
+  // 4) Rejection of connections based on the presence of the address of the
+  //    client in the list of addresses given by FCGI_WEB_SERVER_ADDRS:
+  //    Both AF_INET and AF_INET6.
   //
   // Test cases:
-  // 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty.
-  // 2) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
-  // 3) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
+  // 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
+  // 2) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+  // 3) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+  // 4) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+  // 5) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
   //    connection was made, and the interface was placed in an overloaded
   //    state.
-  // 4) FCGI_WEB_SERVER_ADDRS contains the loopback addresses 127.0.0.1 and
-  //    127.0.0.2. A client with address 127.0.0.2 attempts to make a
-  //    connection and it succeeds. A client with address 127.0.0.3 attempts
+  // 6) FCGI_WEB_SERVER_ADDRS contains the IPv4 loopback address 127.0.0.1. 
+  //    A client with address 127.0.0.1 attempts to make a connection and it
+  //    succeeds. A client with address 127.0.0.2 attempts to make a connection
+  //    and it fails.
+  // 7) FCGI_WEB_SERVER_ADDRS contains the IPv6 loopback address fd00::1.
+  //    A client with IPv6 loopback address ::1 tries to make a connection
+  //    and it fails.
+  // 
+  // Modules which testing depends on:
+  // 1) fcgi_si::PopulateHeader
+  // 2) socket_functions::SocketRead
+  //
+  // Modules whose testing depends on this module: none.
+
+  SIGALRMHandlerInstaller();
+
+  // Ignore SIGPIPE.
+  struct sigaction sigpipe_disp {};
+  sigpipe_disp.sa_handler = SIG_IGN;
+  if(sigemptyset(&sigpipe_disp.sa_mask) == -1)
+  {
+    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
+  }
+  sigpipe_disp.sa_flags = 0;
+  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
+  {
+    FAIL() << "A call to sigaction to ignore SIGPIPE failed." << '\n'
+      << std::strerror(errno);
+  }
+
+  // An arugment structure for TestCaseRunner.
+  struct TestArguments
+  {
+    int domain;
+    int max_connections;
+    int max_requests;
+    int app_status;
+    int initial_connections;
+    int overload_after;
+    int test_case;
+  };
+
+  //   Creates an interface with the provided construction arguments (the
+  // listening socket is implicitly created) and creates
+  // initial_connections + 1 clients which connect to the interface.
+  // The overload integer indicates the connection number after which the
+  // interface is put into an overloaded state through a call to
+  // set_overload(true).
+  //
+  // For AF_UNIX:
+  //    Clients are not bound to a specific file path.
+  //
+  // For AF_INET:
+  //    Clients are given unique, incremented loopback IP addresses starting at
+  // 127.0.0.1. For example, the first client has address IP 127.0.0.1 and the
+  // second client has IP address 127.0.0.2.
+  //
+  // For AF_INET6:
+  //    All clients use the loopback address ::1.
+  auto TestCaseRunner = [](TestArguments args)->void
+  {
+    std::string case_suffix {CaseSuffix(args.test_case)};
+
+     if(!((args.domain == AF_UNIX) || (args.domain == AF_INET) ||
+         (args.domain == AF_INET6)))
+    {
+      ADD_FAILURE() << "Invalid domain argument in" << case_suffix;
+      return;
+    }
+
+    auto ConditionalClosure = [](int descriptor)->void
+    {
+      if(descriptor >= 0)
+        close(descriptor);
+    };
+
+    // Note that the interface socket needs to be closed after use when
+    // construction succeeds.
+    std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t,
+      std::string>
+    inter_tuple {CreateInterface(args.domain, args.max_connections, 
+      args.max_requests, args.app_status)};
+    if(!std::get<0>(inter_tuple))
+    {
+      ADD_FAILURE() << "Interface construction failed in" << case_suffix;
+      return;
+    }
+
+    // Address state to allow connection to the interface and to allow
+    // "clients" to be bound to specific addresses for three address families.
+    // AF_UNIX state.
+    struct sockaddr_un AF_UNIX_interface_addr {};
+    if(args.domain == AF_UNIX)
+    {
+      AF_UNIX_interface_addr.sun_family = AF_UNIX;
+      std::strcpy(AF_UNIX_interface_addr.sun_path, 
+        std::get<3>(inter_tuple).data());
+    }
+    // AF_INET state.
+    struct sockaddr_in AF_INET_interface_addr {};
+    struct sockaddr_in AF_INET_client_addr {};
+      // The numeric value of the loopback address is stored in host byte
+      // order to allow incremental address binding.
+    std::uint32_t AF_INET_ip_address {};
+    if(args.domain == AF_INET)
+    {
+      // To allow clients to connect to the interface socket.
+      AF_INET_interface_addr.sin_family      = AF_INET;
+      AF_INET_interface_addr.sin_port        = std::get<2>(inter_tuple);
+      AF_INET_interface_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  
+      AF_INET_client_addr.sin_family      = AF_INET;
+      AF_INET_client_addr.sin_port        = htons(0U);
+      AF_INET_client_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+      AF_INET_ip_address = ntohl(AF_INET_client_addr.sin_addr.s_addr);
+    }
+
+    // AF_INET6 state.
+    struct sockaddr_in6 AF_INET6_interface_addr {};
+    struct sockaddr_in6 AF_INET6_client_addr {};
+      // All clients will use the loopback address.
+    if(args.domain == AF_INET6)
+    {
+      // To allow clients to connect to the interface socket.
+      AF_INET6_interface_addr.sin6_family = AF_INET6;
+      AF_INET6_interface_addr.sin6_port   = std::get<2>(inter_tuple);
+      AF_INET6_interface_addr.sin6_addr   = in6addr_loopback;
+
+      AF_INET6_client_addr.sin6_family = AF_INET6;
+      AF_INET6_client_addr.sin6_port   = htons(0U);
+      AF_INET6_client_addr.sin6_addr   = in6addr_loopback;
+    }
+
+    std::vector<int> client_socket_descriptor_list(args.initial_connections + 1,
+      -1);
+
+    // Performs closure of any valid client sockets and the interface socket.
+    auto DescriptorCleanup = [&ConditionalClosure, &inter_tuple,
+      &client_socket_descriptor_list]()->void
+    {
+      std::for_each(client_socket_descriptor_list.begin(),
+        client_socket_descriptor_list.end(), ConditionalClosure);
+      close(std::get<1>(inter_tuple));
+    };
+
+    struct sockaddr* interface_addr_ptr {nullptr};
+    struct sockaddr* client_addr_ptr {nullptr};
+    socklen_t socket_addr_length {};
+    if(args.domain == AF_UNIX)
+    {
+      interface_addr_ptr = static_cast<struct sockaddr*>(
+        static_cast<void*>(&AF_UNIX_interface_addr));
+      socket_addr_length = sizeof(struct sockaddr_un);
+    }
+    else if(args.domain == AF_INET)
+    {
+      interface_addr_ptr = static_cast<struct sockaddr*>(
+        static_cast<void*>(&AF_INET_interface_addr));
+      client_addr_ptr    = static_cast<struct sockaddr*>(
+        static_cast<void*>(&AF_INET_client_addr));
+      socket_addr_length = sizeof(struct sockaddr_in);
+    }
+    else
+    {
+      interface_addr_ptr = static_cast<struct sockaddr*>(
+        static_cast<void*>(&AF_INET6_interface_addr));
+      client_addr_ptr    = static_cast<struct sockaddr*>(
+        static_cast<void*>(&AF_INET6_client_addr));
+      socket_addr_length = sizeof(struct sockaddr_in6);
+    }
+
+    for(int i {0}; i < (args.initial_connections + 1); ++i)
+    {
+      if(i == args.overload_after)
+        std::get<0>(inter_tuple)->set_overload(true);
+
+      client_socket_descriptor_list[i] = socket(args.domain, SOCK_STREAM, 0);
+      if(client_socket_descriptor_list[i] < 0)
+      {
+        ADD_FAILURE() << "An error occurred when creating a client socket in"
+          << case_suffix << '\n' << std::strerror(errno);
+        DescriptorCleanup();
+        return;
+      }
+      int f_getfl_return {fcntl(client_socket_descriptor_list[i], F_GETFL)};
+      if(f_getfl_return == -1)
+      {
+        ADD_FAILURE() << "A call to fcntl to get the socket descriptor file "
+          "status flags failed in" << case_suffix << '\n' 
+          << std::strerror(errno);
+        DescriptorCleanup();
+        return;
+      }
+      f_getfl_return |= O_NONBLOCK;
+      if(fcntl(client_socket_descriptor_list[i], F_SETFL, f_getfl_return) 
+         == -1)
+      {
+        ADD_FAILURE() << "A call to fcntl to make a client socket non-blocking "
+          "failed in" << case_suffix << '\n' << std::strerror(errno);
+        DescriptorCleanup();
+        return;
+      }
+      // Bind the client to a specific address.
+      if((args.domain == AF_INET) || (args.domain == AF_INET6))
+      {
+        if(bind(client_socket_descriptor_list[i], client_addr_ptr, 
+          socket_addr_length) == -1)
+        { 
+          ADD_FAILURE() << "A client socket could not be bound to a loopback "
+            << "address in" << case_suffix << '\n' << strerror(errno);
+          DescriptorCleanup();
+          return;
+        }
+      }
+      if(connect(client_socket_descriptor_list[i], interface_addr_ptr, 
+        socket_addr_length) != -1 && (errno != EINPROGRESS))
+      {
+        ADD_FAILURE() << "A call to connect did not return EINPROGRESS as "
+          "expected in" << case_suffix;
+        DescriptorCleanup();
+        return;
+      }
+      // Allow the interface to process the connection.
+      alarm(1U);
+      try
+      {
+        std::get<0>(inter_tuple)->AcceptRequests();
+      }
+      catch(std::system_error& error)
+      {
+        FAIL() << "An excpetion was caught when AcceptRequests was called."
+          << '\n' << "errno: " << error.code().value() << '\n' 
+          << std::strerror(error.code().value()) << '\n' << error.what();
+      }
+      catch(std::exception& error)
+      {
+        FAIL() << "An excpetion was caught when AcceptRequests was called."
+          << error.what();
+      }
+      alarm(0U);
+      // The connection should have occurred.
+
+      // Update address state.
+      // No action for AF_UNIX.
+      if(args.domain == AF_INET)
+      {
+        AF_INET_ip_address++;
+        AF_INET_client_addr.sin_addr.s_addr = htonl(AF_INET_ip_address);
+      }
+      // No action for AF_INET6.
+    }
+
+    // Note that, since the client socket is non-blocking, a write will succeed
+    // in most cases regardless of whether the peer (interface) closed the
+    // its side of the connection. A read is performed to detect connection
+    // closure. socket_functions::SocketRead reports this as errno == 0 with
+    // a short count.
+    std::uint8_t read_buffer[fcgi_si::FCGI_HEADER_LEN] = {};
+    std::size_t read_return {socket_functions::SocketRead(
+      client_socket_descriptor_list[args.initial_connections], read_buffer,
+      fcgi_si::FCGI_HEADER_LEN)};
+    if(read_return > 0 || (read_return == 0 && (errno != 0)))
+    {
+      ADD_FAILURE() << "The connection was not rejected as expected in"
+        << case_suffix << '\n' << "Connection count: " 
+        << int(std::get<0>(inter_tuple)->connection_count());
+      if(read_return == 0)
+        ADD_FAILURE() << std::strerror(errno);
+    }
+    DescriptorCleanup();
+  };
+
+  if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
+  {
+    FAIL() << "FCGI_WEB_SERVER_ADDRS could not be cleared."
+      << '\n' << std::strerror(errno);
+    return;
+  }
+
+  // // Case 1: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
+  // {
+  //   struct TestArguments args {};
+  //   args.domain              = AF_UNIX;
+  //   args.max_connections     = 1;
+  //   args.max_requests        = 1;
+  //   args.app_status          = EXIT_FAILURE;
+  //   args.initial_connections = 1;
+  //   args.overload_after      = 1;
+  //   args.test_case           = 1;
+
+  //   TestCaseRunner(args);
+  // }
+
+  // Case 2: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+  {
+    struct TestArguments args {};
+    args.domain              = AF_INET;
+    args.max_connections     = 1;
+    args.max_requests        = 1;
+    args.app_status          = EXIT_FAILURE;
+    args.initial_connections = 1;
+    args.overload_after      = 2; // No overload.
+    args.test_case           = 2;
+
+    TestCaseRunner(args);
+  }
+
+  // Case 3: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+  // {
+  //   struct TestArguments args {};
+  //   args.domain              = AF_INET6;
+  //   args.max_connections     = 1;
+  //   args.max_requests        = 1;
+  //   args.app_status          = EXIT_FAILURE;
+  //   args.initial_connections = 1;
+  //   args.overload_after      = 2; // No overload.
+  //   args.test_case           = 3;
+
+  //   TestCaseRunner(args);
+  // }
+
+  // Case 4: max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
+  // {
+  //   struct TestArguments args {};
+  //   args.domain              = AF_INET;
+  //   args.max_connections     = 5;
+  //   args.max_requests        = 10;
+  //   args.app_status          = EXIT_FAILURE;
+  //   args.initial_connections = 5;
+  //   args.overload_after      = 6; // No overload.
+  //   args.test_case           = 4;
+
+  //   TestCaseRunner(args);
+  // }
+  
+
+  // Case 3: max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
+  // connection was made, and the interface was placed in an overloaded state.
+
+
+  // 4) FCGI_WEB_SERVER_ADDRS contains the loopback addresses 127.0.0.1. 
+  //    A client with address 127.0.0.1 attempts to make a
+  //    connection and it succeeds. A client with address 127.0.0.2 attempts
   //    to make a connection and it fails.
 
-  // Ensure that operations on std::atomic<bool> are lock-free and can be
-  // used in a signal handler.
-  if(!std::atomic<bool>{}.is_lock_free())
-    FAIL() << "Operations on std::atomic<bool> are not lock free.";
-
-  // Save the previous signal handler information for SIGALRM so that it can
-  // be restored.
-  struct sigaction previous_sigalrm_disposition {};
-  sigset_t empty_signal_set {};
-  if(sigemptyset(&empty_signal_set) == -1)
-    FAIL() << "A call to sigemptyset failed." << '\n' << strerror(errno);
-  struct sigaction new_sigalrm_disposition {};
-  new_sigalrm_disposition.sa_handler = &AlarmInterruptHandler;
-  new_sigalrm_disposition.sa_mask = empty_signal_set;
-  new_sigalrm_disposition.sa_flags = 0;
-  if(sigaction(SIGALRM, &new_sigalrm_disposition, 
-    &previous_sigalrm_disposition) == -1)
-    FAIL() << "A call to sigaction failed" << '\n' << strerror(errno);
-
-  // Case 1: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty.
-  do
+  // Restore the default SIGPIPE disposition.
+  sigpipe_disp.sa_handler = SIG_DFL;
+  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
   {
-    if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
-    {
-      ADD_FAILURE() << "FCGI_WEB_SERVER_ADDRS could not be cleared in case 1."
-        << '\n' << strerror(errno);
-      break;
-    }
-    // Create a listening socket and extract the ephemeral port.
-    int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
-    if(socket_fd < 0)
-    {
-      ADD_FAILURE() << "A call to socket failed in case 1" << '\n' 
-        << strerror(errno);
-      break;
-    }
-    struct sockaddr_in socket_addr {};
-    socklen_t socklen {sizeof(sockaddr_in)};
-    if(getsockname(socket_fd, 
-        static_cast<struct sockaddr*>(static_cast<void*>(&socket_addr)), 
-        &socklen) < 0)
-    {
-      ADD_FAILURE() << "A call to getsockname failed in case 1." << '\n'
-        << strerror(errno);
-      break;
-    }
-    // Construct the interface, create a new socket which connects to it,
-    // and have another socket try to connect and verify rejection.
-    // EXPECT_NO_THROW(
-    // {
-    //   fcgi_si::FCGIServerInterface interface(socket_fd, 1, 1);
-    //   int client_socket(socket());
-    // });
-  } while(false);
-
-  // Restore the previous signal disposition for SIGALRM.
-  if(sigaction(SIGALRM, &previous_sigalrm_disposition, nullptr) == -1)
-    exit(EXIT_FAILURE);
+    FAIL() << "A call to sigaction to restore the defailt SIGPIPE  behavior "
+      "failed." << '\n' << std::strerror(errno);
+  }
 }

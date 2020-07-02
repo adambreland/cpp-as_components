@@ -23,13 +23,13 @@ namespace fcgi_si {
 // class FCGIRequest support multi-threaded applications. FCGIRequest objects
 // are produced by the AcceptRequests method of FCGIServerInterface. The thread
 // which houses the instance of FCGIServerInterface is intended to execute
-// calls to AcceptRequest in a loop. A request object produced by a call may be
-// moved to a worker thread and serviced from it. The methods of FCGIRequest
+// calls to AcceptRequests in a loop. A request object produced by a call may
+// be moved to a worker thread and serviced from it. The methods of FCGIRequest
 // allow the response to a request to be made without explicit synchronization
 // between threads.
 //
 //    As specified by the FastCGI protocol, the interface fully supports:
-// 1) multiple concurrent connections
+// 1) multiple client connections
 // 2) request multiplexing over a single connection
 // AcceptRequests uses I/O multiplexing on connections and will block until new
 // connection requests or request data are present.
@@ -54,16 +54,23 @@ namespace fcgi_si {
 // to the interface constructor as an argument. This descriptor and the file
 // description it is associated with are not managed by the interface (though
 // it will be made non-blocking).
+
+//    
 //
 //    The interface is configured with:
 // a) A maximum number of concurrent connections.
 // b) A maximum number of active requests for a connection.
 // c) A default response if a request is aborted by a client before notice of
-//    receipt of the request was given by the interface to the application
-//    (construction of an FCGIRequest object).
-// d) For internet domain sockets (AF_INET and AF_INET6), the environment
+//    receipt of the request was given by the interface to the application.
+// d)    For internet domain sockets (AF_INET and AF_INET6), the environment
 //    variable FCGI_WEB_SERVER_ADDRS is inspected during interface construction
 //    to generate a list of authorized IP addresses.
+//       When FCGI_WEB_SERVER_ADDRS is unbound or bound with an empty value,
+//    address validation does not occur. The internet "any address" special
+//    address values (0.0.0.0 for IPv4 and :: for IPv6) have no special meaning
+//    to FCGIServerInterface. If a client connection from any address should
+//    be accepted, FCGI_WEB_SERVER_ADDRS should be unbound or bound with an
+//    empty value.
 // 
 // Overloaded state:
 //    The interface may be put into and removed from an overloaded state. This
