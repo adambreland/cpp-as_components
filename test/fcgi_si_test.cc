@@ -1259,11 +1259,11 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
           return;
         }
       }
-      if(connect(client_socket_descriptor_list[i], interface_addr_ptr, 
-        socket_addr_length) != -1 && (errno != EINPROGRESS))
+      if((connect(client_socket_descriptor_list[i], interface_addr_ptr, 
+        socket_addr_length) != -1) || (errno != EINPROGRESS))
       {
         ADD_FAILURE() << "A call to connect did not return EINPROGRESS as "
-          "expected in" << case_suffix;
+          "expected in" << case_suffix << '\n' << strerror(errno);
         DescriptorCleanup();
         return;
       }
@@ -1352,7 +1352,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     TestCaseRunner(args);
   }
 
-  // Case 3: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+  // // Case 3: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
   // {
   //   struct TestArguments args {};
   //   args.domain              = AF_INET6;
@@ -1366,7 +1366,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   //   TestCaseRunner(args);
   // }
 
-  // Case 4: max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
+  // // Case 4: max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
   // {
   //   struct TestArguments args {};
   //   args.domain              = AF_INET;
