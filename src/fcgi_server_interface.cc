@@ -150,30 +150,17 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
   // 3) Check that the socket is listening.
   int getsockopt_int_buffer {};
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
-  int getsockopt_return {};
-
-  while(((getsockopt_return = getsockopt(listening_descriptor_,
-    SOL_SOCKET, SO_DOMAIN, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1) && (errno == EINTR))
-  {
-    getsockopt_int_buffer_size = sizeof(int);
-  }
-  if(getsockopt_return == -1)
+  if(getsockopt(listening_descriptor_, SOL_SOCKET, SO_DOMAIN, 
+     &getsockopt_int_buffer, &getsockopt_int_buffer_size) == -1)
   {
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "getsockopt with SO_DOMAIN"};
   }
-  int socket_domain {getsockopt_int_buffer};
-  socket_domain_ = socket_domain;
+  socket_domain_ = getsockopt_int_buffer;
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(listening_descriptor_,
-    SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1) && (errno == EINTR))
-  {
-    getsockopt_int_buffer_size = sizeof(int);
-  }
-  if(getsockopt_return == -1)
+  if(getsockopt(listening_descriptor_, SOL_SOCKET, SO_TYPE, 
+     &getsockopt_int_buffer, &getsockopt_int_buffer_size) == -1)
   {
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "getsockopt with SO_TYPE"};
@@ -183,13 +170,8 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
       "of an FCGIServerInterface object was not a stream socket."};
 
   getsockopt_int_buffer_size = sizeof(int);
-  while(((getsockopt_return = getsockopt(listening_descriptor_,
-    SOL_SOCKET, SO_ACCEPTCONN, &getsockopt_int_buffer,
-      &getsockopt_int_buffer_size)) == -1) && (errno == EINTR))
-  {
-    getsockopt_int_buffer_size = sizeof(int);
-  }
-  if(getsockopt_return == -1)
+  if(getsockopt(listening_descriptor_, SOL_SOCKET, SO_ACCEPTCONN,
+     &getsockopt_int_buffer, &getsockopt_int_buffer_size) == -1)
   {
     std::error_code ec {errno, std::system_category()};
     throw std::system_error {ec, "getsockopt with SO_ACCEPTCONN"};
@@ -204,7 +186,7 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
   // list, an error is thrown. Otherwise, a list of well-formed addresses which
   // have been converted to a normalized presentation format is stored in the
   // FCGIServerInterface object.
-  if(socket_domain == AF_INET || socket_domain == AF_INET6)
+  if(socket_domain_ == AF_INET || socket_domain_ == AF_INET6)
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
     std::string ip_address_list {(ip_address_list_ptr) ?
@@ -217,7 +199,7 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
       struct in_addr ipv4_internal_address;
       struct in6_addr ipv6_internal_address;
       void* inet_address_subaddress_ptr {nullptr};
-      if(socket_domain == AF_INET)
+      if(socket_domain_ == AF_INET)
         inet_address_subaddress_ptr = &(ipv4_internal_address);
       else
         inet_address_subaddress_ptr = &(ipv6_internal_address);
@@ -238,10 +220,10 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
       for(/*no-op*/; token_it != end; ++token_it)
       {
         int inet_pton_return {};
-        if((inet_pton_return = inet_pton(socket_domain,
+        if((inet_pton_return = inet_pton(socket_domain_,
           (token_it->str()).data(), inet_address_subaddress_ptr)) == 1)
         {
-          if(!inet_ntop(socket_domain, inet_address_subaddress_ptr,
+          if(!inet_ntop(socket_domain_, inet_address_subaddress_ptr,
             normalized_address, INET6_ADDRSTRLEN))
           {
             std::error_code ec {errno, std::system_category()};
