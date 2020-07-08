@@ -54,8 +54,6 @@ namespace fcgi_si {
 // to the interface constructor as an argument. This descriptor and the file
 // description it is associated with are not managed by the interface (though
 // it will be made non-blocking).
-
-//    
 //
 //    The interface is configured with:
 // a) A maximum number of concurrent connections.
@@ -155,7 +153,7 @@ class FCGIServerInterface {
   //    FCGIRequest object was created for the request. It was added to the
   //    returned list.
   // 6) Management requests which were completed during reading were serviced.
-  //    The only currently-recognized management request is FCGI_GET_VALUES. 
+  //    The only recognized management request is FCGI_GET_VALUES. 
   //    All other management requests receive an FCGI_UNKNOWN_TYPE response.
   // 7) New connections which were waiting to be accepted were accepted. 
   //    a) Connections were validated against the list of authorized IP 
@@ -173,9 +171,9 @@ class FCGIServerInterface {
   //       occur even if other requests on the connection have been received
   //       from the client.
   //    b) If an error during reading or writing corrupted the connection or
-  //       corrupted internal state associated with the connection.
-  //    Corruption is associated with errors; exceptions are thrown at the
-  //    source of the error.
+  //       corrupted internal state associated with the connection. Corruption
+  //       is associated with errors; exceptions are thrown at the source of
+  //       the error.
   std::vector<FCGIRequest> AcceptRequests();
 
   // Gets the current number of connected sockets which were accepted by

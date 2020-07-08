@@ -765,10 +765,10 @@ TEST(FCGIServerInterface, FCGIGetValues)
     interface_addr.sin_family = AF_INET;
     interface_addr.sin_port = std::get<2>(inter_tuple);
     interface_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if(connect(
+    if((connect(
       client_socket_fd, 
       static_cast<struct sockaddr*>(static_cast<void*>(&interface_addr)),
-      sizeof(struct sockaddr_in)) != -1 || errno != EINPROGRESS)
+      sizeof(struct sockaddr_in)) != -1) || (errno != EINPROGRESS))
     {
       ADD_FAILURE() << "A call to connect failed in" << case_suffix
         << '\n' << std::strerror(errno);
@@ -777,9 +777,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     }
 
     // Allow the interface to process the connection.
-    // Set an alarm and clear it when AcceptRequests returns. The SIGALRM
-    // handler installed at the start of the test will cause normal program
-    // termination if the alarm goes off.
+    // Set an alarm and clear it when AcceptRequests returns.
     alarm(1U);
     std::vector<fcgi_si::FCGIRequest> accept_return 
       {std::get<0>(inter_tuple)->AcceptRequests()};
@@ -816,6 +814,12 @@ TEST(FCGIServerInterface, FCGIGetValues)
       return;
     }
 
+    // Confirm that observable interface state is as expected.
+    EXPECT_EQ(std::get<0>(inter_tuple)->connection_count(), 1U);
+    EXPECT_EQ(std::get<0>(inter_tuple)->interface_status(), true);
+    EXPECT_EQ(std::get<0>(inter_tuple)->get_overload(), false);
+
+    // Read the FCGI_GET_VALUES_RESULT response.
     std::uint8_t read_buffer[128U];
     std::vector<std::uint8_t> returned_result {};
     bool read {true};
@@ -842,8 +846,8 @@ TEST(FCGIServerInterface, FCGIGetValues)
        (returned_result[1] != static_cast<std::uint8_t>(
          fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT)))
     {
-      ADD_FAILURE() << "The output from the interface was incorrect in" 
-        << case_suffix;
+      ADD_FAILURE() << "The output from the interface was formatted "
+        "incorrectly in" << case_suffix;
       SocketClosure();
       return;
     }
@@ -1044,6 +1048,10 @@ TEST(FCGIServerInterface, FCGIGetValues)
 TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
 {
   // Testing explanation
+  // This test examines the behavior of a newly-created FCGIServerInterface
+  // in relation to accepting and rejecting connections. No FastCGI requests
+  // are made of the interfaces constructed in this test.
+  //
   // Examined properties:
   // 1) Socket domain: AF_UNIX, AF_INET, and AF_INET6
   // 2) Rejection of connections in excess of the limit set by the
@@ -1056,12 +1064,16 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   //
   // Test cases:
   // 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
+  //    The second connection should be rejected.
   // 2) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+  //    The second connection should be rejected.
   // 3) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+  //    The second connection should be rejected.
   // 4) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+  //    The sixth connection should be rejected.
   // 5) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
   //    connection was made, and the interface was placed in an overloaded
-  //    state.
+  //    state. The second connection should be rejected.
   // 6) FCGI_WEB_SERVER_ADDRS contains the IPv4 loopback address 127.0.0.1. 
   //    A client with address 127.0.0.1 attempts to make a connection and it
   //    succeeds. A client with address 127.0.0.2 attempts to make a connection
@@ -1071,29 +1083,17 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   //    and it fails.
   // 
   // Modules which testing depends on:
-  // 1) fcgi_si::PopulateHeader
-  // 2) socket_functions::SocketRead
+  // 1) socket_functions::SocketRead
+  // 2) socker_functions::SocketWrite
   //
   // Modules whose testing depends on this module: none.
 
   SIGALRMHandlerInstaller();
 
-  // Ignore SIGPIPE. The disposition will be inherited by the child produced
-  // by the fork below.
-  struct sigaction sigpipe_disp {};
-  sigpipe_disp.sa_handler = SIG_IGN;
-  if(sigemptyset(&sigpipe_disp.sa_mask) == -1)
-  {
-    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
-  }
-  sigpipe_disp.sa_flags = 0;
-  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
-  {
-    FAIL() << "A call to sigaction to ignore SIGPIPE failed." << '\n'
-      << std::strerror(errno);
-  }
-
-  // An arugment structure for TestCaseRunner.
+  // An argument structure for TestCaseRunner.
+  //
+  // Preconditions: 
+  // 1) overload_after > 0.
   struct TestArguments
   {
     int domain;
@@ -1133,6 +1133,11 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   // 0: connection closed.
   // 1: connection open, but no data was received.
   // 2: connection open, data received.
+  //
+  // Test side-effects relevant to other tests:
+  // SIGPIPE will be ignored. The default disposition is restored at the end
+  // of the test. Only non-fatal failures are used in the implementation
+  // of TestCaseRunner to ensure that restoration takes place.
   auto TestCaseRunner = [](TestArguments args)->void
   {
     std::string case_suffix {CaseSuffix(args.test_case)};
@@ -1388,7 +1393,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
       if(args.domain == AF_UNIX)
       {
         if(unlink(args.interface_path_ptr) == -1)
-          FAIL() << "An error occurred when an attempt was made to remove "
+          ADD_FAILURE() << "An error occurred when an attempt was made to remove "
             "the UNIX socket file in" << case_suffix;
       }
     };
@@ -1494,6 +1499,12 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
       return;
     }
     EXPECT_EQ(status_report, args.expected_status);
+    // Verify expected observable interface state.
+    EXPECT_EQ(std::get<0>(inter_tuple)->connection_count(), 
+      args.initial_connections);
+    EXPECT_EQ(std::get<0>(inter_tuple)->interface_status(), true);
+    EXPECT_EQ(std::get<0>(inter_tuple)->get_overload(), 
+      (args.overload_after == args.initial_connections));
     CleanupForExit();
   };
 
@@ -1502,6 +1513,21 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     FAIL() << "FCGI_WEB_SERVER_ADDRS could not be cleared."
       << '\n' << std::strerror(errno);
     return;
+  }
+
+  // Ignore SIGPIPE. The disposition will be inherited by the child produced
+  // by the fork below.
+  struct sigaction sigpipe_disp {};
+  sigpipe_disp.sa_handler = SIG_IGN;
+  if(sigemptyset(&sigpipe_disp.sa_mask) == -1)
+  {
+    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
+  }
+  sigpipe_disp.sa_flags = 0;
+  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
+  {
+    FAIL() << "A call to sigaction to ignore SIGPIPE failed." << '\n'
+      << std::strerror(errno);
   }
 
   const char* path {"/tmp/fcgi_si_test_UNIX_interface_socket"};
@@ -1514,7 +1540,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     args.max_requests        = 1;
     args.app_status          = EXIT_FAILURE;
     args.initial_connections = 1;
-    args.overload_after      = 2; // No overload
+    args.overload_after      = 5; // No overload. Overload should not be seen.
     args.interface_path_ptr  = path;
     args.expected_status     = std::vector<std::uint8_t> {1, 0};
     args.test_case           = 1;
@@ -1530,7 +1556,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     args.max_requests        = 1;
     args.app_status          = EXIT_FAILURE;
     args.initial_connections = 1;
-    args.overload_after      = 2; // No overload.
+    args.overload_after      = 5; // No overload. Overload should not be seen.
     args.interface_path_ptr  = path;
     args.expected_status     = std::vector<std::uint8_t> {1, 0};
     args.test_case           = 2;
@@ -1546,7 +1572,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     args.max_requests        = 1;
     args.app_status          = EXIT_FAILURE;
     args.initial_connections = 1;
-    args.overload_after      = 2; // No overload.
+    args.overload_after      = 5; // No overload. Overload should not be seen.
     args.interface_path_ptr  = path;
     args.expected_status     = std::vector<std::uint8_t> {1, 0};
     args.test_case           = 3;
@@ -1562,7 +1588,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     args.max_requests        = 10;
     args.app_status          = EXIT_FAILURE;
     args.initial_connections = 5;
-    args.overload_after      = 6; // No overload.
+    args.overload_after      = 10; // No overload. Overload should not be seen.
     args.interface_path_ptr  = path;
     args.expected_status     = std::vector<std::uint8_t> {1,1,1,1,1,0};
     args.test_case           = 4;
@@ -1579,7 +1605,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     args.max_requests        = 10;
     args.app_status          = EXIT_FAILURE;
     args.initial_connections = 1;
-    args.overload_after      = 1; // Overload for connection 2.
+    args.overload_after      = 1; // Overload for connection 2. Overload seen.
     args.interface_path_ptr  = path;
     args.expected_status     = std::vector<std::uint8_t> {1,0};
     args.test_case           = 5;
@@ -1587,10 +1613,62 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     TestCaseRunner(args);
   }
 
-  // 4) FCGI_WEB_SERVER_ADDRS contains the loopback addresses 127.0.0.1. 
-  //    A client with address 127.0.0.1 attempts to make a
-  //    connection and it succeeds. A client with address 127.0.0.2 attempts
-  //    to make a connection and it fails.
+  // 6) FCGI_WEB_SERVER_ADDRS contains the IPv4 loopback address 127.0.0.1. 
+  //    A client with address 127.0.0.1 attempts to make a connection and it
+  //    succeeds. A client with address 127.0.0.2 attempts to make a connection
+  //    and it fails.
+  {
+    if(setenv("FCGI_WEB_SERVER_ADDRS", "127.0.0.1", 1) != -1)
+    {
+      struct TestArguments args {};
+      args.domain              = AF_INET;
+      args.max_connections     = 5;
+      args.max_requests        = 10;
+      args.app_status          = EXIT_FAILURE;
+      args.initial_connections = 1;
+      args.overload_after      = 5; // No overload. Overload should not be seen.
+      args.interface_path_ptr  = path;
+      args.expected_status     = std::vector<std::uint8_t> {1,0};
+      args.test_case           = 6;
+
+      TestCaseRunner(args);
+
+      if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) == -1)
+        ADD_FAILURE() << "The environment could not be restored by a call to "
+          "setenv in case 6." << '\n' << std::strerror(errno);
+    }
+    else
+      ADD_FAILURE() << "The environment could not be modified with by a call "
+        "to setenv in case 6." << '\n' << std::strerror(errno);
+  }
+
+  // 7) FCGI_WEB_SERVER_ADDRS contains the IPv6 private address fd00::1.
+  //    A client with IPv6 loopback address ::1 tries to make a connection
+  //    and it fails.
+  {
+    if(setenv("FCGI_WEB_SERVER_ADDRS", "fd00::1", 1) != -1)
+    {
+      struct TestArguments args {};
+      args.domain              = AF_INET6;
+      args.max_connections     = 100;
+      args.max_requests        = 1000;
+      args.app_status          = EXIT_FAILURE;
+      args.initial_connections = 0;
+      args.overload_after      = 10; // No overload. Overload should be unseen.
+      args.interface_path_ptr  = path;
+      args.expected_status     = std::vector<std::uint8_t> {0};
+      args.test_case           = 7;
+
+      TestCaseRunner(args);
+
+      if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) == -1)
+        ADD_FAILURE() << "The environment could not be restored by a call to "
+          "setenv in case 7." << '\n' << std::strerror(errno);
+    }
+    else
+      ADD_FAILURE() << "The environment could not be modified with by a call "
+        "to setenv in case 7." << '\n' << std::strerror(errno);
+  }
   
   // Restore the default SIGPIPE disposition.
   sigpipe_disp.sa_handler = SIG_DFL;
