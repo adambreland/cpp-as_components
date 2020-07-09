@@ -38,6 +38,8 @@ namespace fcgi_si {
 // FastCGI role expectations. For example, the equality of the number of bytes
 // of FCGI_STDIN input and the CONTENT_LENGTH environment variable represented
 // as a FCGI_PARAMS name-value pair is not verified for the Responder role.
+// Moreover, the presence of expected environment variables for a request as
+// defined by the FCGI_PARAMS stream is not verified by FCGIServerInterface.
 //    The interface considers a request for a Responder and Authorizer to be
 // complete when either:
 // 1) No FCGI_DATA records have been received and FCGI_PARAMS and FCGI_STDIN

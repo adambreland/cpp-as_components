@@ -146,7 +146,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //    header whose length is less than FCGI_HEADER_LEN, also does not occur.
 // 6) All records have a total length which is a multiple of eight bytes.
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::size_t, std::vector<iovec>, 
+std::tuple<bool, std::size_t, std::vector<struct iovec>, 
   const std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
@@ -187,9 +187,9 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 //    b) If content_length is sufficient, the name and value byte sequences
 //       are extracted. A list of name-value pairs of byte sequences is
 //       returned.
-std::vector<std::pair<std::vector<uint8_t>, std::vector<uint8_t>>>
-ExtractBinaryNameValuePairs(const uint8_t* content_ptr, 
-  int_fast32_t content_length);
+std::vector<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>
+ExtractBinaryNameValuePairs(const std::uint8_t* content_ptr, 
+  std::int_fast32_t content_length);
 
 // Attempts to return the length in bytes of a name or value when that length 
 // was encoded using four bytes in the FastCGI name-value pair format.
@@ -251,7 +251,7 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    content is a prefix of [begin_iter, end_iter). The fixed information
 //    contained in the record headers is given by type and FCGI_id.
 // 2) Meaning of returned tuple elements:
-//       Access: std::get<0>; Type: std::vector<uint8_t>; A vector of
+//       Access: std::get<0>; Type: std::vector<std::uint8_t>; A vector of
 //    bytes which holds information which is implicitly referenced in
 //    the struct iovec instances returned by the call.
 //       Access: std::get<1>; Type: std::vector<struct iovec>; A vector

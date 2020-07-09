@@ -1,1 +1,13 @@
-g++ -pthread -o stand_alone -iquote . -iquote /home/adam/cpp/googletest/googletest/include test/stand_alone_test.cc -L/home/adam/cpp/fcgi_si/bazel-bin -L/home/adam/cpp/googletest/bazel-bin -L/home/adam/cpp/socket_functions/bazel-bin -l:libfcgi_si.a -l:libfcgi_si_utilities.a -l:libsocket_functions.a -l:libgtest_main.a  -l:libgtest.a 
+# An example command line for compiling a test executable that does not use the
+# Bazel testing environment. The file test/stand_alone_test.cc has since been
+# deleted, but this command line shows dependencies can be included.
+# Note that the order of static libraries in the command line is one of the
+# two possible linear orderings of dependencies which follow the dependency 
+# graph induced by the test code and its dependencies and which do not
+# contain duplicates.
+g++ -pthread -o stand_alone -iquote . 
+-iquote /home/adam/cpp/googletest/googletest/include test/stand_alone_test.cc 
+-L/home/adam/cpp/fcgi_si/bazel-bin -L/home/adam/cpp/googletest/bazel-bin 
+-L/home/adam/cpp/socket_functions/bazel-bin -l:libfcgi_si.a 
+-l:libfcgi_si_utilities.a -l:libsocket_functions.a -l:libgtest_main.a 
+-l:libgtest.a 
