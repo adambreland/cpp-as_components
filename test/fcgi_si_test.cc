@@ -559,7 +559,8 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // 17) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is bound and has
   //     IPv4 address 127.0.0.1.
   //
-  // Modules which testing depends on: none.
+  // Modules which testing depends on:
+  // 1) SingleProcessInterfaceAndClients (defined locally)
   //
   // Other modules whose testing depends on this module: none.
 
@@ -964,8 +965,8 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // and a single connection at a time.
   // 1) An empty request.
   // 2) Only known names. All three known names.
-  // 3) Only known names. A single known name. Three variations for each of
-  //    the known names.
+  // 3) Only known names. A single known name. The three variations given that
+  //    there are three known names.
   // 4) Unknown name present. A single-byte unknown name in the first position.
   //    All three known names follow. Then an empty name.
   // 5) Unknown name present. A four-byte unknown name in the first position.
@@ -982,6 +983,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // 3) fcgi_si::PopulateHeader
   // 4) socket_functions::ScatterGatherSocketWrite
   // 5) socket_functions::SocketRead
+  // 6) SingleProcessInterfaceAndClients (defined locally)
   //
   // Other modules whose testing depends on this module: none.
 
@@ -1271,31 +1273,204 @@ TEST(FCGIServerInterface, FCGIGetValues)
 TEST(FCGIServerInterface, UnknownManagementRequests)
 {
   // Testing explanation
+  // This test examines the behavior of a new interface to unknown management
+  // requests.
+  //
   // Examined properties:
   // 1) The type of the management request is not FCGI_GET_VALUES and either
   //    is one of the defined types or not.
   // 2) The unknown management request has content or not.
+  // 3) The alignment of the request is on an 8-byte boundary or not.
+  // 4) The presence or absence of padding in the request.
   //
   // Test cases:
   // 1) The management request type is FCGI_STDIN. No content is present.
   // 2) The management request type has value 25. No content is present.
   // 3) The management request type has value 100. A body of bytes where
   //    each byte has value 1 when interpreted as std::uint8_t is present.
+  //    The content is aligned on an 8-byte boundary.
+  // 4) As in 3, but the content is not aligned on an 8-byte boundary and
+  //    padding is used.
+  // 5) As in 3, but content is not aligned on an 8-byte boundary and no
+  //    padding is used.
   //
   // Modules which testing depends on:
+  // 1) socket_functions::SocketRead
+  // 2) socket_functions::SocketWrite
+  // 3) fcgi_si::PopulateHeader
+  // 4) SingleProcessInterfaceAndClients (defined locally)
   // 
   // Other modules whose testing depends on this module: none.
 
+  auto UnknownManagementRecordTester = [](
+    struct InterfaceCreationArguments args, std::uint8_t* buffer_ptr,
+    std::size_t count, fcgi_si::FCGIType type, int test_case)->void
+  {
+    std::string case_suffix {CaseSuffix(test_case)};
+    try
+    {
+      SingleProcessInterfaceAndClients spiac {args, 1};
+      if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+        buffer_ptr, count) < count)
+      {
+        ADD_FAILURE() << "Writing a request to the interface could not be "
+          "performed in full in" << case_suffix << '\n' << std::strerror(errno);
+        return;
+      }
+      // Allow the interface to process the request.
+      spiac.interface().AcceptRequests();
+      // Read the response.
+      constexpr int_fast32_t response_length 
+        {2 * fcgi_si::FCGI_HEADER_LEN};
+      std::uint8_t read_buffer[response_length] = {};
+      if(socket_functions::SocketRead(spiac.client_descriptors()[0],
+        read_buffer, response_length) < (response_length))
+      {
+        ADD_FAILURE() << "Fewer than the expected number of bytes were read "
+          "of the response by the interface to an unknown management request "
+          "in" << case_suffix << '\n' << std::strerror(errno);
+        return;
+      }
+     
+      // Verify response information.
+      EXPECT_EQ(1U, read_buffer[0]) << "The FastCGI protocol version was "
+        "incorrect in the response in" << case_suffix;
+      EXPECT_EQ(read_buffer[fcgi_si::kHeaderTypeIndex], 
+        static_cast<std::uint8_t>(fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE)) <<
+        "The type was not equal to FCGI_UNKNOWN_TYPE in" << case_suffix;
+      EXPECT_EQ(0, (std::int_fast32_t(
+        read_buffer[fcgi_si::kHeaderRequestIDB1Index]) << 8) + 
+        std::int_fast32_t(read_buffer[fcgi_si::kHeaderRequestIDB0Index]))
+        << "The request ID was not zero in the response in" << case_suffix;
+      EXPECT_EQ(fcgi_si::FCGI_HEADER_LEN, (std::int_fast32_t(
+        read_buffer[fcgi_si::kHeaderContentLengthB1Index]) << 8) + 
+        std::int_fast32_t(read_buffer[fcgi_si::kHeaderContentLengthB0Index]))
+        << "The response contained more content than specified in" 
+        << case_suffix;
+      EXPECT_EQ(0U, read_buffer[fcgi_si::kHeaderPaddingLengthIndex])
+        << "Padding was present in the response in" << case_suffix;
+      EXPECT_EQ(static_cast<std::uint8_t>(type),
+        read_buffer[fcgi_si::kHeaderReservedByteIndex + 1]) << "The type "
+        "sent by the client was not correctly returned by the interface in"
+        << case_suffix;
+      
+      // Ensure that unexpected information was not received.
+      std::size_t read_return {socket_functions::SocketRead(
+        spiac.client_descriptors()[0], read_buffer, 1)};
+      if(read_return != 0U)
+      {
+        ADD_FAILURE() << "The interface sent unexpected data to a client "
+        "when it responded to an unknown management request in" << case_suffix; 
+        return;
+      }
+      if(!((errno == EAGAIN) || (errno == EWOULDBLOCK)))
+      {
+        ADD_FAILURE() << "An error occurred during the check for extra data "
+          "in" << case_suffix << '\n' << std::strerror(errno);
+        return;
+      }
 
-  // Create an interface.
-  // Create a client socket and have it connect to the interface.
-  // Allow the interface to process the connection.
-  // Have the client send the management request to the interface.
-  // Allow the interface to process the request and send a response.
-  // Have the client read the response. Verify that the response is correct.
-  
-  
+      // Verify observable interface state.
+      EXPECT_EQ(spiac.interface().get_overload(), false) << "The interface was "
+        "found to be overloaded in" << case_suffix;
+      EXPECT_EQ(spiac.interface().connection_count(), 1U) << "The interface "
+        "did not show one connection in" << case_suffix;
+      EXPECT_EQ(spiac.interface().interface_status(), true) << "The interface "
+        "was found to be in a bad state in" << case_suffix;
+    }
+    catch(const std::exception& e)
+    {
+      ADD_FAILURE() << "An exception was thrown in the implementation of "
+        "UnknownManagementRecordTester in" << case_suffix << '\n' << e.what();
+    }
+  };
 
+  // Case 1: The management request type is FCGI_STDIN. No content is present.
+  {
+    struct InterfaceCreationArguments args {};
+    args.domain          = AF_INET;
+    args.max_connections = 10;
+    args.max_requests    = 10;
+    args.app_status      = EXIT_FAILURE;
+    args.unix_path       = nullptr;
+    
+    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(header, fcgi_si::FCGIType::kFCGI_STDIN,
+      0U, 0U, 0U);
+    UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN, 
+    fcgi_si::FCGIType::kFCGI_STDIN, 1);
+  }
+
+  // Case 2: The management request type has value 25. No content is present.
+  {
+    struct InterfaceCreationArguments args {};
+    args.domain          = AF_INET;
+    args.max_connections = 10;
+    args.max_requests    = 10;
+    args.app_status      = EXIT_FAILURE;
+    args.unix_path       = nullptr;
+
+    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(25),
+      0U, 0U, 0U);
+    UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN, 
+    static_cast<fcgi_si::FCGIType>(25), 2);
+  }
+
+  // Case 3: The management request type has value 100. A body of bytes where
+  // each byte has value 1 when interpreted as std::uint8_t is present. The
+  // content is aligned on an 8-byte boundary.
+  {
+    struct InterfaceCreationArguments args {};
+    args.domain          = AF_INET6;
+    args.max_connections = 1000;
+    args.max_requests    = 1000;
+    args.app_status      = EXIT_FAILURE;
+    args.unix_path       = nullptr;
+
+    std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+      0U, fcgi_si::FCGI_HEADER_LEN, 0U);
+    std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, fcgi_si::FCGI_HEADER_LEN);
+    UnknownManagementRecordTester(args, header, 2 * fcgi_si::FCGI_HEADER_LEN, 
+    static_cast<fcgi_si::FCGIType>(100) , 3);
+  }
+
+  // Case 4: As in 3, but the content is not aligned on an 8-byte boundary and
+  // padding is used.
+  {
+    struct InterfaceCreationArguments args {};
+    args.domain          = AF_INET6;
+    args.max_connections = 1;
+    args.max_requests    = 1;
+    args.app_status      = EXIT_FAILURE;
+    args.unix_path       = nullptr;
+
+    std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+      0U, 3U, 5U);
+    std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, 3);
+    UnknownManagementRecordTester(args, header, 2 * fcgi_si::FCGI_HEADER_LEN, 
+    static_cast<fcgi_si::FCGIType>(100) , 4);
+  }
+
+  // Case 5: As in 3, but content is not aligned on an 8-byte boundary and no
+  // padding is used.
+  {
+    struct InterfaceCreationArguments args {};
+    args.domain          = AF_INET6;
+    args.max_connections = 1;
+    args.max_requests    = 1;
+    args.app_status      = EXIT_FAILURE;
+    args.unix_path       = nullptr;
+
+    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN + 3] = {};
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+      0U, 3U, 0U);
+    std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, 3);
+    UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN + 3, 
+    static_cast<fcgi_si::FCGIType>(100) , 5);
+  }
 }
 
 // Preconditions: 
@@ -2028,15 +2203,58 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
 
 TEST(FCGIServerInterface, FCGIRequestGeneration)
 {
-
+  // Testing explanation
+  //  
+  // Examined properties:
+  // Record sequences:
+  // Notions:
+  // 1) Partial record receipt: FastCGI records must be transmitted as complete
+  //    units. In the discussion of concurrent transmission of FastCGI request
+  //    data below, individual FastCGI records are the indivisible units of data
+  //    whose transmission on a connection cannot be "interrupted" by the
+  //    transmission of other data on that connection.
+  // 2) "Intermingling" of records can occur with respect to several record
+  //    properties. For example, records on a single connection could be
+  //    intermingled with respect to record type but not with respect to 
+  //    request identity.
+  // 3) Record subsequences: Record receipt on a given connection defines a
+  //    sequence of records S. We can imagine a subsequence T of records of
+  //    sequence S where T is defined as the sequence of all records of S
+  //    that possess a given property.
+  //    
+  //
+  // 1) Broadly, connection multiplexing: Will the interface correctly read
+  //    FastCGI records when multiple clients are concurrently sending them?
+  //    a) All records for one or more requests are received on a given
+  //       connection before a read from the connection would block. In other
+  //       words, requests are received as whole units across connections.
+  //    b) Records for requests are interleaved in the sense that periods of
+  //       read blocking interrupt record receipt for a request on a given
+  //       connection and records are received on another connection during
+  //       these periods.
+  // 2) Broadly, request multiplexing: will the interface correctly read
+  //    FastCGI records when records for multiple requests are being 
+  //    concurrently sent over the same connection?
+  // 3) 
+  // x) The occurrence of partial record receipt when the connection of the
+  //    record would block and another connection is ready. Will the request
+  //    be correctly produced when the data for the request is eventually
+  //    received in full?
+  // 4) 
+  //
+  // Test cases:
+  //
+  // Modules which testing depends on:
+  //
+  // Other modules whose testing depends on this module:
 }
 
-TEST(FCGIServerInterface, FCGIRequestDataTransmission)
+TEST(FCGIServerInterface, ConnectionClosure)
 {
 
 }
 
-TEST(FCGIServerInterface, ConnectionClosure)
+TEST(FCGIServerInterface, FCGIRequestDataTransmission)
 {
 
 }
