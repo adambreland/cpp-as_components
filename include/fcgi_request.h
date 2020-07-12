@@ -137,6 +137,22 @@ class FCGIRequest {
     return environment_map_;
   }
 
+  // Returns the value of the FCGI_KEEP_CONN flag which was present in the
+  // FCGI_BEGIN_REQUEST record for the request.
+  inline bool get_keep_conn() const noexcept
+  {
+    return !close_connection_;
+  }
+
+  // Returns the internal request identifier for the request. Request
+  // identifiers are ordered pairs whose first component is the socket
+  // descriptor of the connection of the request and whose second component
+  // is the FastCGI ID of the request.
+  inline RequestIdentifier get_request_identifier() const noexcept
+  {
+    return request_identifier_;
+  }
+
   // Default-constructed and moved-from requests have a role value of zero.
   // This value does not correspond to any FastCGI role.
   inline uint16_t get_role() const noexcept
