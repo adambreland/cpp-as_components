@@ -1,9 +1,11 @@
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
 #include <stdlib.h>         // <cstdlib> does not define setenv. 
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -67,67 +69,23 @@ struct InterfaceCreationArguments
   const char* unix_path;
 };
 
-class FileDescriptorLeakChecker
+void CheckAndReportDescriptorLeaks(
+  fcgi_si_test::FileDescriptorLeakChecker* fdlc_ptr, 
+  const std::string& test_name)
 {
- public:
-  using iterator       = std::set<int>::iterator;
-  using const_iterator = std::set<int>::const_iterator;
-  
-  const_iterator begin();
-  const_iterator end();
-  void Reinitialize();
-  template<typename It>
-  std::pair<const_iterator, const_iterator> Check(It removed_begin, 
-    It removed_end, It added_begin, It added_end);
-
-  FileDescriptorLeakChecker();
-  FileDescriptorLeakChecker(const FileDescriptorLeakChecker&) = default;
-  FileDescriptorLeakChecker(FileDescriptorLeakChecker&&) = default;
-
-  FileDescriptorLeakChecker& operator=(const FileDescriptorLeakChecker&)
-    = default;
-  FileDescriptorLeakChecker& operator=(FileDescriptorLeakChecker&&)
-    = default;
-
-  ~FileDescriptorLeakChecker();
-
- private:
-  std::set<int> capture_list_;
-
-};
-
-FileDescriptorLeakChecker::FileDescriptorLeakChecker()
-{
-
-}
-
-FileDescriptorLeakChecker::~FileDescriptorLeakChecker()
-{
-
-}
-
-FileDescriptorLeakChecker::const_iterator FileDescriptorLeakChecker::begin()
-{
-
-}
-
-FileDescriptorLeakChecker::const_iterator FileDescriptorLeakChecker::end()
-{
-
-}
-
-void FileDescriptorLeakChecker::Reinitialize()
-{
-
-}
-
-template<typename It>
-std::pair<FileDescriptorLeakChecker::const_iterator,
-  FileDescriptorLeakChecker::const_iterator> 
-FileDescriptorLeakChecker:: 
-Check(It removed_begin, It removed_end, It added_begin, It added_end)
-{
-  
+  std::pair<fcgi_si_test::FileDescriptorLeakChecker::const_iterator, 
+    fcgi_si_test::FileDescriptorLeakChecker::const_iterator> iter_pair 
+    {fdlc_ptr->Check()};
+  if(iter_pair.first != iter_pair.second)
+  {
+    std::string message {"File descriptors were leaked in "};
+    (message += test_name) += ": ";
+    for(/*no-op*/; iter_pair.first != iter_pair.second; ++(iter_pair.first))
+    {
+      (message += std::to_string(*(iter_pair.first))) += " ";
+    } 
+    ADD_FAILURE() << message;
+  }
 }
 
 // Creates a listening socket for an interface, and constructs an interface
@@ -631,6 +589,9 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   //
   // Other modules whose testing depends on this module: none.
 
+  // Leak checker
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
+
   auto ClearFCGIWebServerAddrs = []()->void
   {
     if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
@@ -1002,6 +963,10 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       ClearFCGIWebServerAddrs();
     }
   }
+
+  // Check for file descriptor leaks:
+  CheckAndReportDescriptorLeaks(&fdlc, 
+    "ConstructionExceptionsAndDirectlyObservableEffects");
 }
 
 TEST(FCGIServerInterface, FCGIGetValues)
@@ -1053,6 +1018,8 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // 6) SingleProcessInterfaceAndClients (defined locally)
   //
   // Other modules whose testing depends on this module: none.
+
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   SIGALRMHandlerInstaller();
 
@@ -1335,6 +1302,8 @@ TEST(FCGIServerInterface, FCGIGetValues)
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map {};
     TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 8);
   }
+
+  CheckAndReportDescriptorLeaks(&fdlc, "FCGIGetValues");
 }
 
 TEST(FCGIServerInterface, UnknownManagementRequests)
@@ -1368,6 +1337,8 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
   // 4) SingleProcessInterfaceAndClients (defined locally)
   // 
   // Other modules whose testing depends on this module: none.
+
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   auto UnknownManagementRecordTester = [](
     struct InterfaceCreationArguments args, std::uint8_t* buffer_ptr,
@@ -1538,6 +1509,8 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN + 3, 
     static_cast<fcgi_si::FCGIType>(100) , 5);
   }
+
+  CheckAndReportDescriptorLeaks(&fdlc, "UnknownManagementRequests");
 }
 
 namespace {
@@ -2084,6 +2057,8 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   // of the test. Only non-fatal failures are used in the implementation
   // of TestCaseRunner to ensure that restoration takes place.
 
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
+
   SIGALRMHandlerInstaller();  
 
   if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
@@ -2270,6 +2245,8 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
     FAIL() << "A call to sigaction to restore the defailt SIGPIPE  behavior "
       "failed." << '\n' << std::strerror(errno);
   }
+
+  CheckAndReportDescriptorLeaks(&fdlc, "ConnectionAcceptanceAndRejection");
 }
 
 TEST(FCGIServerInterface, FCGIRequestGeneration)
@@ -2370,6 +2347,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   // Modules which testing depends on:
   //
   // Other modules whose testing depends on this module:
+
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   struct RequestData
   {
@@ -2682,6 +2661,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   {
     
   };
+
+  CheckAndReportDescriptorLeaks(&fdlc, "FCGIRequestGeneration");
 }
 
 TEST(FCGIServerInterface, RequestAcceptanceAndRejection)

@@ -1,7 +1,11 @@
 #ifndef FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
 #define FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
 
+#include <dirent.h>
+
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <tuple>
 #include <vector>
 
@@ -88,6 +92,91 @@ bool PrepareTemporaryFile(int descriptor);
 //    c) the end of the file.
 std::tuple<bool, bool, bool, bool, std::vector<std::uint8_t>>
 ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id);
+
+class FileDescriptorLeakChecker
+{
+ public:
+  using value_type     = int;
+  using iterator       = std::vector<int>::iterator;
+  using const_iterator = std::vector<int>::const_iterator;
+
+  void Reinitialize();
+
+  inline std::pair<FileDescriptorLeakChecker::const_iterator, 
+    FileDescriptorLeakChecker::const_iterator> Check()
+  {
+    CheckHelper(recorded_list_);
+  }
+
+  template<typename It>
+  std::pair<FileDescriptorLeakChecker::const_iterator, 
+  FileDescriptorLeakChecker::const_iterator> Check(It removed_begin, 
+    It removed_end, It added_begin, It added_end);
+
+
+  inline FileDescriptorLeakChecker()
+  {
+    Reinitialize();
+  }
+  FileDescriptorLeakChecker(const FileDescriptorLeakChecker&) = default;
+  FileDescriptorLeakChecker(FileDescriptorLeakChecker&&) = default;
+
+  FileDescriptorLeakChecker& operator=(const FileDescriptorLeakChecker&)
+    = default;
+  FileDescriptorLeakChecker& operator=(FileDescriptorLeakChecker&&)
+    = default;
+
+  ~FileDescriptorLeakChecker() = default;
+
+ private:
+  void CleanUp(DIR* dir_stream_ptr);
+  DIR* CreateDirectoryStream();
+  void RecordDescriptorList(DIR* dir_stream_ptr, std::vector<int>* list_ptr);
+  std::pair<FileDescriptorLeakChecker::const_iterator, 
+    FileDescriptorLeakChecker::const_iterator> 
+    CheckHelper(const std::vector<int>& expected_list);
+
+  // After construction, a sorted list of unique integers.
+  std::vector<int> recorded_list_ {};
+  std::vector<int> leak_list_ {};
+};
+
+template<typename It>
+std::pair<FileDescriptorLeakChecker::const_iterator, 
+  FileDescriptorLeakChecker::const_iterator>
+FileDescriptorLeakChecker:: 
+Check(It removed_begin, It removed_end, It added_begin, It added_end)
+{  
+  // Process the removed and added iterator lists.
+  std::vector<int> removed {};
+  std::vector<int> added   {};
+  auto CopySortRemoveDuplicates = [](std::vector<int>* vec_cont, It begin_it,
+    It end_it)->void
+  {
+    while(begin_it != end_it)
+    {
+      vec_cont->push_back(*begin_it);
+      ++begin_it;
+    }
+    std::sort(vec_cont->begin(), vec_cont->end());
+    std::vector<int>::iterator new_end 
+      {std::unique(vec_cont->begin(), vec_cont->end())};
+    vec_cont->erase(new_end, vec_cont->end());
+  };
+
+  CopySortRemoveDuplicates(&removed, removed_begin, removed_end);
+  CopySortRemoveDuplicates(&added, added_begin, added_end);
+  std::vector<int> difference_list {};
+  std::set_difference(recorded_list_.begin(), recorded_list_.end(),
+    removed.begin(), removed.end(), 
+    std::back_insert_iterator<std::vector<int>>(difference_list));
+  std::vector<int> expected_list {};
+  std::set_union(difference_list.begin(), difference_list.end(),
+    added.begin(), added.end(), 
+    std::back_insert_iterator<std::vector<int>>(expected_list));
+
+  return CheckHelper(expected_list);
+}
 
 } // namespace fcgi_si_test
 
