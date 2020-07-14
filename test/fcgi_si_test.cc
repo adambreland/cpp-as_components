@@ -2265,9 +2265,9 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   //       over which the record data was sent would block. Until the remaining
   //       data of the record is received, the record is in an incomplete or
   //       partially-received state.
-  // 2) "Intermingling" of records can occur with respect to several record
+  // 2) Interleaving of records can occur with respect to several record
   //    properties. For example, records on a single connection could be
-  //    intermingled with respect to record type but not with respect to 
+  //    interleaved with respect to record type but not with respect to 
   //    request identity.
   // 3) Record subsequences: Record receipt on a given connection defines a
   //    sequence of records S. We can imagine a subsequence T of records of
@@ -2299,12 +2299,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   // 4) Stream record type data paritioning: The data associated with a stream
   //    record type can be arbitrarily partitioned between records provided
   //    that an empty record only occurs as the terminal record of the stream.
-  // 5) Padding: Any record may have padding. Padding may be present regardless
-  //    of whether the record is aligned on an 8-byte boundary or not.  
-  // 6) The occurrence of partial record receipt when the connection of the
-  //    record would block and another connection is ready. Will the request
-  //    be correctly produced when the data for the request is eventually
-  //    received in full?
+  // 5) Padding: Most records may have padding. Padding may be present
+  //    regardless of whether the record is aligned on an 8-byte boundary or
+  //    not.
+  // 6) Partial request receipt: multiple cycles of data transmission and
+  //    data processing are required to receive the request data in full.
+  // 7) Partial record receipt and connection blocking when no other
+  //    connections are ready for reading.
+  // 8) The occurrence of partial record receipt when the connection of the
+  //    record would block and another connection is ready.
   //
   // Test cases:
   // Single connection:
@@ -2323,10 +2326,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   //       records. The FCGI_DATA record is sent after the other records.
   //       A request object should not be generated until it is received
   //       according to the specified request completion logic for FCGI_DATA.
-  //    g) Role: The role field has value 10; otherwise as e.
-  // 2) Single request record type orderings: Records of different types are
-  //    not interleaved. Rather, the record type order is varied across
-  //    requests.
+  //    g) Role: The role field has value 10; otherwise as f.
+  // 2) Partial request data receipt on a call of AcceptRequests. 
+  //    a) Role: Responder. No partial records. Several cycles of request data
+  //       transmission by a client and data processing by the interface are
+  //       to needed receive the request.
+  //    b) Role: Responder. Partial records.
+  // 3) Single requests with varying record type orderings: Records of
+  //    different types are not interleaved. Rather, the record type order is
+  //    varied across requests.
   //    a) Role: Responder. Data is present for FCGI_PARAMS and absent for
   //       FCGI_STDIN. No record with type FCGI_DATA is sent. The FCGI_PARAMS
   //       records are sent first.
@@ -2334,15 +2342,70 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   //    c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
   //       No records of type FCGI_DATA are sent. The records for FCGI_PARAMS
   //       are sent before those for FCGI_STDIN.
-  //    d) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
-  //    e) Role: Filter. Data is present for all of the streams. Data is sent
+  //    d) As c, but arbitrary amounts of padding are present in the records
+  //       of both streams.
+  //    e) As c, but a different partitioning of the data among records is used
+  //       for the streams.
+  //    f) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
+  //    g) Role: Filter. Data is present for all of the streams. Data is sent
   //       in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA.
-  //    f) As e, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
-  // 3) Single request record type interleavings:
+  //    h) As g, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
+  // 4) Single requests with record type interleavings:
   //    a) Role: Responder. Data is present for FCGI_PARAMS and FCGI_STDIN.
   //       No records of type FCGI_DATA are sent. The records of FCGI_PARAMS
   //       and FCGI_STDIN are interleaved before the streams are completed.
-  //    b) 
+  //    b) Role: Filter. Data is present for all three streams. Records for
+  //       each stream are interleaved with the other.
+  // 5) Multiple request record interleaving:
+  //    a) A Responder request, an Authorizer request, and a Filter request are
+  //       sent on the same connection. Records for the requests are
+  //       interleaved arbitrarily. "Partial records" in the sense that data
+  //       receipt is interrupted with periods where reading would block and
+  //       the current record was not received in full are present.
+  //
+  // Multiple connections:
+  // 1) (No interleaving of request data receipt between connections; 
+  //    homogenous request type; single request on each connection.) 
+  //    Five connections. A Responder request is sent on each connection to the
+  //    interface. Each request contains unique FCGI_PARAMS and FCGI_STDIN
+  //    data. Activity is synchronized such that all data for the requests is
+  //    sent to the interface before a call to AcceptRequests is made on the
+  //    interface. This means that a request should be received in full for
+  //    each connection before the interface moves on to the next connection.
+  // 2) (No interleaving of request data receipt between connections; mixed
+  //    request type; single request on each connection.) 
+  //    Five connections: A mix of Responder, Authorizer, and Filter requests
+  //    are sent. A single request is sent on each connection. As in 1, the
+  //    data for each request is sent in full before the interface begins
+  //    processing the requests.
+  // 3) (No interleaving of request data receipt between connections; 
+  //    homogenous request type; multiple requests on a connection.)
+  //    Ten connections. Responder requests are sent on each connection. As in
+  //    1, each request has unique FCGI_PARAMS and FCGI_STDIN data. However,
+  //    for at least one of the connections, multiple requests are sent on the
+  //    same connection. As in 1, all data for each request is sent before the
+  //    interface begins processing data.
+  // 4) (Interleaving of request data receipt between connections. No partial
+  //    records. Homogeneous request type. Single request on each connection.)
+  //    Three connections. A Responder request is sent on each connection.
+  //    Each request has unique FCGI_PARAMS and FCGI_STDIN data. For at least
+  //    one of the connections, data for a request is not sent in full. This
+  //    means that multiple cycles of data transmission by "clients" and data
+  //    processing by the interface will be required for all request data to be
+  //    received in full by the interface. For each request, data is sent on
+  //    record boundaries. In other words, a partial record should not be
+  //    observed by the interface.
+  // 5) (Interleaving of request data receipt between connections. Partial
+  //    records. Mixed request types. Single request on each connection.)
+  //    Two connections. A Responder request is sent on one connection. A
+  //    Filter request is sent on the other connection. Request data is sent
+  //    with frequent partial records. Multiple cylces of data transmission and
+  //    data processing are required.
+  // 6) (Interleaving of request data receipt between connections. Partial 
+  //    records. Mixed request types. Multiple requests on a connection. 
+  //    Interleaving of request data within a connection.)
+  //    As in 5, but multiple responder requests are sent on one of the
+  //    connections.
   //
   // Modules which testing depends on:
   //
@@ -2379,6 +2442,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   };
 
   // Single connection Test Case Set 1: Minimal requests
+
   auto SimpleMinimalRequestTestCaseRunner = [&RequestInspector, &PopulateRole]
   (const struct RequestData& request_data, const std::string& case_message)
   {
@@ -2642,25 +2706,157 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     FilterMinimalRequestTestCaseRunner(request_data, case_message);
   }
 
-  // Single Connection Test Case Set 2: Record type orderings without
-  // record type record interleaving.
-  // a) Role: Responder. Data is present for FCGI_PARAMS and absent for
-  //    FCGI_STDIN. No record with type FCGI_DATA is sent. The FCGI_PARAMS
-  //    records are sent first.
-  // b) As a, but the completing, empty FCGI_STDIN record is sent first.
-  // c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
-  //    No records of type FCGI_DATA are sent. The records for FCGI_PARAMS
-  //    are sent before those for FCGI_STDIN.
-  // d) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
-  // e) Role: Filter. Data is present for all of the streams. Data is sent
-  //    in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA.
-  // f) As e, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
+  // Single connection Test Case Set 2: Partial request data receipt on a call
+  // of AcceptRequests.
 
-  auto TypeOrderingTestCaseRunner = [&RequestInspector, &PopulateRole]
-  ()
-  {
-    
-  };
+  // a) Role: Responder. No partial records. Several cycles of request data
+  //    transmission by a client and data processing by the interface are
+  //    needed to receive the request.
+  do 
+  { 
+    using map_type = std::map<std::vector<std::uint8_t>,
+      std::vector<std::uint8_t>>;
+
+    InterfaceCreationArguments inter_args {};
+    inter_args.domain          = AF_INET;
+    inter_args.max_connections = 1;
+    inter_args.max_requests    = 10;
+    inter_args.app_status      = EXIT_FAILURE;
+    inter_args.unix_path       = nullptr;   
+    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+
+    struct RequestData request_data {};
+    request_data.FCGI_id        = 1U;
+    request_data.fcgi_keep_conn = false;
+    request_data.role           = fcgi_si::FCGI_RESPONDER;
+    request_data.fcgi_params    = map_type 
+    {
+      {
+        {'C','O','N','T','E','N','T','_','T','Y','P','E'}, 
+        {'t','e','x','t','/','h','t','m','l'}
+      }, 
+      {
+        {'C','O','N','T','E','N','T','_','L','E','N','G','T','H'}, 
+        {'3','1'}
+      }
+    };
+    request_data.fcgi_stdin     = std::vector<std::uint8_t>
+    {
+      '<','!','D','O','C','T','Y','P','E',' ','h','t','m','l','>','\n',
+      '<','h','t','m','l','>','\n',
+      '<','/','h','t','m','l','>','\n'
+    };
+
+    const char* accept_error {"FCGIRequest objects returned when none was "
+      "expected."};
+    std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
+    fcgi_si::PopulateHeader(begin_record,
+      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1U, fcgi_si::FCGI_HEADER_LEN,
+      0U);
+    PopulateRole(begin_record + fcgi_si::FCGI_HEADER_LEN, request_data.role);
+    // keep_conn is zero from aggreage initialization.
+    std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_params_record,
+      fcgi_si::FCGIType::kFCGI_PARAMS, 1U, 0U, 0U);
+    std::uint8_t terminal_stdin_record[fcgi_si::FCGI_HEADER_LEN]  = {};
+    fcgi_si::PopulateHeader(terminal_stdin_record,
+      fcgi_si::FCGIType::kFCGI_STDIN, 1U, 0U, 0U);
+
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], begin_record,
+      2 * fcgi_si::FCGI_HEADER_LEN) < 2 * fcgi_si::FCGI_HEADER_LEN)
+    {
+      ADD_FAILURE() << "Incomplete begin request record write.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    };
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+      const std::vector<std::uint8_t>, std::size_t, map_type::iterator>
+    pair_encoding_return 
+      {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
+        request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
+        1U, 0U)};
+    if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
+      != 0U))
+    {
+      ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
+      break;
+    }
+    std::tuple<struct iovec*, int, std::size_t> sgsw_return 
+      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+        std::get<2>(pair_encoding_return).data(), 
+        std::get<2>(pair_encoding_return).size(), 
+        std::get<1>(pair_encoding_return))};
+    if(std::get<2>(sgsw_return) != 0U)
+    {
+      ADD_FAILURE() << "Not all of the encoded name-value pair information "
+        "could be written.";
+      break;
+    }
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+      terminal_params_record, fcgi_si::FCGI_HEADER_LEN) != 
+        fcgi_si::FCGI_HEADER_LEN)
+    {
+      ADD_FAILURE() << "Incomplete terminal params record write.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    }
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
+      std::size_t, std::vector<std::uint8_t>::iterator>
+    partition_return 
+      {fcgi_si::PartitionByteSequence(request_data.fcgi_stdin.begin(),
+        request_data.fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN, 1U)};
+    if(std::get<3>(partition_return) != request_data.fcgi_stdin.end())
+    {
+      ADD_FAILURE() << "Not all of the stdin data could be encoded.";
+      break;
+    }
+    std::tuple<struct iovec*, int, std::size_t> stdin_sgsw_return
+      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+        std::get<1>(partition_return).data(), 
+        std::get<1>(partition_return).size(), std::get<2>(partition_return))};
+    if(std::get<2>(stdin_sgsw_return) != 0U)
+    {
+      ADD_FAILURE() << "An error occurred when writing stdin content.";
+      break;
+    }
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+      terminal_stdin_record, fcgi_si::FCGI_HEADER_LEN) < 
+      fcgi_si::FCGI_HEADER_LEN)
+    {
+      ADD_FAILURE() << "The terminal stdin record was not sent in full.";
+      break;
+    }
+    std::vector<fcgi_si::FCGIRequest> request_list 
+      {spiac.interface().AcceptRequests()};
+    if(request_list.size() != 1U)
+    {
+      ADD_FAILURE() << "An incorrect number of requests was returned.";
+      break;
+    }
+    RequestInspector(request_list[0], request_data, "Single connection "
+      "partial request data receipt");
+    // Inspect observable interface state.
+    EXPECT_EQ(spiac.interface().connection_count(), 1U);
+    EXPECT_EQ(spiac.interface().interface_status(), true);
+    EXPECT_EQ(spiac.interface().get_overload(), false);
+  } while(false);
+
+
+
+
+
+
+  // b) Role: Responder. Partial records.
+
+
 
   CheckAndReportDescriptorLeaks(&fdlc, "FCGIRequestGeneration");
 }

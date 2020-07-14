@@ -105,7 +105,7 @@ class FileDescriptorLeakChecker
   inline std::pair<FileDescriptorLeakChecker::const_iterator, 
     FileDescriptorLeakChecker::const_iterator> Check()
   {
-    CheckHelper(recorded_list_);
+    return CheckHelper(recorded_list_);
   }
 
   template<typename It>
