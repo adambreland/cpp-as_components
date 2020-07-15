@@ -17,6 +17,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -1182,10 +1183,11 @@ TEST(FCGIServerInterface, FCGIGetValues)
     std::tuple<bool, std::size_t, std::vector<iovec>, 
       const std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
     returned_encoding_information {fcgi_si::EncodeNameValuePairs(
-      input_pairs.begin(), input_pairs.end(), fcgi_si::FCGIType::kFCGI_GET_VALUES,
-      0U, 0U)};
-    if((!std::get<0>(returned_encoding_information)) || 
-       (std::get<4>(returned_encoding_information) != 0U))
+      input_pairs.begin(), input_pairs.end(), 
+      fcgi_si::FCGIType::kFCGI_GET_VALUES, 0U, 0U)};
+    if((!std::get<0>(returned_encoding_information))      || 
+       (std::get<4>(returned_encoding_information) != 0U) || 
+       (std::get<5>(returned_encoding_information) != input_pairs.end()))
     {
       ADD_FAILURE() << "The name-value pairs given to EncodeNameValuePairs "
         "caused an error.";
@@ -1502,7 +1504,7 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.app_status      = EXIT_FAILURE;
     args.unix_path       = nullptr;
 
-    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN + 3] = {};
+    std::uint8_t header[fcgi_si::FCGI_HEADER_LEN + 3U] = {};
     fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
       0U, 3U, 0U);
     std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, 3);
@@ -2411,6 +2413,9 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   //
   // Other modules whose testing depends on this module:
 
+  using map_type = std::map<std::vector<std::uint8_t>, 
+      std::vector<std::uint8_t>>;
+
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   struct RequestData
@@ -2714,9 +2719,6 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   //    needed to receive the request.
   do 
   { 
-    using map_type = std::map<std::vector<std::uint8_t>,
-      std::vector<std::uint8_t>>;
-
     InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.max_connections = 1;
@@ -2747,7 +2749,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       '<','/','h','t','m','l','>','\n'
     };
 
-    const char* accept_error {"FCGIRequest objects returned when none was "
+    const char* accept_error {"FCGIRequest objects were returned when none was "
       "expected."};
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
     fcgi_si::PopulateHeader(begin_record,
@@ -2762,8 +2764,9 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     fcgi_si::PopulateHeader(terminal_stdin_record,
       fcgi_si::FCGIType::kFCGI_STDIN, 1U, 0U, 0U);
 
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], begin_record,
-      2 * fcgi_si::FCGI_HEADER_LEN) < 2 * fcgi_si::FCGI_HEADER_LEN)
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+      begin_record, 2 * fcgi_si::FCGI_HEADER_LEN) 
+      < 2 * fcgi_si::FCGI_HEADER_LEN)
     {
       ADD_FAILURE() << "Incomplete begin request record write.";
       break;
@@ -2780,7 +2783,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
         request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
         1U, 0U)};
     if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
-      != 0U))
+      != 0U) || (std::get<5>(pair_encoding_return) != 
+      request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
       break;
@@ -2849,13 +2853,337 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
 
-
-
-
-
-
   // b) Role: Responder. Partial records.
+  do 
+  { 
+    InterfaceCreationArguments inter_args {};
+    inter_args.domain          = AF_INET;
+    inter_args.max_connections = 1;
+    inter_args.max_requests    = 10;
+    inter_args.app_status      = EXIT_FAILURE;
+    inter_args.unix_path       = nullptr;   
+    SingleProcessInterfaceAndClients spiac {inter_args, 1};
 
+    struct RequestData request_data {};
+    request_data.FCGI_id        = 1U;
+    request_data.fcgi_keep_conn = false;
+    request_data.role           = fcgi_si::FCGI_RESPONDER;
+    request_data.fcgi_params    = map_type 
+    {
+      {
+        {'C','O','N','T','E','N','T','_','T','Y','P','E'}, 
+        {'t','e','x','t','/','h','t','m','l'}
+      }, 
+      {
+        {'C','O','N','T','E','N','T','_','L','E','N','G','T','H'}, 
+        {'3','1'}
+      }
+    };
+    request_data.fcgi_stdin     = std::vector<std::uint8_t>
+    {
+      '<','!','D','O','C','T','Y','P','E',' ','h','t','m','l','>','\n',
+      '<','h','t','m','l','>','\n',
+      '<','/','h','t','m','l','>','\n'
+    };
+
+    const char* accept_error {"FCGIRequest objects were returned when none was "
+      "expected."};
+    std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
+    fcgi_si::PopulateHeader(begin_record,
+      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1U, fcgi_si::FCGI_HEADER_LEN,
+      0U);
+    PopulateRole(begin_record + fcgi_si::FCGI_HEADER_LEN, request_data.role);
+    // keep_conn is zero from aggreage initialization.
+    std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_params_record,
+      fcgi_si::FCGIType::kFCGI_PARAMS, 1U, 0U, 0U);
+    std::uint8_t terminal_stdin_record[fcgi_si::FCGI_HEADER_LEN]  = {};
+    fcgi_si::PopulateHeader(terminal_stdin_record,
+      fcgi_si::FCGIType::kFCGI_STDIN, 1U, 0U, 0U);
+    
+    // Write the FCGI_BEGIN_REQUEST record. 
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+      begin_record, 3U) < 3U)
+    {
+      ADD_FAILURE() << "Incomplete begin request record write, first fragment.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    };
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+      begin_record + 3U, (2*fcgi_si::FCGI_HEADER_LEN) - 3U) < 
+      ((2*fcgi_si::FCGI_HEADER_LEN) - 3U))
+    {
+      ADD_FAILURE() << "Incomplete begin request record write, second "
+        "fragment.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    };
+  
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+      const std::vector<std::uint8_t>, std::size_t, map_type::iterator>
+    pair_encoding_return 
+      {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
+        request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
+        1U, 0U)};
+    if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
+      != 0U) || (std::get<5>(pair_encoding_return) != 
+      request_data.fcgi_params.end()))
+    {
+      ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
+      break;
+    }
+    // Write the FCGI_PARAMS record in two parts with an intervening call to
+    // AcceptRequests.
+      // integer division
+    std::size_t partial_number {std::get<2>(pair_encoding_return).size() / 2};
+    if(partial_number == 0U)
+      partial_number = 1U;
+    std::size_t partial_byte_count {0U};
+    for(std::size_t i {0U}; i < partial_number; ++i)
+      partial_byte_count += std::get<2>(pair_encoding_return)[i].iov_len;
+    std::tuple<struct iovec*, int, std::size_t> sgsw_return 
+      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+        std::get<2>(pair_encoding_return).data(), 
+        partial_number, partial_byte_count)};
+    if(std::get<2>(sgsw_return) != 0U)
+    {
+      ADD_FAILURE() << "Not all of the encoded name-value pair information "
+        "could be written for the first fragment.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    }
+    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+      spiac.client_descriptors()[0], 
+      std::get<2>(pair_encoding_return).data() + partial_number, 
+      std::get<2>(pair_encoding_return).size() - partial_number, 
+      std::get<1>(pair_encoding_return) - partial_byte_count);
+    if(std::get<2>(sgsw_return) != 0U)
+    {
+      ADD_FAILURE() << "Not all of the encoded name-value pair information "
+        "could be written for the second fragment.";
+      break;
+    }
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+      terminal_params_record, fcgi_si::FCGI_HEADER_LEN) != 
+        fcgi_si::FCGI_HEADER_LEN)
+    {
+      ADD_FAILURE() << "Incomplete terminal params record write.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    }
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
+      std::size_t, std::vector<std::uint8_t>::iterator>
+    partition_return 
+      {fcgi_si::PartitionByteSequence(request_data.fcgi_stdin.begin(),
+        request_data.fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN, 1U)};
+    if(std::get<3>(partition_return) != request_data.fcgi_stdin.end())
+    {
+      ADD_FAILURE() << "Not all of the stdin data could be encoded.";
+      break;
+    }
+    std::tuple<struct iovec*, int, std::size_t> stdin_sgsw_return
+      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+        std::get<1>(partition_return).data(), 
+        std::get<1>(partition_return).size(), std::get<2>(partition_return))};
+    if(std::get<2>(stdin_sgsw_return) != 0U)
+    {
+      ADD_FAILURE() << "An error occurred when writing stdin content.";
+      break;
+    }
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+      terminal_stdin_record, 4U) < 4U)
+    {
+      ADD_FAILURE() << "The first fragment of the terminal stdin record was "
+        "not sent in full.";
+      break;
+    }
+    if(spiac.interface().AcceptRequests().size() != 0U)
+    {
+      ADD_FAILURE() << accept_error;
+      break;
+    }
+    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+      terminal_stdin_record + 4U, fcgi_si::FCGI_HEADER_LEN - 4U) < 
+      (fcgi_si::FCGI_HEADER_LEN - 4U))
+    {
+      ADD_FAILURE() << "The second fragment of the terminal stdin record was "
+        "not sent in full.";
+      break;
+    }
+    std::vector<fcgi_si::FCGIRequest> request_list 
+      {spiac.interface().AcceptRequests()};
+    if(request_list.size() != 1U)
+    {
+      ADD_FAILURE() << "An incorrect number of requests was returned.";
+      break;
+    }
+    RequestInspector(request_list[0], request_data, "Single connection "
+      "partial request data receipt");
+    // Inspect observable interface state.
+    EXPECT_EQ(spiac.interface().connection_count(), 1U);
+    EXPECT_EQ(spiac.interface().interface_status(), true);
+    EXPECT_EQ(spiac.interface().get_overload(), false);
+  } while(false);
+
+  // Single connection Test Case Set 3: Single requests with varying record
+  // type orderings: Records of different types are not interleaved. Rather,
+  // the record type order is varied across requests.
+
+  auto RecordTypeOrderTester = [&RequestInspector, &PopulateRole]
+  (const struct InterfaceCreationArguments inter_args,
+   const struct RequestData& request_data, 
+   const std::vector<fcgi_si::FCGIType>& type_sequence, 
+   std::string test_case_name)->void
+  {
+    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+
+    std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(begin_record, 
+      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1U, fcgi_si::FCGI_HEADER_LEN,
+      0U);
+    PopulateRole(begin_record + fcgi_si::FCGI_HEADER_LEN, 
+      fcgi_si::FCGI_RESPONDER);
+    if(request_data.fcgi_keep_conn)
+      begin_record[fcgi_si::FCGI_HEADER_LEN + 3U] = 1U;
+
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+      const std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
+    encoded_pairs_return {fcgi_si::EncodeNameValuePairs(
+      request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
+      fcgi_si::FCGIType::kFCGI_PARAMS, 1U, 0U)};
+    if(!std::get<0>(encoded_pairs_return) || (std::get<4>(encoded_pairs_return)
+       != 0U) || (std::get<5>(encoded_pairs_return) != 
+       request_data.fcgi_params.cend()))
+    {
+      ADD_FAILURE() << "An error occurred while encoding FCGI_PARAMS data in "
+        << test_case_name;
+      return;
+    }
+    std::uint8_t terminal_params[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_params, fcgi_si::FCGIType::kFCGI_PARAMS,
+      1U, 0U, 0U);
+    
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
+      std::size_t, std::vector<std::uint8_t>::const_iterator>
+    encoded_stdin_return {fcgi_si::PartitionByteSequence(
+      request_data.fcgi_stdin.cbegin(), request_data.fcgi_stdin.cend(),
+      fcgi_si::FCGIType::kFCGI_STDIN, 1U)};
+    if(std::get<3>(encoded_stdin_return) != request_data.fcgi_stdin.cend())
+    {
+      ADD_FAILURE() << "Not all of fcgi_stdin could be encoded in "
+        << test_case_name;
+      return;
+    }
+    std::uint8_t terminal_stdin[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_stdin, fcgi_si::FCGIType::kFCGI_STDIN,
+      1U, 0U, 0U);
+
+    for(fcgi_si::FCGIType type : type_sequence)
+    {
+      switch(type) {
+        case fcgi_si::FCGIType::kFCGI_PARAMS : {
+          std::tuple<struct iovec*, int, std::size_t> sgsw_return
+            {socket_functions::ScatterGatherSocketWrite(
+              spiac.client_descriptors()[0],
+              std::get<2>(encoded_pairs_return).data(),
+              std::get<2>(encoded_pairs_return).size(),
+              std::get<1>(encoded_pairs_return))};
+          if(std::get<2>(sgsw_return) != 0U)
+          {
+            ADD_FAILURE() << "An error occurred when writing FCGI_PARAMS "
+              "content in " << test_case_name;
+            return;
+          }
+          socket_functions::SocketWrite(spiac.client_descriptors()[0],
+            terminal_params())
+
+          break;
+        }
+        case fcgi_si::FCGIType::kFCGI_STDIN : {
+
+          break;
+        }
+        case fcgi_si::FCGIType::kFCGI_DATA : {
+
+          break;
+        }
+        default : {
+          ADD_FAILURE() << "An incorrect type was passed in the type sequence "
+          "in " << test_case_name;
+          return;
+        }
+      }
+    }
+  };
+
+  // a) Role: Responder. Data is present for FCGI_PARAMS and absent for
+  //    FCGI_STDIN. No record with type FCGI_DATA is sent. The FCGI_PARAMS
+  //    records are sent first.
+  {
+    InterfaceCreationArguments inter_args {};
+    inter_args.domain          = AF_INET6;
+    inter_args.max_connections = 1;
+    inter_args.max_requests    = 1;
+    inter_args.app_status      = EXIT_FAILURE ;
+    inter_args.unix_path       = nullptr;
+    
+    struct RequestData request_data {};
+    request_data.role           = fcgi_si::FCGI_RESPONDER;
+    request_data.FCGI_id        = 1U;
+    request_data.fcgi_keep_conn = false;
+    request_data.fcgi_params    = map_type 
+    {
+      {
+        {'F','C','G','I','_','V','E','R','S','I','O','N','_','1'},
+        {'1'},
+      }
+    };
+    // request_data.fcgi_stdin is empty (value initialization)
+    // request_data.fcgi_data is empty (value initialization)
+  
+    RecordTypeOrderTester(inter_args, request_data, 
+      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_PARAMS, 
+        fcgi_si::FCGIType::kFCGI_STDIN}, "Record Type Order case a");
+  }
+
+  {
+
+  }
+
+
+
+
+
+
+
+  //    b) As a, but the completing, empty FCGI_STDIN record is sent first.
+  //    c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
+  //       No records of type FCGI_DATA are sent. The records for FCGI_PARAMS
+  //       are sent before those for FCGI_STDIN.
+  //    d) As c, but arbitrary amounts of padding are present in the records
+  //       of both streams.
+  //    e) As c, but a different partitioning of the data among records is used
+  //       for the streams.
+  //    f) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
+  //    g) Role: Filter. Data is present for all of the streams. Data is sent
+  //       in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA.
+  //    h) As g, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
 
 
   CheckAndReportDescriptorLeaks(&fdlc, "FCGIRequestGeneration");
