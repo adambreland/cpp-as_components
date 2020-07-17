@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -1181,7 +1182,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     int test_case)
   {
     std::tuple<bool, std::size_t, std::vector<iovec>, 
-      const std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
+      std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
     returned_encoding_information {fcgi_si::EncodeNameValuePairs(
       input_pairs.begin(), input_pairs.end(), 
       fcgi_si::FCGIType::kFCGI_GET_VALUES, 0U, 0U)};
@@ -2812,7 +2813,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       break;
     };
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-      const std::vector<std::uint8_t>, std::size_t, map_type::iterator>
+      std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
@@ -2964,7 +2965,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     };
   
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-      const std::vector<std::uint8_t>, std::size_t, map_type::iterator>
+      std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
@@ -3100,7 +3101,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
     // Populate the the FCGI_PARAMS records.
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-      const std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
+      std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
     encoded_pairs_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
       fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U)};
@@ -3588,52 +3589,52 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // responder_request.fcgi_data is empty.
 
     struct RequestData authorizer_request {};
-    responder_request.FCGI_id        = 2U;
-    responder_request.role           = fcgi_si::FCGI_AUTHORIZER;
-    responder_request.fcgi_keep_conn = true;
-    responder_request.fcgi_params    = map_type 
+    authorizer_request.FCGI_id        = 2U;
+    authorizer_request.role           = fcgi_si::FCGI_AUTHORIZER;
+    authorizer_request.fcgi_keep_conn = true;
+    authorizer_request.fcgi_params    = map_type 
     {
       {
         {'Y'},
         {'2','5'}
       }
     };
-    // responder_request.fcgi_stdin is empty.
-    // responder_request.fcgi_data is empty.
+    // authorizer_request.fcgi_stdin is empty.
+    // authorizer_request.fcgi_data is empty.
 
     struct RequestData filter_request {};
-    responder_request.FCGI_id        = 3U;
-    responder_request.role           = fcgi_si::FCGI_FILTER;
-    responder_request.fcgi_keep_conn = true;
-    responder_request.fcgi_params    = map_type 
+    filter_request.FCGI_id        = 3U;
+    filter_request.role           = fcgi_si::FCGI_FILTER;
+    filter_request.fcgi_keep_conn = true;
+    filter_request.fcgi_params    = map_type 
     {
       {
-        std::vector<std::uint8_t>(200, 'X'),
+        std::vector<std::uint8_t>(200, 'X'), // A 4-byte name as per FCGI n-v.
         {}
       }
     };
-    responder_request.fcgi_stdin = std::vector<std::uint8_t> 
+    filter_request.fcgi_stdin = std::vector<std::uint8_t> 
       {'p','r','i','m','e','s'};
-    responder_request.fcgi_data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    filter_request.fcgi_data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
-    std::uint8_t responder_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(responder_begin, responder_request);
-    std::uint8_t authorizer_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(authorizer_begin, authorizer_request);
-    std::uint8_t filter_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(filter_begin, filter_request);
-
-    std::vector<std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-      const std::vector<std::uint8_t>, std::size_t, map_type::iterator>>
-    params_encoding_list {};
-    struct RequestData* request_ptr_array[3] = {&responder_request,
+    struct RequestData* request_ptr_array[] = {&responder_request,
       &authorizer_request, &filter_request};
+
+    // Define the FCGI_BEGIN_REQUEST records.
+    std::uint8_t begin_records[3][2 * fcgi_si::FCGI_HEADER_LEN] = {};
     for(int i {0}; i < 3; ++i)
+      PopulateBeginRequestRecord(begin_records[i], *request_ptr_array[i]);
+    
+    // Encode and check the FCGI_PARAMS records.
+    std::vector<std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+      std::vector<std::uint8_t>, std::size_t, map_type::iterator>>
+    params_encoding_list {};
+    for(struct RequestData* request_data_ptr : request_ptr_array)
     {
       params_encoding_list.push_back(fcgi_si::EncodeNameValuePairs(
-      request_ptr_array[i]->fcgi_params.begin(),
-      request_ptr_array[i]->fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
-      request_ptr_array[i]->FCGI_id, 0U));
+      request_data_ptr->fcgi_params.begin(),
+      request_data_ptr->fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
+      request_data_ptr->FCGI_id, 0U));
     }
     int number_params_correct {0};
     for(int i {0}; i < 3; ++i)
@@ -3651,9 +3652,241 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     }
     if(number_params_correct < 3)
       break;
+    // Populate the terminal FCGI_PARAMS records.
+    std::uint8_t terminal_params_records[3][fcgi_si::FCGI_HEADER_LEN] = {};
+    for(int i {0}; i < 3; ++i)
+      fcgi_si::PopulateHeader(terminal_params_records[i],
+        fcgi_si::FCGIType::kFCGI_PARAMS, request_ptr_array[i]->FCGI_id, 0U, 0U);
     
-    // RESUME
+    // Encode and check the FCGI_STDIN records.
+    std::vector<std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
+      std::size_t, std::vector<std::uint8_t>::iterator>>
+    stdin_encoding_list {};
+    for(int i {0}; i < 3; i++)
+    {
+      stdin_encoding_list.push_back(fcgi_si::PartitionByteSequence(
+        request_ptr_array[i]->fcgi_stdin.begin(),
+        request_ptr_array[i]->fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN,
+        request_ptr_array[i]->FCGI_id));
+    }
+    int number_stdin_correct {0};
+    for(int i {0}; i < 3; ++i)
+    {
+      if(std::get<3>(stdin_encoding_list[i]) != 
+         request_ptr_array[i]->fcgi_stdin.end())
+      {
+        ADD_FAILURE() << "Some of the FCGI_STDIN information was too large "
+          "to be encoded with a single call to fcgi_si::PartitionByteSequence";
+        break;
+      }
+      number_stdin_correct++;
+    }
+    if(number_stdin_correct < 3)
+      break;
+    
+    // Populate terminal FCGI_STDIN record for filter_request.
+    // PartitionByteSequence will produce temrinal records for
+    // responder_request and authorizer_request as their FCGI_STDIN streams
+    // have no content.
+    std::uint8_t terminal_filter_stdin_record[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_filter_stdin_record,
+      fcgi_si::FCGIType::kFCGI_STDIN, filter_request.FCGI_id, 0U, 0U);
 
+    // Encode the FCGI_DATA records for the filter request.
+    std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
+      std::size_t, std::vector<std::uint8_t>::iterator>
+    encoded_data_records {fcgi_si::PartitionByteSequence(
+      filter_request.fcgi_data.begin(), filter_request.fcgi_data.end(),
+      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id)};
+    if(std::get<3>(encoded_data_records) != filter_request.fcgi_data.end())
+    {
+      ADD_FAILURE() << "The FCGI_DATA information was too large to be encoded "
+        "with a single call to fcgi_si::PartitionByteSequence.";
+      break;
+    }
+    // Populate the terminal FCGI_DATA record.
+    std::uint8_t terminal_data_record[fcgi_si::FCGI_HEADER_LEN] = {};
+    fcgi_si::PopulateHeader(terminal_data_record, 
+      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id, 0U, 0U);
+    
+    // Begin writing to the interface. Sequence:
+    // R-b, A-b, R-p, AcceptRequests, F-b, A-s, A-p, AcceptRequests, A-pe,
+    // F-d, F-de, F-s, F-se, AcceptRequests, R-pe, R-s, F-p, F-pe
+    // AcceptRequests
+    // Key: R = Responder, A = Authorizer, F = Filter; b = FCGI_BEGIN_REQUEST,
+    //      s = FCGI_STDIN, p = FCGI_PARAMS, d = FCGI_DATA, *e = end of stream
+    const int& in {spiac.client_descriptors()[0]};
+    std::vector<fcgi_si::FCGIRequest> request_list {};
+    std::vector<fcgi_si::FCGIRequest> new_requests {};
+    auto AcceptAndAddRequests = [&spiac, &request_list, &new_requests]()->void
+    {
+      new_requests = spiac.interface().AcceptRequests();
+      request_list.insert(request_list.end(), 
+        std::move_iterator<std::vector<fcgi_si::FCGIRequest>::iterator>(
+          new_requests.begin()), 
+        std::move_iterator<std::vector<fcgi_si::FCGIRequest>::iterator>(
+          new_requests.end()));
+    };
+
+    // R-b, A-b
+    if(socket_functions::SocketWrite(in, begin_records[0], 
+       4 * fcgi_si::FCGI_HEADER_LEN) < (4 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // R-p
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<2>(params_encoding_list[0]).data(),
+         std::get<2>(params_encoding_list[0]).size(),
+         std::get<1>(params_encoding_list[0])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    // AcceptRequests
+    AcceptAndAddRequests();
+    // F-b
+    if(socket_functions::SocketWrite(in, begin_records[2], 
+       2 * fcgi_si::FCGI_HEADER_LEN) < (2 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // A-s
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<1>(stdin_encoding_list[1]).data(),
+         std::get<1>(stdin_encoding_list[1]).size(),
+         std::get<2>(stdin_encoding_list[1])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+      std::vector<std::uint8_t>, std::size_t, map_type::iterator>
+    a_params_encoded {EncodeNameValuePairs(
+      authorizer_request.fcgi_params.begin(),
+      authorizer_request.fcgi_params.end(),
+      fcgi_si::FCGIType::kFCGI_PARAMS,
+      authorizer_request.FCGI_id,
+      0U)};
+    socket_functions::ScatterGatherSocketWrite(
+      in,
+      std::get<2>(a_params_encoded).data(),
+      std::get<2>(a_params_encoded).size(),
+      std::get<1>(a_params_encoded));
+    // A-p
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<2>(params_encoding_list[1]).data(),
+         std::get<2>(params_encoding_list[1]).size(),
+         std::get<1>(params_encoding_list[1])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    
+    // AcceptRequests
+    AcceptAndAddRequests();
+    // A-pe
+    if(socket_functions::SocketWrite(in, terminal_params_records[1], 
+       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // F-d
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<1>(encoded_data_records).data(),
+         std::get<1>(encoded_data_records).size(),
+         std::get<2>(encoded_data_records)))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    // F-de
+     if(socket_functions::SocketWrite(in, terminal_data_record, 
+       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // F-s
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<1>(stdin_encoding_list[2]).data(),
+         std::get<1>(stdin_encoding_list[2]).size(),
+         std::get<2>(stdin_encoding_list[2])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    // F-se
+    if(socket_functions::SocketWrite(in, terminal_filter_stdin_record, 
+       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // AcceptRequests
+    AcceptAndAddRequests();
+    // R-pe
+    if(socket_functions::SocketWrite(in, terminal_params_records[0], 
+       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // R-s
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<1>(stdin_encoding_list[0]).data(),
+         std::get<1>(stdin_encoding_list[0]).size(),
+         std::get<2>(stdin_encoding_list[0])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    // F-p
+    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+         in, 
+         std::get<2>(params_encoding_list[2]).data(),
+         std::get<2>(params_encoding_list[2]).size(),
+         std::get<1>(params_encoding_list[2])))        != 0U)
+    {
+      ADD_FAILURE();
+      break;
+    }
+    // F-pe
+    if(socket_functions::SocketWrite(in, terminal_params_records[2], 
+       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    {
+      ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
+      break;
+    }
+    // AcceptRequests
+    AcceptAndAddRequests();
+
+    // Validate results.
+    if(request_list.size() != 3U)
+    {
+      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was "
+        "returned." << '\n' << request_list.size();
+      break;
+    }
+    for(int i {0}; i < 3; ++i)
+    {
+      RequestInspector(request_list[i], 
+        *request_ptr_array[request_list[i].get_request_identifier().FCGI_id() - 1],
+        "Single Connection Test Case Set 5: Multiple requests with record "
+          "interleaving");
+    }
+    EXPECT_EQ(spiac.interface().connection_count(), 1U);
+    EXPECT_EQ(spiac.interface().interface_status(), true);
+    EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
 
   CheckAndReportDescriptorLeaks(&fdlc, "FCGIRequestGeneration");

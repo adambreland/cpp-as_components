@@ -147,7 +147,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 // 6) All records have a total length which is a multiple of eight bytes.
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-  const std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
+  std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
 
@@ -220,6 +220,7 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 // sequence of FastCGI records.
 //    This function is intended to be called in a loop if the byte
 // sequence is too long to be handled in one call.
+//    If begin_iter == end_iter, an empty (terminal) record is produced.
 //
 // Parameters:
 // begin_iter: An iterator which points to the first byte of the byte
@@ -245,11 +246,12 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    invalidates the returned sequence of struct iovec instances.
 //
 // Effects:
-// 1) A sequence of struct iovec instances is returned. This sequence contains
-//    an array which can be used in a call to writev. When written with a
-//    scatter-gather write, a sequence of FastCGI records is produced whose
-//    content is a prefix of [begin_iter, end_iter). The fixed information
-//    contained in the record headers is given by type and FCGI_id.
+// 1)     A sequence of struct iovec instances is returned. This sequence
+//    contains an array which can be used in a call to writev. When written
+//    with a scatter-gather write, a sequence of FastCGI records is produced
+//    whose content is a prefix of [begin_iter, end_iter). The fixed
+//    information contained in the record headers is given by type and FCGI_id.
+//        If begin_iter == end_iter, an empty (terminal) record is produced.
 // 2) Meaning of returned tuple elements:
 //       Access: std::get<0>; Type: std::vector<std::uint8_t>; A vector of
 //    bytes which holds information which is implicitly referenced in

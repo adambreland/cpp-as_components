@@ -39,7 +39,7 @@ ExtractBinaryNameValuePairs(const uint8_t* content_ptr,
       // Checks if a byte is present to continue.
       if((bytes_processed + 1) > content_length)
         return error_result;
-      bool four_byte_bit {*content_ptr & 0x80}; // Check the leading bit.
+      bool four_byte_bit {bool(*content_ptr & 0x80)}; // Check the leading bit.
       if(four_byte_bit)
       {
         // Check that enough bytes were given.

@@ -55,7 +55,7 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept
 
 template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, 
-  const std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
+  std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
 {
