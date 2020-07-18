@@ -47,6 +47,32 @@ std::string CaseSuffix(int test_case)
   return case_suffix;
 }
 
+void IgnoreSigPipe()
+{
+  struct sigaction sigpipe_disp {};
+  sigpipe_disp.sa_handler = SIG_IGN;
+  if(sigemptyset(&sigpipe_disp.sa_mask) == -1)
+  {
+    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
+  }
+  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
+  {
+    FAIL() << "A call to sigaction to ignore SIGPIPE failed." << '\n'
+      << std::strerror(errno);
+  }
+}
+
+void RestoreSigPipe()
+{
+  struct sigaction sigpipe_disp {};
+  sigpipe_disp.sa_handler = SIG_DFL;
+  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
+  {
+    FAIL() << "A call to sigaction to restore the defailt SIGPIPE behavior "
+      "failed." << '\n' << std::strerror(errno);
+  }
+}
+
 // This function sets the disposition of SIGALRM to the default
 // action (termination).
 void SIGALRMHandlerInstaller()
@@ -2073,18 +2099,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
 
   // Ignore SIGPIPE. The disposition will be inherited by the child produced
   // in the test.
-  struct sigaction sigpipe_disp {};
-  sigpipe_disp.sa_handler = SIG_IGN;
-  if(sigemptyset(&sigpipe_disp.sa_mask) == -1)
-  {
-    FAIL() << "A call to sigemptyset failed." << '\n' << std::strerror(errno);
-  }
-  sigpipe_disp.sa_flags = 0;
-  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
-  {
-    FAIL() << "A call to sigaction to ignore SIGPIPE failed." << '\n'
-      << std::strerror(errno);
-  }
+  IgnoreSigPipe();
 
   const char* path {"/tmp/fcgi_si_test_UNIX_interface_socket"};
 
@@ -2242,12 +2257,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   }
   
   // Restore the default SIGPIPE disposition.
-  sigpipe_disp.sa_handler = SIG_DFL;
-  if(sigaction(SIGPIPE, &sigpipe_disp, nullptr) == -1)
-  {
-    FAIL() << "A call to sigaction to restore the defailt SIGPIPE  behavior "
-      "failed." << '\n' << std::strerror(errno);
-  }
+  RestoreSigPipe();
 
   CheckAndReportDescriptorLeaks(&fdlc, "ConnectionAcceptanceAndRejection");
 }
@@ -3894,7 +3904,32 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
 TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
 {
+  // Testing explanation
+  // Examined properties:
+  // 1) Request limit (value of max_requests passed to the interface
+  //    constructor): 1 or greater than 1.
+  // 2) Presence of previous connections when the interface is placed into an
+  //    overloaded state: requests are present or not.
+  // 3) Incomplete requests vs. requests for which an FCGIRequest object
+  //    has been produced.
+  // 4) Multiple connections and separate request limits.
+  // 5) Request number tracking as requests are sent and completed.
+  //
+  // Test Cases:
+  // 1) 
+  //
+  // Modules which testing depends on:
+  //
+  // Other modules whose testing depends on this module:
 
+  IgnoreSigPipe();
+
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
+
+
+  CheckAndReportDescriptorLeaks(&fdlc, "RequestAcceptanceAndRejection");
+
+  RestoreSigPipe();
 }
 
 TEST(FCGIServerInterface, ConnectionClosure)

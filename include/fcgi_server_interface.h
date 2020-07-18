@@ -141,7 +141,8 @@ class FCGIServerInterface {
   // 3) For FCGI_BEGIN_REQUEST records, if the interface was overloaded or the
   //    maximum request limit was met at the time of record receipt, the request
   //    was rejected with an FCGI_END_REQUEST record. The protocol status of
-  //    the record was FCGI_OVERLOADED or FCGI_CANT_MPX_CONN as appropriate.
+  //    the record was FCGI_OVERLOADED if FCGI_CANT_MPX_CONN could not apply.
+  //    Otherwise the protocol status of the record was FCGI_CANT_MPX_CONN.
   //    The application status of the record was EXIT_FAILURE.
   // 4) For FCGI_ABORT_REQUEST records, either the request was deleted from the
   //    interface or state was updated so that inspection by the AbortStatus
@@ -236,9 +237,8 @@ class FCGIServerInterface {
   // Parameters:
   // listening_descriptor: The descriptor of the listening socket to be
   //                       used by the interface to accept connections.
-  // max_connections:      The maximum number of currently-active socket 
-  //                       connections of those which were accepted by the
-  //                       listening socket.
+  // max_connections:      The maximum number of socket connections of those
+  //                       which were accepted by the listening socket.
   // max_requests:         The maximum number of active requests for a
   //                       socket connection.
   // app_status_on_abort:  The application status which will be returned by the
