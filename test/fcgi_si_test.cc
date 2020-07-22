@@ -4668,11 +4668,54 @@ TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
   //    overloaded state: requests are present or not.
   // 3) Incomplete requests vs. requests for which an FCGIRequest object
   //    has been produced.
-  // 4) Multiple connections and separate request limits.
+  // 4) Multiple connections and separate request tallies.
   // 5) Request number tracking as requests are sent and completed.
   //
   // Test Cases:
-  // 1) 
+  // Single connection:
+  // 1) max_connections == 1, max_requests == 1. A single request has been
+  //    received in full. A new application request should be rejected with:
+  //    protocol_status == FCGI_CANT_MPX_CONN and 
+  //    application_status == EXIT_FAILURE. A management request should
+  //    receive an appropriate response.
+  // 2) As 1, but the previous request has not been received in full.
+  // 3) As 2, but the interface was put into an overloaded state before the
+  //    FCGI_BEGIN_REQUEST record of the request was received. The
+  //    protocol_status of the FCGI_END_REQUEST record sent in response should
+  //    be equal to FCGI_CANT_MPX_CONN as this status can apply. The 
+  //    application_status of the response should be EXIT_FAILURE. Data for
+  //    the partially-received request should be accepted.
+  // 4) max_connection == 1, max_requests == 1. The interface is put into an
+  //    overloaded state. No requests have been received. A request should be
+  //    rejected with protocol_status == FCGI_OVERLOADED and 
+  //    application_status == EXIT_FAILURE. A management request should be 
+  //    handled normally.
+  //
+  // Multiple connections:
+  //    The protcol_status in all cases should be FCGI_OVERLOADED. 
+  //    The application_status in all cases should be EXIT_FAILURE.
+  // 5) max_connections == 10, max_requests = 5. Two connections are present.
+  //    One connection has received no requests. The other connection has
+  //    received 5 requests in full. A request sent to the connection at the
+  //    request limit should be rejected. A request sent to the connection
+  //    without requests should be accepted. A management request sent to the
+  //    connection at the request limit should be handled normally.
+  // 6) As 6, but the connection at the request limit has a combination of
+  //    partially-received requests and fully-received requests.
+  // 7) As 7, but the interface is placed into an overloaded state. New
+  //    requests on both connections should be rejected. Management requests
+  //    on both connections should be handled normally. Data for partially-
+  //    received requests should be accepted.
+  // 8) max_connections == 10, max_requests = 5. Two connections are present.
+  //    Neither connection has received requests. The interface is placed into
+  //    an overloaded state. New requests on either connection should be
+  //    rejected. Management requests should be handled normally.
+  //
+  // Request number tracking:
+  // 9) max_connections = 10, max_requests = 2. One connection is idle.
+  //    Another connections receives two requests. A third request should then
+  //    be rejected. One of the two requests is completed. A fourth request
+  //    should then be accepted.
   //
   // Modules which testing depends on:
   //
@@ -4682,18 +4725,72 @@ TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
 
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
-
-
-
-
-
   GTestCheckAndReportDescriptorLeaks(&fdlc, "RequestAcceptanceAndRejection");
 
   GTestFatalRestoreSignal(SIGPIPE);
 }
 
-TEST(FCGIServerInterface, ConnectionClosure)
+TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
 {
+  // Testing explanation
+  // Examined properties:
+  // 1) Proper behavior when it is discovered that a client closed a
+  //    connection. After reacting to the closure:
+  //    a) The value returned by a call to connection_count should be one less
+  //       than the value returned by an immediately-preceding call.
+  //    b) If the interface was at its connection limit, a new connection
+  //       should be accepted.
+  //    c) FCGIRequest objects should be updated appropriately.
+  //       1) A call to AbortStatus should return true. 
+  //       2) Calls to Complete, RejectRole, Write, and WriteError should
+  //          return false.
+  //       3) A call to get_completion should return true.
+  // 2) Proper behavior reacting to connection closure by a client when the
+  //    interface is in an overloaded state.
+  // 3) Proper behavior when a request is completed.
+  //    a) The completion of a request whose FCGI_BEGIN_REQUEST record did not
+  //       have its FCGI_KEEP_CONN flag set should cause the interface to close
+  //       the connection when the request is completed. In this case:
+  //       1) A call to connection_count should return the appropriate number.
+  //       2) If the interface was at its connection limit, a new connection
+  //          should be accepted.
+  //       3) If other FCGIRequest objects are present, their state should be
+  //          updated to reflect connection closure.
+  //           a) A call to AbortStatus should return true. 
+  //           b) Calls to Complete, RejectRole, Write, and WriteError should
+  //              return false.
+  // 4) Proper behavior reacting to request completion in an overloaded state.
+  // 5) Proper behavior reacting to FCGI_ABORT_REQUEST records.
+  //    a) If a partially-received request had the FCGI_KEEP_CONN flag set in
+  //       its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST record
+  //       was received for the request, then:
+  //       1) The request should be removed from the interface. An observation
+  //          of this change, such as the acceptance of a request when others
+  //          were previously rejected due to the connection being at its
+  //          request limit, should be made.
+  //       2) An FCGI_END_REQUEST record should be sent by the interface to the
+  //          client. The application status of the record should be that given
+  //          by the value of app_status_on_abort when the interface was
+  //          constructed.
+  //    b) If a partially-received request did not have the FCGI_KEEP_CONN
+  //       flag set in its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST
+  //       record was received for the request, then the connection should be
+  //       closed. In this case:
+  //       1) An FCGI_END_REQUEST record should be sent to the client before
+  //          connection closure. The application status of the record should
+  //          be that given by the value of app_status_on_abort when the 
+  //          interface was constructed.
+  //    c) If a request was completely received and an FCGI_ABORT_STATUS record
+  //       was received for the request, the state of the FCGIRequest object
+  //       for the request should be appropriately updated.
+  //       1) A call to AbortStatus should return true.
+  //       2) Calls to Complete, RejectRole, Write, and WriteError should
+  //          function as normal.
+  //       3) A call to get_completion should return false.
+  //
+  // Test cases:
+  // 
+  //
 
 }
 

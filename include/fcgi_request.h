@@ -225,7 +225,7 @@ class FCGIRequest {
 
   // Move assignment may only occur to FCGIRequest objects which have been 
   // completed or moved from. An exception is thrown if a move is attempted
-  // to an FCGIRequest opbject which is in any other state.
+  // to an FCGIRequest object which is in any other state.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.

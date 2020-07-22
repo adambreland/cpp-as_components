@@ -159,21 +159,30 @@ class FCGIServerInterface {
   //    The only recognized management request is FCGI_GET_VALUES. 
   //    All other management requests receive an FCGI_UNKNOWN_TYPE response.
   // 7) New connections which were waiting to be accepted were accepted. 
-  //    a) Connections were validated against the list of authorized IP 
-  //       addresses if the list contains addresses. Unauthorized connections 
-  //       were immediately closed.
+  //    a) For internet domains, connections were validated against the list of
+  //       authorized IP addresses if the list contains addresses. Unauthorized
+  //       connections were immediately closed.
   //    b) If the interface was overloaded or the maximum number of connections
   //       was met, new connections were immediately closed.
   //    c) Connections were validated for socket domain and socket type. The
   //       reference domain and type were those determined from 
   //       listening_socket during interface construction.
   // 8) Connections which were scheduled to be closed were closed. Connection
-  //    closure scheduling occurs in two instances:
+  //    closure scheduling occurs in several cases:
   //    a) On the completion of a request for which the FCGI_KEEP_CONN flag was
   //       not set in the request's FCGI_BEGIN_REQUEST record. Closure will 
   //       occur even if other requests on the connection have been received
   //       from the client.
-  //    b) If an error during reading or writing corrupted the connection or
+  //    b) As part of the response to the discovery that a client closed its
+  //       end of a connection.
+  //    c) The request was aborted by an FCGI_ABORT_REQUEST record, the request
+  //       had not yet been used to construct an FCGIRequest object, and the
+  //       FCGI_KEEP_CONN flag of the request's FCGI_BEGIN_REQUEST record was
+  //       not set. (This is a consequence of a.)
+  //    d) A write operation on the connection blocked for a time that exceeded
+  //       the limit set by fcgi_si::write_block_timeout. The interface assumed
+  //       that the connection was no longer being read by the client.
+  //    e) If an error during reading or writing corrupted the connection or
   //       corrupted internal state associated with the connection. Corruption
   //       is associated with errors; exceptions are thrown at the source of
   //       the error.
@@ -220,14 +229,17 @@ class FCGIServerInterface {
   // Effects:
   // 1) While the flag is set:
   //    a) All new connections will be accepted and then immediately closed.
-  //    b) If the maximum number of requests on a connection is not met, all
-  //       requests initiated with an FCGI_BEGIN_REQUEST record on the
-  //       connection will be rejected with an FCGI_END_REQUEST record. The
-  //       protocol status of the record will be FCGI_OVERLOADED. The
-  //       application status of the record will be EXIT_FAILURE.
-  //    c) Requests which were previously accepted from the receipt of an
-  //       FCGI_BEGIN_REQUEST record will continue to receive data.
-  //    d) Requests which were previously assigned to the application through
+  //    b) All FCGI_BEGIN_REQUEST records will be rejected with an 
+  //       FCGI_END_REQUEST record. The protocol_status of the record will
+  //       be FCGI_CANT_MPX_CONN if it is applicable and FCGI_OVERLOADED
+  //       otherwise. The application status of the record will be EXIT_FAILURE.
+  //       After the rejection of an FCGI_BEGIN_REQUEST record, any received
+  //       records which are associated with the rejected request will be
+  //       ignored.
+  //    c) Management requests will be serviced normally.
+  //    d) Requests which were previously accepted from the receipt of an
+  //       FCGI_BEGIN_REQUEST record will continue to be able to receive data.
+  //    e) Requests which were previously assigned to the application through
   //       the production of an FCGIRequest object may be serviced normally.
   inline void set_overload(bool overload_status) noexcept
   {
