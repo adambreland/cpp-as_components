@@ -30,7 +30,7 @@ class FCGIServerInterface;
 // a call to Complete.
 //
 // Requests may be implicitly aborted in three cases: 
-// 1) The client sends an FCGI_ABORT record for the request.
+// 1) The client sends an FCGI_ABORT_REQUEST record for the request.
 // 2) The client closes the connection of the request.
 // 3) The interface is forced to close the connection of the request.
 // AbortStatus allows the current abort status of request to be inspected.
@@ -54,6 +54,14 @@ class FCGIServerInterface;
 // 2) Calls on distinct requests in separate threads do not require
 //    synchronization. This is true whether or not requests share
 //    underlying socket connections.
+// 3) An application does not need to enforce a particular order of destruction
+//    for FCGIRequest objects and the FCGIServerInterface object with which
+//    they are associated. 
+//    a) It is safe to have FCGIRequest objects which were produced from
+//       distinct FCGIServerInterface objects present at the same time.
+//    b) In general, output method calls on FCGIRequest objects whose interface
+//       has been destroyed fail as if the connection of the request was found
+//       to be closed.
 class FCGIRequest {
  public:
 
@@ -99,7 +107,8 @@ class FCGIRequest {
   //       FastCGI protocol. In addition, the client was informed that the
   //       request was serviced by the transmission of a final FCGI_END_REQUEST
   //       record. The application status of this record was given by the value
-  //       of app_status.
+  //       of app_status. The protocol status of this record is 
+  //       FCGI_REQUEST_COMPLETE.
   //    b) The request was completed. Calls to Complete, Write, and WriteError
   //       will have no effect.
   // 2) If the call returned false:
@@ -207,8 +216,9 @@ class FCGIRequest {
   //          to be corrupted. In the case of corruption, it is unknown how
   //          the connection became corrupt. No further action need be taken to
   //          service the request. The request should be destroyed. The
-  //          should be present in the closure set (in the case of corruption,
-  //          this may depend on the entity which corrupted the connection).
+  //          connection should be present in the closure set (in the case of
+  //          corruption, this may depend on the entity which corrupted the
+  //          connection).
   //       2) The request was completed. Calls to Complete, Write, and
   //          WriteError will have no effect.
   //    b) If the request had been previously completed or the request was
@@ -224,8 +234,8 @@ class FCGIRequest {
   FCGIRequest(FCGIRequest&&) noexcept;
 
   // Move assignment may only occur to FCGIRequest objects which have been 
-  // completed or moved from. An exception is thrown if a move is attempted
-  // to an FCGIRequest object which is in any other state.
+  // default-constructed, completed, or moved from. An exception is thrown if
+  // a move is attempted to an FCGIRequest object which is in any other state.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.

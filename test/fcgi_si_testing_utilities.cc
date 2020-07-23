@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -6,8 +7,12 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <dirent.h>
+#include <exception>
+#include <iterator>
+#include <limits>
 #include <memory>
+#include <set>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -319,6 +324,88 @@ void FileDescriptorLeakChecker::Reinitialize()
   CleanUp(dir_stream_ptr);
   recorded_list_.swap(new_list);
   leak_list_.swap(new_leak_list);
+}
+
+void FcgiRequestIdManager::CorruptionCheck()
+{
+  if(corrupt_)
+    throw std::logic_error {"The FcgiRequesIdManager instance was found to "
+      "be corrupt."};
+}
+
+std::uint16_t FcgiRequestIdManager::GetId()
+{
+  CorruptionCheck();
+
+  if(available_.size() == 0U)
+  {
+    if(in_use_.size() == 0U)
+    {
+      in_use_.insert(1U);
+      return 1U;
+    }
+    std::uint16_t max_in_use {*in_use_.rbegin()};
+    if(max_in_use == std::numeric_limits<std::uint16_t>::max())
+      throw std::length_error {"All possible request request IDs have "
+        "been assigned."};
+    std::uint16_t new_id {std::uint16_t(max_in_use + 1)};
+    in_use_.insert(in_use_.end(), new_id);
+    return new_id;
+  }
+  else
+  {
+    std::uint16_t new_id {*available_.begin()};
+    std::pair<std::set<std::uint16_t>::iterator, bool> insert_return
+      {in_use_.insert(new_id)};
+    if(!insert_return.second)
+    {
+      corrupt_ = true;
+      throw std::logic_error {"The state used by the FcgiRequestIdManager "
+        "instance to track used IDs was found to be corrupt. An ID was in use "
+        "when it was also considered available in a call to GetId."};
+    }
+    available_.erase(available_.begin());
+    return new_id;
+  }
+}
+
+void FcgiRequestIdManager::ReleaseId(std::uint16_t id)
+{
+  CorruptionCheck();
+
+  std::set<std::uint16_t>::iterator id_iter {in_use_.find(id)};
+  if(id_iter == in_use_.end())
+    throw std::out_of_range {"A call to ReleaseId was made for an ID that "
+      "was not in use."};
+  std::set<std::uint16_t>::reverse_iterator last_id_iter {in_use_.rbegin()};
+  if(std::reverse_iterator<std::set<std::uint16_t>::iterator>(id_iter) == 
+    last_id_iter)
+  {
+    std::set<std::uint16_t>::reverse_iterator next_reverse_id_iter 
+      {++last_id_iter};
+    if(next_reverse_id_iter != in_use_.rend())
+    {
+      std::uint16_t next_reverse_id {*next_reverse_id_iter};
+      if((id - next_reverse_id) > 1)
+      {
+        std::set<std::uint16_t>::iterator low_iter 
+          {available_.find(next_reverse_id + 1)};
+        if(low_iter == available_.end())
+        {
+          corrupt_ = true;
+          throw std::logic_error {"The state used by the FcgiRequestIdManager "
+            "instance to track available IDs was found to be corrupt. An ID "
+            "which should have been present was absent in a call to ReleaseId"};
+        }
+        available_.erase(low_iter, available_.end());
+      }
+    }
+  }
+  else
+  {
+    available_.insert(id);
+  }
+  in_use_.erase(id_iter);
 }
 
 } // namespace fcgi_si_test

@@ -4790,16 +4790,73 @@ TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
   //
   // Test cases:
   // 
+  // Modules which testing depends on:
   //
+  // Other modules whose testing depends on this module:
+
 
 }
 
-TEST(FCGIServerInterface, FCGIRequestDataTransmission)
+TEST(FCGIServerInterface, FCGIRequestDataTransmissionAndCompletion)
 {
+  // Testing explanation
+  // Examined properties:
+  // 1) Behavior of Complete and RejectRole in several cases:
+  //    a) When no data has been sent with an output function.
+  //    b) When data has been sent by calls to Write and WriteError.
+  //    c) The occurrence of one or more than one call to Write and
+  //       WriteError.
+  //    Behavior of the FCGIRequest object and interface pair includes:
+  //    a) The transmission of terminal records for FCGI_STDIN and FCGI_STDOUT.
+  //    b) The transmission of an FCGI_END_REQUEST record with the
+  //       provided value of app_status and the specified value for the
+  //       protocol status.
+  //    c) Changes to interface state. 
+  //       1) The ConnectionClosureAndAbortRequests test examines connection
+  //          closure related to request completion.
+  //       2) The RequestAcceptanceAndRejection test examines updates to the
+  //          request tally upon request completion by observing how the
+  //          interface behaves relative to request acceptance or rejection
+  //          when the request limit was reached for a connection and a request
+  //          was completed on that connection.
+  // 2) Behavior of output methods when multiple requests are present
+  //    on the same connection and when multiple connections with requests
+  //    are present. Does interleaving of method calls across request identity
+  //    or connection identity affect the behavior of the calls?
+  // 3) Behavior of non-output methods before request completion. In
+  //    particular, AbortStatus.
+  // 4) Behavior of FCGIRequest methods after the completion of the request
+  //    by a call to Complete or RejectRole. This includes output methods and
+  //    other methods.
+  //
+  // Test cases:
+  // 
+  // Modules which testing depends on:
+  //
+  // Other modules whose testing depends on this module:
+
 
 }
 
-TEST(FCGIServerInterface, FCGIServerInterfaceDestruction)
+TEST(FCGIServerInterface, FCGIServerInterfaceDestructionNotSynchronization)
 {
-
+  // Testing explanation
+  // Examined properties:
+  // 1) Destruction of completed and uncompleted FCGIRequest objects followed
+  //    by destruction of the interface.
+  // 2) Destruction of the interface while completed and uncompleted
+  //    FCGIRequest objects are present. Method calls on FCGIRequest objects
+  //    should behave as specified.
+  // 3) Creation of a new interface which creates new requests while completed
+  //    and uncompleted requests from the previous interface are present.
+  //    Method calls on all requests should function as specified. In
+  //    particular, the clients which sent the new requests should be able to
+  //    receive correct responses.
+  //
+  // Test cases:
+  //    
+  // 
+  // Modules which testing depends on:
+  //
+  // Other modules whose testing depends on this module:
 }

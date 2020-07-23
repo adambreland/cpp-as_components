@@ -739,13 +739,13 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
       FD_SET(map_reverse_iter->first, &read_set);
   }
 
-  int select_return {};
-  while(((select_return =
-    select(number_for_select, &read_set, nullptr, nullptr, nullptr))
-    == -1) && (errno == EINTR || errno == EAGAIN))
-    continue;
+  int select_return {select(number_for_select, &read_set, nullptr, nullptr, 
+    nullptr)};
   if(select_return == -1)
   {
+    // Return when a signal was caught by the thread of the interface.
+    if(errno == EINTR)
+      return {};
     // TODO Are there any situations that could cause select to return EBADF
     // from a call with only a non-null read set other than one of the file
     // descriptors not being open?

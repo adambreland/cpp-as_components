@@ -178,6 +178,20 @@ Check(It removed_begin, It removed_end, It added_begin, It added_end)
   return CheckHelper(expected_list);
 }
 
+class FcgiRequestIdManager
+{
+ public:
+  std::uint16_t GetId();
+  void ReleaseId(std::uint16_t id);
+
+ private:
+  void CorruptionCheck();
+
+  std::set<std::uint16_t> available_;
+  std::set<std::uint16_t> in_use_;
+  bool corrupt_ {false};
+};
+
 } // namespace fcgi_si_test
 
 #endif  // FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
