@@ -12,3 +12,6 @@ bazel-bin
 bazel-fcgi_si
 bazel-out
 bazel-testlogs
+
+.vscode/
+
