@@ -1,0 +1,15 @@
+# Compiler intermediate files
+*.s
+*.o
+*.so
+*.a
+
+# External dependencies
+external/
+
+# Bazel files
+bazel*
+
+# VS Code
+.vscode/
+
