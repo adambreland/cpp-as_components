@@ -1,6 +1,8 @@
 #ifndef FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_
 #define FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_
 
+#include "include/utility.h"
+
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -57,7 +59,7 @@ template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<iovec>, 
   std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
-  FCGIType type, std::uint16_t FCGI_id, std::size_t offset)
+  FcgiType type, std::uint16_t Fcgi_id, std::size_t offset)
 {
   if(pair_iter == end)
     return {true, 0U, {}, {}, 0U, end};
@@ -217,7 +219,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
             iovec_list.push_back({nullptr, FCGI_HEADER_LEN});
             local_buffers.insert(local_buffers.end(), FCGI_HEADER_LEN, 0);
             PopulateHeader(local_buffers.data() + previous_header_offset,
-              type, FCGI_id, 0, 0);
+              type, Fcgi_id, 0, 0);
             number_to_write += FCGI_HEADER_LEN;
             remaining_byte_count -= FCGI_HEADER_LEN;
             remaining_iovec_count--;
@@ -341,8 +343,8 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
-PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type, 
-  std::uint16_t FCGI_id)
+PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type, 
+  std::uint16_t Fcgi_id)
 {
   // Verify that ByteIter iterates over units of data which are the size of
   // a byte.
@@ -371,6 +373,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
   // The first FCGI_HEADER_LEN (8) bytes are zero for padding.
   std::vector<uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
   std::vector<struct iovec> iovec_list {};
+  std::vector<std::vector<uint8_t>::size_type> noncontent_index_list {};
+  std::vector<std::vector<struct iovec>::size_type> iovec_relocation {};
   ssize_t number_to_write {0};
 
   // Handle the special case of no content.
@@ -379,7 +383,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
     std::vector<uint8_t>::iterator header_iter 
       {noncontent_record_information.insert(noncontent_record_information.end(),
         FCGI_HEADER_LEN, 0)};
-    PopulateHeader(&(*header_iter), type, FCGI_id, 0, 0);
+    PopulateHeader(&(*header_iter), type, Fcgi_id, 0, 0);
     iovec_list.push_back({&(*header_iter), FCGI_HEADER_LEN});
     number_to_write += FCGI_HEADER_LEN;
   }
@@ -417,25 +421,33 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
       padding_length = (padding_length_complement) ?
         8 - padding_length_complement : 0U;
     }
+
+    // Update iovec with header. Update relocation information.
+    iovec_relocation.push_back(iovec_list.size());
+    iovec_list.push_back({nullptr, FCGI_HEADER_LEN});
+    noncontent_index_list.push_back(noncontent_record_information.size());
+
     // Update non-content information.
     std::vector<uint8_t>::iterator header_iter 
       {noncontent_record_information.insert(noncontent_record_information.end(),
         FCGI_HEADER_LEN, 0)};
-    PopulateHeader(&(*header_iter), type, FCGI_id,
+    PopulateHeader(&(*header_iter), type, Fcgi_id,
       current_record_content_length, padding_length);
       
-    // Update iovec information.
-    iovec_list.push_back({static_cast<void*>(&(*header_iter)),
-      FCGI_HEADER_LEN});
-      // The const_cast is necessary as struct iovec contains a void* member,
-      // but a client may pass in a const_iterator.
+    // The const_cast is necessary as struct iovec contains a void* member,
+    // but a client may pass in a const_iterator.
     iovec_list.push_back({
       const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
       current_record_content_length
     });
+
+    // Update iovec with padding if needed. Update relocation information.
     if(padding_length)
-      iovec_list.push_back({static_cast<void*>(
-        &(*noncontent_record_information.begin())), padding_length});
+    {
+      iovec_relocation.push_back(iovec_list.size());
+      iovec_list.push_back({nullptr, padding_length});
+      noncontent_index_list.push_back(0U);
+    }
     
     ssize_t total_record_bytes {FCGI_HEADER_LEN + current_record_content_length 
       + padding_length};
@@ -445,6 +457,14 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
     remaining_iovec -= 2 + (padding_length > 0);
     remaining_content_length -= current_record_content_length;
     std::advance(begin_iter, current_record_content_length);
+  }
+  // Relocate iovec_list.
+  for(std::vector<std::vector<std::uint8_t>::size_type>::size_type i {0}; 
+      i < iovec_relocation.size();
+      ++i)
+  {
+    iovec_list[iovec_relocation[i]].iov_base = 
+      &(noncontent_record_information[noncontent_index_list[i]]);
   }
   return std::make_tuple(std::move(noncontent_record_information), 
     std::move(iovec_list), number_to_write, begin_iter);

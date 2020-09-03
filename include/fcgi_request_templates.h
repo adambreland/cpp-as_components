@@ -1,8 +1,10 @@
-// Template definitions for fcgi_si::FCGIRequest. This file is included as
-// a template definition header by the FCGIRequest header.
+// Template definitions for fcgi_si::FcgiRequest. This file is included as
+// a template definition header by the FcgiRequest header.
 
 #ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 #define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+
+#include "include/fcgi_request.h"
 
 #include <sys/types.h>     // For ssize_t.
 #include <sys/uio.h>
@@ -13,15 +15,14 @@
 #include <utility>
 #include <vector>
 
-#include "include/fcgi_request.h"
 #include "include/protocol_constants.h"
 #include "include/utility.h"
 
 namespace fcgi_si {
 
 template<typename ByteIter>
-bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
-  FCGIType type)
+bool FcgiRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
+  FcgiType type)
 {
   if(completed_ || associated_interface_id_ == 0U)
     return false;
@@ -32,7 +33,7 @@ bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
     std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
       std::size_t, ByteIter> 
     partition_return {PartitionByteSequence(begin_iter, end_iter, 
-      type, request_identifier_.FCGI_id())};
+      type, request_identifier_.Fcgi_id())};
 
     write_success = ScatterGatherWriteHelper(
       std::get<1>(partition_return).data(),
@@ -46,15 +47,15 @@ bool FCGIRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
 }
 
 template<typename ByteIter>
-bool FCGIRequest::Write(ByteIter begin_iter, ByteIter end_iter)
+bool FcgiRequest::Write(ByteIter begin_iter, ByteIter end_iter)
 {
-  return WriteHelper(begin_iter, end_iter, FCGIType::kFCGI_STDOUT);
+  return WriteHelper(begin_iter, end_iter, FcgiType::kFCGI_STDOUT);
 }
 
 template<typename ByteIter>
-bool FCGIRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
+bool FcgiRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
 {
-  return WriteHelper(begin_iter, end_iter, FCGIType::kFCGI_STDERR);
+  return WriteHelper(begin_iter, end_iter, FcgiType::kFCGI_STDERR);
 }
 
 } // namespace fcgi_si

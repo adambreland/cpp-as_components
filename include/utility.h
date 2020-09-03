@@ -61,7 +61,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //            encoded.
 // type:      The FastCGI record type of the records to be generated from the
 //            sequence of name-value pairs.
-// FCGI_id:   The FastCGI identifier of the records to be generated from the
+// Fcgi_id:   The FastCGI identifier of the records to be generated from the
 //            sequence of name-value pairs.
 // offset:    A value used to indicate how many bytes have previously been
 //            encoded of the first name-value pair pointed to by pair_iter.
@@ -149,7 +149,7 @@ template<typename ByteSeqPairIter>
 std::tuple<bool, std::size_t, std::vector<struct iovec>, 
   std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
-  FCGIType type, std::uint16_t FCGI_id, std::size_t offset);
+  FcgiType type, std::uint16_t Fcgi_id, std::size_t offset);
 
 //    Attempts to extract a collection of name-value pair byte sequences when 
 // they are encoded as a sequence of bytes in the FastCGI name-value pair
@@ -228,7 +228,7 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 // end_iter:   An iterator to one-past-the-last byte of the byte sequence
 //             to be partitioned.
 // type:       The FastCGI record type to be used for the produced records.
-// FCGI_id:    The FastCGI request identifier to be used for the produced
+// Fcgi_id:    The FastCGI request identifier to be used for the produced
 //             records.
 //
 // Preconditions:
@@ -250,7 +250,7 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    contains an array which can be used in a call to writev. When written
 //    with a scatter-gather write, a sequence of FastCGI records is produced
 //    whose content is a prefix of [begin_iter, end_iter). The fixed
-//    information contained in the record headers is given by type and FCGI_id.
+//    information contained in the record headers is given by type and Fcgi_id.
 //        If begin_iter == end_iter, an empty (terminal) record is produced.
 // 2) Meaning of returned tuple elements:
 //       Access: std::get<0>; Type: std::vector<std::uint8_t>; A vector of
@@ -273,8 +273,8 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
-PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
-  std::uint16_t FCGI_id);
+PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
+  std::uint16_t Fcgi_id);
 
 // Generates a FastCGI header and writes it to the indicated buffer. The values
 // of the arguments are encoded per the FastCGI record header binary format.
@@ -283,7 +283,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
 // byte_ptr:       A pointer to the first byte of the buffer which will hold
 //                 the header.
 // type:           The FastCGI type of the record described by the header.
-// FCGI_id:        The FastCGI request identifier of the record described by
+// Fcgi_id:        The FastCGI request identifier of the record described by
 //                 the header.
 // content_length: The content length of the record described by the header.
 // padding_length: The padding length of the record described by the header.
@@ -302,8 +302,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FCGIType type,
 //    the same value for every header:
 //    a) The first byte is given the value FCGI_VERSION_1 which equals 1.
 //    b) The last byte, which is reserved by the FastCGI protocol, is zero.
-void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FCGIType type,
-  std::uint16_t FCGI_id, std::uint16_t content_length,
+void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FcgiType type,
+  std::uint16_t Fcgi_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept;
 
 //    Returns a vector of bytes which represents the integer argument in decimal 

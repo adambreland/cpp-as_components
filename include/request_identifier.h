@@ -17,7 +17,7 @@ public:
     return pair_.first;
   }
 
-  inline std::uint16_t FCGI_id() const noexcept
+  inline std::uint16_t Fcgi_id() const noexcept
   {
     return pair_.second;
   }
@@ -29,8 +29,8 @@ public:
   : pair_ {0, 0U}
   {}
 
-  inline RequestIdentifier(int descriptor, uint16_t FCGI_id) noexcept
-  : pair_ {descriptor, FCGI_id}
+  inline RequestIdentifier(int descriptor, uint16_t Fcgi_id) noexcept
+  : pair_ {descriptor, Fcgi_id}
   {}
 
   inline RequestIdentifier(const RequestIdentifier& request_id) noexcept

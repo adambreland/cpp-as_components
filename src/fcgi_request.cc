@@ -1,3 +1,5 @@
+#include "include/fcgi_request.h"
+
 #include <sys/select.h>
 #include <sys/time.h>           // For portable use of select.
 #include <sys/types.h>          // For ssize_t and portable use of select.
@@ -6,7 +8,6 @@
 
 #include <cerrno>
 #include <cstdint>
-
 #include <limits>
 #include <map>
 #include <memory>
@@ -19,7 +20,6 @@
 
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/fcgi_request.h"
 #include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
 #include "include/request_data.h"
@@ -33,7 +33,7 @@
 //          Requests are responsible for removing themselves from their
 //       interface. The interface will not remove an item from request_map_ if
 //       the associated request has been assigned to the application.
-//       ("Assignment" and FCGIRequest object construction are equivalent.)
+//       ("Assignment" and FcgiRequest object construction are equivalent.)
 //          Removal must occur when the request is no longer relevant to the
 //       interface. This occurs when:
 //       1) A call to Complete is made on the request.
@@ -75,7 +75,7 @@
 //          with a failure status as doing so would require writing an
 //          FCGI_END_REQUEST record on the corrupted connection.
 //             The shared application_closure_request_set_ of the request's
-//          FCGIServerInterface object is used to indicate that the connection
+//          FcgiServerInterface object is used to indicate that the connection
 //          should be closed in this case.
 //    c) Indicating that a connection is corrupt.
 //          When a request corrupts its connection from a partial write:
@@ -155,7 +155,7 @@
 //    a) Immediately after acquisition of interface_state_mutex_, a request
 //       must check if:
 //       1) Its interface has been destroyed. This is done by comparing the 
-//          value of FCGIServerInterface::interface_identifier_ to the value of
+//          value of FcgiServerInterface::interface_identifier_ to the value of
 //          associated_interface_id_.
 //       2) Its interface is in a bad state. This is done after the check for
 //          interface destruction by checking if 
@@ -175,8 +175,8 @@
 //       set.
 //    d) Acquisition of a write mutex may only occur when interface_state_mutex_
 //       is held.
-//       1) FCGIRequest objects are separate from their associated
-//          FCGIServerInterface object yet need to access state which belongs to
+//       1) FcgiRequest objects are separate from their associated
+//          FcgiServerInterface object yet need to access state which belongs to
 //          the interface. This means that the interface may be destroyed before
 //          one of its associated requests. In particular, write mutexes, which
 //          are part of the interface, may be destroyed while they are held by
@@ -203,25 +203,25 @@
 //      is held. Doing so may lead to deadlock.
 //
 // 3) Other disciplines:
-//    a) Only shared data members may be accessed by FCGIRequest. These data
+//    a) Only shared data members may be accessed by FcgiRequest. These data
 //       members must be accessed under mutex protection.
-//    b) The FCGIServerInterface data member write_mutex_map_ must not be
+//    b) The FcgiServerInterface data member write_mutex_map_ must not be
 //       accessed directly. A write mutex must only be accessed through an
-//       FCGIRequest object's write_mutex_ptr_. In other words, the mutexes are
-//       shared, but the map which stores them is not. FCGIServerInterface may
+//       FcgiRequest object's write_mutex_ptr_. In other words, the mutexes are
+//       shared, but the map which stores them is not. FcgiServerInterface may
 //       treat the map as a non-shared data member which locates shared objects.
-//    c) Of the methods of FCGIServerInterface, only RemoveRequest may be
+//    c) Of the methods of FcgiServerInterface, only RemoveRequest may be
 //       called. It must be called under mutex protection.
 //
 // 4) General implementation notes:
-//    a) The destructor of an FCGIRequest object acquires and releases
-//       FCGIServerInterface::interface_state_mutex_. This is not problematic
+//    a) The destructor of an FcgiRequest object acquires and releases
+//       FcgiServerInterface::interface_state_mutex_. This is not problematic
 //       when requests are destroyed within the scope of user code. It will
 //       lead to deadlock in implementation code if the destructor is executed
 //       in a scope which owns the interface mutex.
 //
 // 5) Discipline brief summary:
-//    a) Updating completed_ and was_aborted_ of an FCGIRequest object.
+//    a) Updating completed_ and was_aborted_ of an FcgiRequest object.
 //    b) Removing a request from the interface.
 //    c) Adding a connection to application_closure_request_set_.
 //    d) Marking a connection as corrupted.
@@ -230,12 +230,12 @@
 //    f) Marking the interface as corrupted.
 //    g) Obeying mutex acquisition and release rules.
 //    h) Not accessing private interface state or methods even though
-//       a pointer to the interface is available and FCGIRequest is a friend.
+//       a pointer to the interface is available and FcgiRequest is a friend.
 //    i) Terminating the program when invariants cannot be maintained.
 namespace fcgi_si {
 
 
-FCGIRequest::FCGIRequest()
+FcgiRequest::FcgiRequest()
 : associated_interface_id_         {0U},
   interface_ptr_                   {nullptr},
   request_identifier_              {RequestIdentifier {}},
@@ -253,14 +253,14 @@ FCGIRequest::FCGIRequest()
 {}
 
 // Implementation notes:
-// This constructor should only be called by an FCGIServerInterface object.
+// This constructor should only be called by an FcgiServerInterface object.
 //
 // Synchronization:
 // 1) It is assumed that interface_state_mutex_ is held prior to a call.
-FCGIRequest::FCGIRequest(
+FcgiRequest::FcgiRequest(
   RequestIdentifier request_id,
   unsigned long interface_id,
-  FCGIServerInterface* interface_ptr,
+  FcgiServerInterface* interface_ptr,
   RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr,
   bool* bad_connection_state_ptr,
@@ -285,7 +285,7 @@ FCGIRequest::FCGIRequest(
      || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
   {
     interface_ptr_->bad_interface_state_detected_ = true; 
-    throw std::logic_error {"An FCGIRequest could not be "
+    throw std::logic_error {"An FcgiRequest could not be "
       "constructed."};
   }
 
@@ -298,11 +298,11 @@ FCGIRequest::FCGIRequest(
   request_data_content_  = std::move(request_data_ptr->FCGI_DATA_);
   
   // Update the status of the RequestData object to reflect its use in the
-  // construction of an FCGIRequest which will be exposed to the application.
+  // construction of an FcgiRequest which will be exposed to the application.
   request_data_ptr_->request_status_ = RequestStatus::kRequestAssigned;
 }
 
-FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
+FcgiRequest::FcgiRequest(FcgiRequest&& request) noexcept
 : associated_interface_id_         {request.associated_interface_id_},
   interface_ptr_                   {request.interface_ptr_},
   request_identifier_              {request.request_identifier_},
@@ -334,13 +334,13 @@ FCGIRequest::FCGIRequest(FCGIRequest&& request) noexcept
   request.completed_ = false;
 }
 
-FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
+FcgiRequest& FcgiRequest::operator=(FcgiRequest&& request)
 {
   if(this != &request)
   {
     if(!(completed_ || associated_interface_id_ == 0))
       throw std::logic_error {"Move assignment would have occurred on an "
-        "FCGIRequest object which was not in a valid state to be moved to."};
+        "FcgiRequest object which was not in a valid state to be moved to."};
 
     associated_interface_id_ = request.associated_interface_id_;
     interface_ptr_ = request.interface_ptr_;
@@ -398,13 +398,13 @@ FCGIRequest& FCGIRequest::operator=(FCGIRequest&& request)
 //    b) Interface state could not be updated successfully. The
 //       bad_interface_state_detected_ flag of the interface was set.
 // 2) If the request was completed, the call had no effect.
-FCGIRequest::~FCGIRequest()
+FcgiRequest::~FcgiRequest()
 {
   if(!(completed_ || (associated_interface_id_ == 0U)))
   {
     // ACQUIRE interface_state_mutex_.
     std::unique_lock<std::mutex> interface_state_lock
-      {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+      {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
     try
     {
       interface_state_lock.lock();
@@ -415,7 +415,7 @@ FCGIRequest::~FCGIRequest()
       std::terminate();
     }
     // Check if the interface has not been destroyed and is not in a bad state.
-    if((FCGIServerInterface::interface_identifier_ == associated_interface_id_)
+    if((FcgiServerInterface::interface_identifier_ == associated_interface_id_)
        && (interface_ptr_->bad_interface_state_detected_ == false))
     {
       // Try to remove the request from the interface.
@@ -458,7 +458,7 @@ FCGIRequest::~FCGIRequest()
 // Implementation notes:
 // Synchronization:
 // 1) Acquires interface_state_mutex_.
-bool FCGIRequest::AbortStatus()
+bool FcgiRequest::AbortStatus()
 {
   if(completed_ || was_aborted_ || associated_interface_id_ == 0U)
     return was_aborted_;
@@ -466,22 +466,22 @@ bool FCGIRequest::AbortStatus()
   // The actual abort status is unknown if this point is reached.
   // ACQUIRE interface_state_mutex_ to determine current abort status.
   std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
+    {FcgiServerInterface::interface_state_mutex_};
   // Check if the interface has been destroyed.
-  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+  if(FcgiServerInterface::interface_identifier_ != associated_interface_id_)
   {
     completed_ = true;
     was_aborted_ = true;
-    throw std::runtime_error {"The FCGIServerInterface associated "
-      "with an FCGIRequest object was destroyed before the request."};
+    throw std::runtime_error {"The FcgiServerInterface associated "
+      "with an FcgiRequest object was destroyed before the request."};
   }
   // Check if the interface is in a bad state.
   if(interface_ptr_->bad_interface_state_detected_)
   {
     completed_ = true;
     was_aborted_ = true;
-    throw std::runtime_error {"The FCGIServerInterface associated "
-      "with an FCGIRequest object was in a bad state."};
+    throw std::runtime_error {"The FcgiServerInterface associated "
+      "with an FcgiRequest object was in a bad state."};
   }
   // Check if the connection has been closed by the interface.
   if(request_data_ptr_->connection_closed_by_interface_)
@@ -539,7 +539,7 @@ bool FCGIRequest::AbortStatus()
 //   In this scenario, an error on the part of the client can corrupt
 // interface state. Holding the interface mutex during the write prevents the
 // interface from spuriously validating an erroneous begin request record.
-bool FCGIRequest::EndRequestHelper(std::int32_t app_status, 
+bool FcgiRequest::EndRequestHelper(std::int32_t app_status, 
   std::uint8_t protocol_status)
 {
   if(completed_ || associated_interface_id_ == 0U)
@@ -550,14 +550,14 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   uint8_t header_and_end_content[seq_num][FCGI_HEADER_LEN];
 
   PopulateHeader(&header_and_end_content[0][0],
-    FCGIType::kFCGI_STDOUT,
-    request_identifier_.FCGI_id(), 0, 0);
+    FcgiType::kFCGI_STDOUT,
+    request_identifier_.Fcgi_id(), 0, 0);
   PopulateHeader(&header_and_end_content[1][0],
-    FCGIType::kFCGI_STDERR,
-    request_identifier_.FCGI_id(), 0, 0);
+    FcgiType::kFCGI_STDERR,
+    request_identifier_.Fcgi_id(), 0, 0);
   PopulateHeader(&header_and_end_content[2][0],
-    FCGIType::kFCGI_END_REQUEST,
-    request_identifier_.FCGI_id(), FCGI_HEADER_LEN, 0);
+    FcgiType::kFCGI_END_REQUEST,
+    request_identifier_.Fcgi_id(), FCGI_HEADER_LEN, 0);
 
   // Fill end request content.
   for(int i {0}; i < app_status_byte_length ; ++i)
@@ -576,7 +576,7 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   // update and to prevent race conditions between the client server and
   // the interface.
   std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
+    {FcgiServerInterface::interface_state_mutex_};
   if(!InterfaceStateCheckForWritingUponMutexAcquisition())
     return false;
 
@@ -584,7 +584,7 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
   bool write_return {ScatterGatherWriteHelper(iovec_wrapper, 1, number_to_write,
     true)};
 
-  // Update interface state and FCGIRequest state.
+  // Update interface state and FcgiRequest state.
   //
   // If write_return is false, ScatterGatherWriteHelper updated interface
   // state by removing the request. The descriptor does not need to be
@@ -644,8 +644,8 @@ bool FCGIRequest::EndRequestHelper(std::int32_t app_status,
 // 2) The interface associated with the request must be in a valid state.
 //
 // Synchronization: 
-// 1) FCGIServerInterface::interface_state_mutex_ must be held before a call.
-void FCGIRequest::InterfacePipeWrite()
+// 1) FcgiServerInterface::interface_state_mutex_ must be held before a call.
+void FcgiRequest::InterfacePipeWrite()
 {
   // Inform the interface that a connection closure was requested.
   std::uint8_t pipe_buff[1] = {0};
@@ -662,11 +662,11 @@ void FCGIRequest::InterfacePipeWrite()
 // Implementation notes:
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-bool FCGIRequest::
+bool FcgiRequest::
 InterfaceStateCheckForWritingUponMutexAcquisition()
 {
   // Check if the interface has been destroyed.
-  if(FCGIServerInterface::interface_identifier_ != associated_interface_id_)
+  if(FcgiServerInterface::interface_identifier_ != associated_interface_id_)
   {
     completed_   = true;
     was_aborted_ = true;
@@ -710,12 +710,12 @@ InterfaceStateCheckForWritingUponMutexAcquisition()
   return true;
 }
 
-bool FCGIRequest::
+bool FcgiRequest::
 ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   std::size_t number_to_write, bool interface_mutex_held)
 {
   std::unique_lock<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+    {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
 
   // write_lock has the following property in the loop below:
   // The mutex is always held when writing and, once some data has been written,
@@ -842,7 +842,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       // Note that the write mutex is not released once some data has been
       // written. As such, a throw from lock() does not risk corrupting
       // the connection.
-      // This is a case where a throw may occur but FCGIRequest object state
+      // This is a case where a throw may occur but FcgiRequest object state
       // is not updated.
       interface_state_lock.lock();
       if(!InterfaceStateCheckForWritingUponMutexAcquisition())
@@ -854,7 +854,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     {
       // As above, no data will have been written to the connection. A throw
       // from lock() does not risk connection corruption.
-      // This is a case where a throw may occur but FCGIRequest object state
+      // This is a case where a throw may occur but FcgiRequest object state
       // is not updated.
       write_lock.lock();
       if(*bad_connection_state_ptr_)

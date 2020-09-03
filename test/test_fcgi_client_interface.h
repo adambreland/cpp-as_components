@@ -11,9 +11,24 @@
 #include <memory>
 #include <vector>
 
+#include "external/id_manager/include/id_manager.h"
+
 #include "fcgi_si.h"
 
 namespace fcgi_si_test {
+
+using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
+
+struct FcgiRequest
+{
+  std::uint16_t       role;
+  bool                keep_conn;
+  const ParamsMap&    params_map;
+  const std::uint8_t* fcgi_stdin_ptr;
+  std::size_t         stdin_length;
+  const std::uint8_t* fcgi_data_ptr;
+  std::size_t         data_length;
+};
 
 class ServerEvent
 {
@@ -22,7 +37,12 @@ class ServerEvent
   virtual ~ServerEvent();
 };
 
-class LocalFcgiResponse : public ServerEvent
+class ConnectionClosure : public ServerEvent
+{
+
+};
+
+class FcgiResponse : public ServerEvent
 {
  public:
 
@@ -58,35 +78,27 @@ class OtherManagementResponse : public ServerEvent
 class TestFcgiClientInterface
 {
  public:
-  using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
-
   // 1) Detect the address domain, create a socket of the detected domain, and
   //    attempt to connect to the specified address and port pair.
   // 2) Return the file descriptor of the socket on success and -1 on failure.
-  int ConnectToServer(const char* address, std::uint16_t port);
+  int Connect(const char* address, std::uint16_t port);
 
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
   bool SendBinaryManagementRequest(int connection, const std::uint8_t* byte_ptr,
     std::size_t length);
 
-  struct FcgiRequest
-  {
-    std::uint16_t       role;
-    bool                keep_conn;
-    const ParamsMap&    params_map;
-    const std::uint8_t* fcgi_stdin_ptr;
-    std::size_t         stdin_length;
-    const std::uint8_t* fcgi_data_ptr;
-    std::size_t         data_length;
-  };
-
   fcgi_si::RequestIdentifier SendRequest(int connection, 
     const FcgiRequest& request);
   bool SendAbortRequest(fcgi_si::RequestIdentifier);
+  bool ReleaseId(fcgi_si::RequestIdentifier id);
+  bool ReleaseId(int connection);
 
   bool CloseConnection(int connection);
 
   std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
+
+ private:
+  std::map<int, a_component::IdManager> id_manager_map_;
 };
 
 } // fcgi_si_test

@@ -1,12 +1,11 @@
-// C standard library headers in the C++ standard library.
-#include <cstdint>         // For uint16_t.
+#include "include/request_data.h"
 
 #include <algorithm>
+#include <cstdint>         // For uint16_t.
 #include <map>
 #include <vector>
 
 #include "include/utility.h"
-#include "include/request_data.h"
 
 namespace fcgi_si {
 

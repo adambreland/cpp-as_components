@@ -1,3 +1,5 @@
+#include "include/fcgi_server_interface.h"
+
 #include <arpa/inet.h>    // For inet_pton() and inet_ntop().
 #include <fcntl.h>
 #include <netinet/in.h>   // Defines constants for use with inet_ntop().
@@ -21,7 +23,6 @@
 #include "external/socket_functions/include/socket_functions.h"
 
 #include "include/fcgi_request.h"
-#include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
 #include "include/record_status.h"
 #include "include/request_data.h"
@@ -90,12 +91,12 @@
 namespace fcgi_si {
 
 // Initialize static class data members.
-std::mutex FCGIServerInterface::interface_state_mutex_ {};
-unsigned long FCGIServerInterface::interface_identifier_ {0U};
-unsigned long FCGIServerInterface::previous_interface_identifier_ {0U};
+std::mutex FcgiServerInterface::interface_state_mutex_ {};
+unsigned long FcgiServerInterface::interface_identifier_ {0U};
+unsigned long FcgiServerInterface::previous_interface_identifier_ {0U};
 
-FCGIServerInterface::
-FCGIServerInterface(int listening_descriptor, int max_connections,
+FcgiServerInterface::
+FcgiServerInterface(int listening_descriptor, int max_connections,
   int max_requests, std::int32_t app_status_on_abort)
 : listening_descriptor_ {listening_descriptor},
   app_status_on_abort_ {app_status_on_abort},
@@ -166,7 +167,7 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
   }
   if(getsockopt_int_buffer != SOCK_STREAM)
     throw std::runtime_error {"The socket used for construction "
-      "of an FCGIServerInterface object was not a stream socket."};
+      "of an FcgiServerInterface object was not a stream socket."};
 
   getsockopt_int_buffer_size = sizeof(int);
   if(getsockopt(listening_descriptor_, SOL_SOCKET, SO_ACCEPTCONN,
@@ -177,14 +178,14 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
   }
   if(getsockopt_int_buffer != 1) // The value 1 indicates listening status.
     throw std::runtime_error {"The socket used for construction "
-      "of an FCGIServerInterface object\nwas not a listening socket."};
+      "of an FcgiServerInterface object\nwas not a listening socket."};
 
   // For internet domains, check for IP addresses which are deemed authorized.
   // If FCGI_WEB_SERVER_ADDRS is unbound or bound to an empty value, any
   // address is authorized. If no valid addresses are found after processing a
   // list, an error is thrown. Otherwise, a list of well-formed addresses which
   // have been converted to a normalized presentation format is stored in the
-  // FCGIServerInterface object.
+  // FcgiServerInterface object.
   if(socket_domain_ == AF_INET || socket_domain_ == AF_INET6)
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
@@ -239,7 +240,7 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
 
       if(!valid_ip_address_set_.size())
         throw std::runtime_error {"No authorized IP addresses "
-          "were found during construction of an FCGIServerInterface object."};
+          "were found during construction of an FcgiServerInterface object."};
     }
   }
 
@@ -247,10 +248,10 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
 
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
+    {FcgiServerInterface::interface_state_mutex_};
 
   if(interface_identifier_)
-    throw std::runtime_error {"Construction of an FCGIServerInterface object "
+    throw std::runtime_error {"Construction of an FcgiServerInterface object "
       "occurred when another object was present."};
 
   // Prevent interface_identifier_ == 0 when a valid interface is present in
@@ -287,7 +288,7 @@ FCGIServerInterface(int listening_descriptor, int max_connections,
   }
 } // RELEASE interface_state_mutex_.
 
-FCGIServerInterface::~FCGIServerInterface()
+FcgiServerInterface::~FcgiServerInterface()
 {
   // Any exception results in program termination.
   try
@@ -298,13 +299,13 @@ FCGIServerInterface::~FCGIServerInterface()
 
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock
-      {FCGIServerInterface::interface_state_mutex_};
+      {FcgiServerInterface::interface_state_mutex_};
     
     close(self_pipe_read_descriptor_);
     close(self_pipe_write_descriptor_);
 
     // ACQUIRE and RELEASE each write mutex. The usage discipline followed by
-    // FCGIRequest objects for write mutexes ensures that no write mutex will
+    // FcgiRequest objects for write mutexes ensures that no write mutex will
     // be held when the loop completes until the interface mutex is released.
     // Close all file descriptors for active sockets.
     for(auto write_mutex_iter {write_mutex_map_.begin()};
@@ -316,7 +317,7 @@ FCGIServerInterface::~FCGIServerInterface()
     }
 
     // Kill interface.
-    FCGIServerInterface::interface_identifier_ = 0U;
+    FcgiServerInterface::interface_identifier_ = 0U;
   } // RELEASE interface_state_mutex_.
   catch(...)
   {
@@ -324,7 +325,7 @@ FCGIServerInterface::~FCGIServerInterface()
   }
 }
 
-int FCGIServerInterface::AcceptConnection()
+int FcgiServerInterface::AcceptConnection()
 {
   // A local RAII class for the socket descriptor returned from a call to
   // accept.
@@ -533,7 +534,7 @@ int FCGIServerInterface::AcceptConnection()
   
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
+    {FcgiServerInterface::interface_state_mutex_};
 
   try
   {
@@ -558,7 +559,7 @@ int FCGIServerInterface::AcceptConnection()
   }
   catch(...)
   {
-    // Ensure that the original state of FCGIServerInterface is restored before
+    // Ensure that the original state of FcgiServerInterface is restored before
     // rethrowing. The flag can only be true if insertion occurred. If so, the
     // iterator is valid and the socket descriptor must be removed from the map.
     try
@@ -574,7 +575,7 @@ int FCGIServerInterface::AcceptConnection()
     {
       // Termination is necessary as a double closure may occur on the
       // descriptor. It will be called once on on exit and may be called
-      // in the desctructor of the FCGIServerInterface object.
+      // in the desctructor of the FcgiServerInterface object.
       std::terminate();
     }
     throw;
@@ -584,14 +585,14 @@ int FCGIServerInterface::AcceptConnection()
   return managed_descriptor.release_descriptor();
 } // RELEASE interface_state_mutex_.
 
-std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
+std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 {
   auto InterfaceCheck = [this]()->void
   {
     if(bad_interface_state_detected_)
       throw std::runtime_error {"The interface was found to be "
         "corrupt in a call to "
-        "fcgi_si::FCGIServerInterface::AcceptRequests."};
+        "fcgi_si::FcgiServerInterface::AcceptRequests."};
   };
   
   // Check for previously-created requests that could not be returned because
@@ -605,7 +606,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock 
-      {FCGIServerInterface::interface_state_mutex_};
+      {FcgiServerInterface::interface_state_mutex_};
     InterfaceCheck();
 
     // Remove dummy descriptors if possible.
@@ -628,7 +629,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 
       // The absence of requests allows closure of the descriptor.
       // Remember that RequestIdentifier is lexically ordered and that a
-      // request with an FCGI_id of zero is never added to request_map_.
+      // request with an Fcgi_id of zero is never added to request_map_.
       if(request_map_iter == request_map_.end() 
           || request_map_iter->first.descriptor() > *dds_iter)
       {
@@ -648,7 +649,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
           if(!request_count_map_.erase(connection_to_be_closed))
             throw std::logic_error {"An expected connection was not present "
               "in request_count_map_ during connection cleanup in a call "
-              "to fcgi_si::FCGIServerInterface::AcceptRequests."};
+              "to fcgi_si::FcgiServerInterface::AcceptRequests."};
 
           int close_return {close(connection_to_be_closed)};
           if(close_return == -1 && errno != EINTR)
@@ -688,7 +689,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     }
 
     // Close connection descriptors for which closure was requested.
-    // Update interface state to allow FCGIRequest objects to inspect for
+    // Update interface state to allow FcgiRequest objects to inspect for
     // connection closure. 
     //
     // Note that dummy_descriptor_set_ is disjoint from 
@@ -755,7 +756,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
       {
         // ACQUIRE interface_state_mutex_
         std::unique_lock<std::mutex> interface_state_lock
-          {FCGIServerInterface::interface_state_mutex_};
+          {FcgiServerInterface::interface_state_mutex_};
         bad_interface_state_detected_ = true;
       } // RELEASE interface_state_mutex_
       catch(...)
@@ -770,18 +771,18 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
   // Check if the interface was corrupted while it blocked on select.
   { // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock 
-      {FCGIServerInterface::interface_state_mutex_};
+      {FcgiServerInterface::interface_state_mutex_};
     InterfaceCheck();
   } // RELEASE interface_state_mutex_.
 
-  std::vector<FCGIRequest> requests {};
+  std::vector<FcgiRequest> requests {};
 
   // This list length variable is assigned to at the end of each iteration of
   // the below for loop. It allows the following case to be detected: 1) some
-  // FCGIRequest objects were added to requests in a loop iteration 2) a throw
+  // FcgiRequest objects were added to requests in a loop iteration 2) a throw
   // occurred in that iteration. In this case, length_at_loop and 
   // requests.size() will differ.
-  std::vector<FCGIRequest>::size_type length_at_loop {0U};
+  std::vector<FcgiRequest>::size_type length_at_loop {0U};
 
   // This variable allows the number of connected sockets read in the below
   // loop to be tracked so that a comparison of select_return and it determines
@@ -802,7 +803,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         ++it)
     {
       current_connection = it->first;
-      // Call ReadRecords and construct FCGIRequest objects for any application
+      // Call ReadRecords and construct FcgiRequest objects for any application
       // requests which are complete and ready to be passed to the application.
       if(FD_ISSET(current_connection, &read_set))
       {
@@ -813,7 +814,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
         {
           // ACQUIRE interface_state_mutex_.
           std::unique_lock<std::mutex> unique_interface_state_lock
-            {FCGIServerInterface::interface_state_mutex_};
+            {FcgiServerInterface::interface_state_mutex_};
           InterfaceCheck();
 
           std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator 
@@ -823,7 +824,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
             bad_interface_state_detected_ = true;
             throw std::logic_error {"An expected write mutex and flag pair "
               "was not present in write_mutex_map_ in a call to "
-              "fcgi_si::FCGIServerInterface::AcceptRequests."};
+              "fcgi_si::FcgiServerInterface::AcceptRequests."};
           }
           std::mutex* write_mutex_ptr 
             {write_mutex_map_iter->second.first.get()};
@@ -831,7 +832,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
             {&(write_mutex_map_iter->second.second)};
 
           // For each request_id, find the associated RequestData object, extract
-          // a pointer to it, and create an FCGIRequest object from it.
+          // a pointer to it, and create an FcgiRequest object from it.
           for(RequestIdentifier request_id : request_identifiers)
           {
             std::map<RequestIdentifier, RequestData>::iterator request_data_iter
@@ -841,16 +842,16 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
               bad_interface_state_detected_ = true;
               throw std::logic_error {"An expected request "
                 "was not present in request_map_ in a call to "
-                "fcgi_si::FCGIServerInterface::AcceptRequests."};
+                "fcgi_si::FcgiServerInterface::AcceptRequests."};
             }
             RequestData* request_data_ptr {&(request_data_iter->second)};
             
-            // This is a rare instance where an FCGIRequest may be destroyed
+            // This is a rare instance where an FcgiRequest may be destroyed
             // within the scope of implementation code. The destructor of
-            // FCGIRequest objects tries to acquire interface_state_mutex_.
+            // FcgiRequest objects tries to acquire interface_state_mutex_.
             // See the catch block immediately below.
-            FCGIRequest request {request_id,
-              FCGIServerInterface::interface_identifier_, this, 
+            FcgiRequest request {request_id,
+              FcgiServerInterface::interface_identifier_, this, 
               request_data_ptr, write_mutex_ptr, write_mutex_bad_state_ptr, 
               self_pipe_write_descriptor_};
             try
@@ -885,7 +886,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
       throw;
 
     std::unique_lock<std::mutex> unique_interface_state_lock
-        {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+        {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
     try
     {
       // We need to check if there is a point to try to preserve the request
@@ -903,7 +904,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
     {
       try
       {
-        for(std::vector<FCGIRequest>::size_type i {0}; i < length_at_loop; ++i)
+        for(std::vector<FcgiRequest>::size_type i {0}; i < length_at_loop; ++i)
           request_buffer_on_throw_.push_back(std::move(requests[i]));
       }
       catch(...)
@@ -932,7 +933,7 @@ std::vector<FCGIRequest> FCGIServerInterface::AcceptRequests()
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void FCGIServerInterface::AddRequest(RequestIdentifier request_id, 
+void FcgiServerInterface::AddRequest(RequestIdentifier request_id, 
   std::uint16_t role, bool close_connection)
 {
   std::map<int, int>::iterator request_count_iter {};
@@ -973,17 +974,17 @@ void FCGIServerInterface::AddRequest(RequestIdentifier request_id,
   }
 }
 
-bool FCGIServerInterface::interface_status() const
+bool FcgiServerInterface::interface_status() const
 {
   // ACQUIRE interface_state_mutex_.
   std::lock_guard<std::mutex> interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_};
+    {FcgiServerInterface::interface_state_mutex_};
   return !bad_interface_state_detected_;
 } // RELEASE interface_state_mutex_.
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-bool FCGIServerInterface::RemoveConnection(int connection)
+bool FcgiServerInterface::RemoveConnection(int connection)
 {
   // Care must be taken to prevent descriptor leaks or double closures.
 
@@ -1010,7 +1011,7 @@ bool FCGIServerInterface::RemoveConnection(int connection)
         throw std::logic_error {"An expected connection was not present in "
           "at least one of record_status_map_, write_mutex_map_, and "
           "request_count_map_ in a call to "
-          "fcgi_si::FCGIServerInterface::RemoveConnection."};
+          "fcgi_si::FcgiServerInterface::RemoveConnection."};
 
       record_status_map_.erase(record_iter);
       write_mutex_map_.erase(write_iter);
@@ -1084,7 +1085,7 @@ bool FCGIServerInterface::RemoveConnection(int connection)
   }
 }
 
-void FCGIServerInterface::
+void FcgiServerInterface::
 RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
 {
   try
@@ -1113,7 +1114,7 @@ RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-bool FCGIServerInterface::RequestCleanupDuringConnectionClosure(int connection)
+bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
 {
   try
   {
@@ -1149,8 +1150,8 @@ bool FCGIServerInterface::RequestCleanupDuringConnectionClosure(int connection)
   }
 }
 
-bool FCGIServerInterface::
-SendFCGIEndRequest(int connection, RequestIdentifier request_id,
+bool FcgiServerInterface::
+SendFcgiEndRequest(int connection, RequestIdentifier request_id,
   uint8_t protocol_status, int32_t app_status)
 {
   std::vector<uint8_t> result(16, 0U); // Allocate space for two bytes.
@@ -1163,8 +1164,8 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   }
 
   // Set header.
-  PopulateHeader(result.data(), FCGIType::kFCGI_END_REQUEST,
-    request_id.FCGI_id(), FCGI_HEADER_LEN, 0);
+  PopulateHeader(result.data(), FcgiType::kFCGI_END_REQUEST,
+    request_id.Fcgi_id(), FCGI_HEADER_LEN, 0);
   // Set body.
   for(int i {0}; i < 4; i++)
   {
@@ -1176,13 +1177,13 @@ SendFCGIEndRequest(int connection, RequestIdentifier request_id,
   return SendRecord(connection, result.data(), result.size());
 }
 
-bool FCGIServerInterface::
-SendFCGIUnknownType(int connection, FCGIType type)
+bool FcgiServerInterface::
+SendFcgiUnknownType(int connection, FcgiType type)
 {
   std::vector<uint8_t> result(16, 0U); // Allocate space for two bytes.
 
   // Set header.
-  PopulateHeader(result.data(), FCGIType::kFCGI_UNKNOWN_TYPE,
+  PopulateHeader(result.data(), FcgiType::kFCGI_UNKNOWN_TYPE,
     FCGI_NULL_REQUEST_ID, FCGI_HEADER_LEN, 0U);
   // Set body. (Only the first byte in the body is used.)
   result[1 + kHeaderReservedByteIndex] = static_cast<uint8_t>(type);
@@ -1191,7 +1192,7 @@ SendFCGIUnknownType(int connection, FCGIType type)
   return SendRecord(connection, result.data(), result.size());
 }
 
-bool FCGIServerInterface::
+bool FcgiServerInterface::
 SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
   std::int_fast32_t count)
 {
@@ -1298,7 +1299,7 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
     pad_length = 0;
   result.insert(result.end(), pad_length, 0);
   PopulateHeader(result.data(),
-    FCGIType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
+    FcgiType::kFCGI_GET_VALUES_RESULT, FCGI_NULL_REQUEST_ID,
     content_length, pad_length);
 
   return SendRecord(connection, result.data(), result.size());
@@ -1313,7 +1314,7 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
 // Non-blocking write mutex destruction combined with interface writes being
 // made by a separate thread would allow the interface thread to never block on
 // write mutex acquisition during normal operation.
-bool FCGIServerInterface::
+bool FcgiServerInterface::
 SendRecord(int connection, const std::uint8_t* buffer_ptr, 
   std::int_fast32_t count)
 {
@@ -1321,7 +1322,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     throw std::logic_error {"A negative value was provided for count."};
 
   std::unique_lock<std::mutex> unique_interface_state_lock
-    {FCGIServerInterface::interface_state_mutex_, std::defer_lock};
+    {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
 
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
     mutex_map_iter {write_mutex_map_.find(connection)};

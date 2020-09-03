@@ -12,11 +12,11 @@
 namespace fcgi_si {
 
 // RecordStatus objects are used as internal components of an
-// FCGIServerInterface object. A RecordStatus object represents the status of
+// FcgiServerInterface object. A RecordStatus object represents the status of
 // a FastCGI record as it is received over a socket connection. The method
 // ReadRecords updates interface state as records are received over the
 // connection. It produces a list of requests which are complete and ready to
-// be used to create an FCGIRequest object.
+// be used to create an FcgiRequest object.
 class RecordStatus {
 public:
 
@@ -24,7 +24,7 @@ public:
   // to be closed, or an error prevents further reading. While reading, FastCGI
   // records are validated and interface state is updated appropriately. On
   // normal exit, a list is returned of request identifiers. The identifiers
-  // indicate the requests which are ready to be used to create an FCGIRequest
+  // indicate the requests which are ready to be used to create an FcgiRequest
   // object.
   //
   // Parameters: none.
@@ -51,7 +51,7 @@ public:
   // Effects:
   // 1) Returns a list of request identifiers. This list may be empty. The
   //    presence of a request identifier indicates that the associated request
-  //    is complete and may be used to construct an FCGIRequest object to be
+  //    is complete and may be used to construct an FcgiRequest object to be
   //    passed to the application.
   // 2) The return of an empty list does not indicate an absence of side-
   //    effects. For example, interface state may have been updated to track
@@ -60,7 +60,7 @@ public:
   std::vector<RequestIdentifier> ReadRecords();
 
   RecordStatus() = default;
-  RecordStatus(int connection, FCGIServerInterface* interface_ptr);
+  RecordStatus(int connection, FcgiServerInterface* interface_ptr);
 
   // No copy.
   RecordStatus(const RecordStatus&) = delete;
@@ -98,7 +98,7 @@ private:
   //    Takes various actions depending on the type of the completed record and
   // returns either a non-null RequestIdentifier object or a null object
   // (RequestIdentifier {}). A non-null object indicates that the associated
-  // request is complete and ready to be used to construct an FCGIRequest
+  // request is complete and ready to be used to construct an FcgiRequest
   // object.
   //    Intended to be used within the implementation of ReadRecords.
   //
@@ -136,12 +136,12 @@ private:
   //    c) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
   // 3) Begin request record:
   //    a) A null RequestIdentifier object is returned. 
-  //    b) request_id_.FCGI_id() is made active.
+  //    b) request_id_.Fcgi_id() is made active.
   // 4) Abort record:
   //    a) A null RequestIdentifier object is returned.
   //    b) If the request of the record is present and has not been assigned, 
   //       the request is deleted, an FCGI_END_REQUEST record is sent to the 
-  //       client, and request_id_.FCGI_id() is made inactive. 
+  //       client, and request_id_.Fcgi_id() is made inactive. 
   //       1) The protocolStatus field of the FCGI_END_REQUEST record is set to 
   //          FCGI_REQUEST_COMPLETE (0). 
   //       2) The appStatus field of the record is equal to
@@ -231,7 +231,7 @@ private:
   // The value zero is used for type_ as no FastCGI record has this value as a
   // type. This is appropriate as no record identity has yet been assigned to
   // the RecordStatus object.
-  FCGIType type_ {static_cast<FCGIType>(0U)};
+  FcgiType type_ {static_cast<FcgiType>(0U)};
   RequestIdentifier request_id_ {};
 
   // When the header is completed, the record is either rejected or
@@ -246,7 +246,7 @@ private:
   // an associated application request in which to store the content.
   std::vector<std::uint8_t> local_record_content_buffer_ {};
 
-  FCGIServerInterface* i_ptr_;
+  FcgiServerInterface* i_ptr_;
 };
 
 } // namespace fcgi_si

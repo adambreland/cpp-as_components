@@ -61,7 +61,7 @@ constexpr std::int_fast32_t            kNameValuePairFourByteLength   {(1LU << 3
 constexpr std::int_fast32_t            kMaxRecordContentByteLength    {(1LU << 16) - 1};
 
 // Enum class for header type values.
-enum class FCGIType : std::uint8_t
+enum class FcgiType : std::uint8_t
 {
   kFCGI_BEGIN_REQUEST     = 1,       // From client.
   kFCGI_ABORT_REQUEST     = 2,       // From client.

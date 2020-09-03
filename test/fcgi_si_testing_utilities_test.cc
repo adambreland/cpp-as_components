@@ -1,3 +1,5 @@
+#include "test/fcgi_si_testing_utilities.h"
+
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -9,7 +11,6 @@
 
 #include "include/protocol_constants.h"
 #include "include/utility.h"
-#include "test/fcgi_si_testing_utilities.h"
 
 TEST(Utility, ExtractContent)
 {
@@ -92,7 +93,7 @@ TEST(Utility, ExtractContent)
       break;
     
     std::uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(local_header, fcgi_si::FCGIType::kFCGI_DATA,
+    fcgi_si::PopulateHeader(local_header, fcgi_si::FcgiType::kFCGI_DATA,
       1, 0, 0);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(local_header),
@@ -110,7 +111,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -140,7 +141,7 @@ TEST(Utility, ExtractContent)
     // Populate an FCGI_BEGIN_REQUEST record.
     std::uint8_t record[2*fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(record,
-      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, std::uint16_t(-1), 
+      fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, std::uint16_t(-1), 
       fcgi_si::FCGI_HEADER_LEN, 0);
     // The second set of eight bytes (FCGI_HEADER_LEN) is zero except for
     // the low-order byte of the role.
@@ -161,7 +162,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, std::uint16_t(-1))};
+      fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, std::uint16_t(-1))};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -190,7 +191,7 @@ TEST(Utility, ExtractContent)
     // Populate an FCGI_BEGIN_REQUEST record.
     std::uint8_t record[fcgi_si::FCGI_HEADER_LEN + 4] = {};
     fcgi_si::PopulateHeader(record,
-      fcgi_si::FCGIType::kFCGI_PARAMS, 0, 4,
+      fcgi_si::FcgiType::kFCGI_PARAMS, 0, 4,
       0);
     // The second set of eight bytes (FCGI_HEADER_LEN) is zero except for
     // the low-order byte of the role.
@@ -213,7 +214,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_PARAMS, 0)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, 0)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -240,7 +241,7 @@ TEST(Utility, ExtractContent)
       break;
     
     std::uint8_t record[2*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 10, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 10, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]     = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1] = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2] = 3;
@@ -263,7 +264,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 10)};
+      fcgi_si::FcgiType::kFCGI_DATA, 10)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -292,7 +293,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[3*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 10, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 10, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]     = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1] = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2] = 3;
@@ -300,7 +301,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4] = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 10, 0, 0);
+      fcgi_si::FcgiType::kFCGI_DATA, 10, 0, 0);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       3*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -317,7 +318,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 10)};
+      fcgi_si::FcgiType::kFCGI_DATA, 10)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -346,7 +347,7 @@ TEST(Utility, ExtractContent)
       break;
     
     std::uint8_t record[6*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -354,7 +355,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -362,7 +363,7 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
@@ -384,7 +385,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result))  <<
@@ -411,7 +412,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -419,7 +420,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -427,14 +428,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 0, 0);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -451,7 +452,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_TRUE(std::get<1>(extract_content_result)) <<
@@ -484,7 +485,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto result {fcgi_si_test::ExtractContent(file_descriptor_limit + 1000,
-      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, 1)};
+      fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, 1)};
     EXPECT_FALSE(std::get<0>(result));
     close(file_descriptor_limit);
   } while(false);
@@ -496,7 +497,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -504,7 +505,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_PARAMS, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_PARAMS, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -512,14 +513,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 0, 0);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -536,7 +537,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -564,7 +565,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -572,7 +573,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 2, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 2, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -580,14 +581,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 0, 0);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 0, 0);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -604,7 +605,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -632,7 +633,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_PARAMS, 1, 50, 6);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_PARAMS, 1, 50, 6);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -649,7 +650,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_PARAMS, 1)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -678,7 +679,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -686,7 +687,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -694,14 +695,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 38, 2);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 38, 2);
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
       7*fcgi_si::FCGI_HEADER_LEN)) == -1 && errno == EINTR)
@@ -718,7 +719,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -747,7 +748,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[6*fcgi_si::FCGI_HEADER_LEN + 3];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -755,7 +756,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -763,7 +764,7 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
@@ -773,7 +774,7 @@ TEST(Utility, ExtractContent)
     record[6*fcgi_si::FCGI_HEADER_LEN + fcgi_si::kHeaderVersionIndex]     =
       fcgi_si::FCGI_VERSION_1;
     record[6*fcgi_si::FCGI_HEADER_LEN + fcgi_si::kHeaderTypeIndex]        =
-      static_cast<std::uint8_t>(fcgi_si::FCGIType::kFCGI_DATA);
+      static_cast<std::uint8_t>(fcgi_si::FcgiType::kFCGI_DATA);
     record[6*fcgi_si::FCGI_HEADER_LEN + fcgi_si::kHeaderRequestIDB1Index] =
       0;
     ssize_t write_return {write(temp_fd, static_cast<void*>(record),
@@ -790,7 +791,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -819,7 +820,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 1];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -827,7 +828,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -835,14 +836,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 50, 6);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 50, 6);
     record[7*fcgi_si::FCGI_HEADER_LEN]     = 16;
     ssize_t write_return {0};
     while((write_return = write(temp_fd, static_cast<void*>(record),
@@ -860,7 +861,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<
@@ -889,7 +890,7 @@ TEST(Utility, ExtractContent)
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 5];
-    fcgi_si::PopulateHeader(record, fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[fcgi_si::FCGI_HEADER_LEN]       = 1;
     record[fcgi_si::FCGI_HEADER_LEN + 1]   = 2;
     record[fcgi_si::FCGI_HEADER_LEN + 2]   = 3;
@@ -897,7 +898,7 @@ TEST(Utility, ExtractContent)
     record[fcgi_si::FCGI_HEADER_LEN + 4]   = 5;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 2*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[3*fcgi_si::FCGI_HEADER_LEN]     = 6;
     record[3*fcgi_si::FCGI_HEADER_LEN + 1] = 7;
     record[3*fcgi_si::FCGI_HEADER_LEN + 2] = 8;
@@ -905,14 +906,14 @@ TEST(Utility, ExtractContent)
     record[3*fcgi_si::FCGI_HEADER_LEN + 4] = 10;
     // Padding was uninitialized.
     fcgi_si::PopulateHeader(record + 4*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[5*fcgi_si::FCGI_HEADER_LEN]     = 11;
     record[5*fcgi_si::FCGI_HEADER_LEN + 1] = 12;
     record[5*fcgi_si::FCGI_HEADER_LEN + 2] = 13;
     record[5*fcgi_si::FCGI_HEADER_LEN + 3] = 14;
     record[5*fcgi_si::FCGI_HEADER_LEN + 4] = 15;
     fcgi_si::PopulateHeader(record + 6*fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_DATA, 1, 5, 3);
+      fcgi_si::FcgiType::kFCGI_DATA, 1, 5, 3);
     record[7*fcgi_si::FCGI_HEADER_LEN]     = 16;
     record[7*fcgi_si::FCGI_HEADER_LEN + 1] = 17;
     record[7*fcgi_si::FCGI_HEADER_LEN + 2] = 18;
@@ -934,7 +935,7 @@ TEST(Utility, ExtractContent)
       break;
     }
     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FCGIType::kFCGI_DATA, 1)};
+      fcgi_si::FcgiType::kFCGI_DATA, 1)};
     if(std::get<0>(extract_content_result))
     {
       EXPECT_FALSE(std::get<1>(extract_content_result)) <<

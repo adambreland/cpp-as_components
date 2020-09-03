@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
+#include <set>
 #include <tuple>
 #include <vector>
 
@@ -91,7 +92,7 @@ bool PrepareTemporaryFile(int descriptor);
 //    b) a record with a zero content length
 //    c) the end of the file.
 std::tuple<bool, bool, bool, bool, std::vector<std::uint8_t>>
-ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id);
+ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id);
 
 class FileDescriptorLeakChecker
 {

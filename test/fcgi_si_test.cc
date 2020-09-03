@@ -1,3 +1,5 @@
+#include "fcgi_si.h"
+
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -28,7 +30,6 @@
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "fcgi_si.h"
 #include "test/fcgi_si_testing_utilities.h"
 #include "external/socket_functions/include/socket_functions.h"
 
@@ -108,7 +109,7 @@ void GTestCheckAndReportDescriptorLeaks(
 //
 // Exceptions:
 // 1) Throws any exceptions thrown by the constructor of
-//    fcgi_si::FCGIServerInterface. 
+//    fcgi_si::FcgiServerInterface. 
 //    a) The interface socket file descriptor was closed.
 //    b) The pointer to the interface is null.
 // 2) Throws std::system_error if a file for a UNIX socket was created and it
@@ -145,10 +146,10 @@ struct InterfaceCreationArguments
   const char* unix_path;
 };
 
-std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
 CreateInterface(struct InterfaceCreationArguments args)
 {
-  std::unique_ptr<fcgi_si::FCGIServerInterface> interface_uptr {};
+  std::unique_ptr<fcgi_si::FcgiServerInterface> interface_uptr {};
   if((args.domain == AF_UNIX) && !args.unix_path)
     return std::make_tuple(std::move(interface_uptr), -1, 0U);
   int socket_fd {socket(args.domain, SOCK_STREAM, 0)};
@@ -157,7 +158,7 @@ CreateInterface(struct InterfaceCreationArguments args)
   auto CleanupForFailure = [&interface_uptr, &unix_socket_bound, socket_fd, 
     &args]
     (std::string message, int errno_value)->
-      std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+      std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
   {
     if(errno_value)
       ADD_FAILURE() << message << '\n' << std::strerror(errno_value);
@@ -236,8 +237,8 @@ CreateInterface(struct InterfaceCreationArguments args)
 
   try
   {
-    interface_uptr = std::unique_ptr<fcgi_si::FCGIServerInterface> 
-      {new fcgi_si::FCGIServerInterface {socket_fd, args.max_connections, 
+    interface_uptr = std::unique_ptr<fcgi_si::FcgiServerInterface> 
+      {new fcgi_si::FcgiServerInterface {socket_fd, args.max_connections, 
         args.max_requests, args.app_status}};
   }
   catch(...)
@@ -259,7 +260,7 @@ CreateInterface(struct InterfaceCreationArguments args)
 
 // This class creates an interface with the parameters provided in inter_args.
 // client_number sockets are created and connected to the interface. These
-// sockets are made non-blocking to facilitate testing FCGIServerInterface
+// sockets are made non-blocking to facilitate testing FcgiServerInterface
 // and related classes using a single process.
 //
 // The client socket descriptors, the interface, and interface information
@@ -271,7 +272,7 @@ CreateInterface(struct InterfaceCreationArguments args)
 class SingleProcessInterfaceAndClients
 {
  public:
-  inline fcgi_si::FCGIServerInterface& interface()
+  inline fcgi_si::FcgiServerInterface& interface()
   {
     return *std::get<0>(inter_tuple_);
   }
@@ -321,7 +322,7 @@ class SingleProcessInterfaceAndClients
   void CleanUp();
 
   struct InterfaceCreationArguments inter_args_;
-  std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
   inter_tuple_;
   struct sockaddr* interface_addr_ptr_;
   socklen_t socket_addr_length_;
@@ -532,7 +533,7 @@ SingleProcessInterfaceAndClients(
 
                           ////// Tests //////
 
-TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
+TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
   // Testing explanation
   // Examined properties:
@@ -611,7 +612,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // Leak checker
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
-  auto ClearFCGIWebServerAddrs = []()->void
+  auto ClearFcgiWebServerAddrs = []()->void
   {
     if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
       FAIL() << "setenv failed" << '\n' << std::strerror(errno);
@@ -619,7 +620,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 
   // Ensure that FCGI_WEB_SERVER_ADDRS is bound and empty to establish a
   // consistent start state.
-  ClearFCGIWebServerAddrs();
+  ClearFcgiWebServerAddrs();
 
   // Case 1: listening_descriptor refers to a file which is not a socket.
   // Create a temporary regular file.
@@ -627,7 +628,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     int temp_fd {};
     // BAZEL DEPENDENCY
     fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
-    EXPECT_THROW(fcgi_si::FCGIServerInterface(temp_fd, 1, 1), std::exception);
+    EXPECT_THROW(fcgi_si::FcgiServerInterface(temp_fd, 1, 1), std::exception);
     close(temp_fd);
   }
 
@@ -655,7 +656,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       }
       else
       {
-        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+        EXPECT_THROW(fcgi_si::FcgiServerInterface(socket_fd, 1, 1),
           std::exception);
         close(socket_fd);
       }
@@ -687,15 +688,15 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       }
       else
       {
-        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+        EXPECT_THROW(fcgi_si::FcgiServerInterface(socket_fd, 1, 1),
           std::exception);
         close(socket_fd);
       }
     }
   }
 
-  auto FCGIWebServerAddrsCase = 
-    [&ClearFCGIWebServerAddrs](const char* address_list_ptr, int domain, 
+  auto FcgiWebServerAddrsCase = 
+    [&ClearFcgiWebServerAddrs](const char* address_list_ptr, int domain, 
       int test_case)->void
   {
     std::string case_suffix {CaseSuffix(test_case)};
@@ -710,7 +711,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       {
         ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
           << std::strerror(errno);
-        ClearFCGIWebServerAddrs();
+        ClearFcgiWebServerAddrs();
       }
       else
       {
@@ -719,14 +720,14 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
           ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n'
             << std::strerror(errno);
           close(socket_fd);
-          ClearFCGIWebServerAddrs();
+          ClearFcgiWebServerAddrs();
         }
         else
         {
-          EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1),
+          EXPECT_THROW(fcgi_si::FcgiServerInterface(socket_fd, 1, 1),
             std::exception);
           close(socket_fd);
-          ClearFCGIWebServerAddrs();
+          ClearFcgiWebServerAddrs();
         }
       }
     }
@@ -734,18 +735,18 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 
   // Case 4: The socket is of domain AF_INET and only IPv6 addresses are
   // present.
-  FCGIWebServerAddrsCase("::1", AF_INET, 4);
+  FcgiWebServerAddrsCase("::1", AF_INET, 4);
 
   // Case 5: The socket is of domain AF_INET6 and only IPv4 addresses are
   // present.
-  FCGIWebServerAddrsCase("127.0.0.1", AF_INET6, 5);
+  FcgiWebServerAddrsCase("127.0.0.1", AF_INET6, 5);
   
   // Case 6: The socket is of domain AF_INET and a combination of invalid IPv4
   // addresses and valid IPv6 addresses are present. "Invalid" means malformed.
-  FCGIWebServerAddrsCase("::,127.0.0.256,::1,0.0.0.0.0", AF_INET, 6);
+  FcgiWebServerAddrsCase("::,127.0.0.256,::1,0.0.0.0.0", AF_INET, 6);
 
   // Case 7: The socket is of domain AF_INET and only a comma is present.
-  FCGIWebServerAddrsCase(",", AF_INET, 7);
+  FcgiWebServerAddrsCase(",", AF_INET, 7);
 
   auto MaxConnectionsMaxRequestsCase = [](int max_connections,
     int max_requests, int test_case)->void
@@ -768,7 +769,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       }
       else
       {
-        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, max_connections, 
+        EXPECT_THROW(fcgi_si::FcgiServerInterface(socket_fd, max_connections, 
           max_requests), std::exception);
         close(socket_fd);
       }
@@ -806,8 +807,8 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       }
       else
       {
-        fcgi_si::FCGIServerInterface interface {socket_fd, 1, 1};
-        EXPECT_THROW(fcgi_si::FCGIServerInterface(socket_fd, 1, 1), 
+        fcgi_si::FcgiServerInterface interface {socket_fd, 1, 1};
+        EXPECT_THROW(fcgi_si::FcgiServerInterface(socket_fd, 1, 1), 
           std::exception);
         close(socket_fd);
       }
@@ -822,7 +823,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   {
     EXPECT_NO_THROW(
     {
-      fcgi_si::FCGIServerInterface interface(socket_fd, max_connections,
+      fcgi_si::FcgiServerInterface interface(socket_fd, max_connections,
         max_requests, app_status_on_abort);
       int f_getfl_return {fcntl(socket_fd, F_GETFL)};
       if(f_getfl_return == -1)
@@ -887,14 +888,14 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       ValidSocketCase(AF_INET, 1, 1, EXIT_FAILURE, 13);
-      ClearFCGIWebServerAddrs();
+      ClearFcgiWebServerAddrs();
     }
   }
 
   // Case 14: FCGI_WEB_SERVER_ADDRS is bound and empty. The descriptor is a
   // valid socket.
   {
-    ClearFCGIWebServerAddrs();
+    ClearFcgiWebServerAddrs();
     ValidSocketCase(AF_INET, 1, 1, EXIT_FAILURE, 14);
   }
 
@@ -966,7 +967,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       UnixValidSocketCase(16);
-      ClearFCGIWebServerAddrs();
+      ClearFcgiWebServerAddrs();
     }
   }
 
@@ -979,7 +980,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       UnixValidSocketCase(17);
-      ClearFCGIWebServerAddrs();
+      ClearFcgiWebServerAddrs();
     }
   }
 
@@ -988,7 +989,7 @@ TEST(FCGIServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     "ConstructionExceptionsAndDirectlyObservableEffects");
 }
 
-TEST(FCGIServerInterface, FCGIGetValues)
+TEST(FcgiServerInterface, FcgiGetValues)
 {
   // Testing explanation
   //    The FastCGI protocol requires applications to respond to
@@ -1051,7 +1052,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     std::size_t number_to_write;
   };
 
-  auto FCGIGetValuesTest = [](ScatterGatherSocketWriteArgs a,
+  auto FcgiGetValuesTest = [](ScatterGatherSocketWriteArgs a,
     const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
       expected_result, int test_case)->void
   {
@@ -1089,7 +1090,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
 
     // Allow the interface to process the FCGI_GET_VALUES request (record).
     alarm(1U);
-    std::vector<fcgi_si::FCGIRequest> get_values_accept_return 
+    std::vector<fcgi_si::FcgiRequest> get_values_accept_return 
       {spiac.interface().AcceptRequests()};
     alarm(0U);
     if(get_values_accept_return.size())
@@ -1128,7 +1129,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
 
     if((returned_result.size() < fcgi_si::FCGI_HEADER_LEN) || 
        (returned_result[1] != static_cast<std::uint8_t>(
-         fcgi_si::FCGIType::kFCGI_GET_VALUES_RESULT)))
+         fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT)))
     {
       ADD_FAILURE() << "The output from the interface was formatted "
         "incorrectly in" << case_suffix;
@@ -1183,7 +1184,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
   // Case 1: Empty FCGI_GET_VALUES record
   {
     std::uint8_t header[fcgi_si::FCGI_HEADER_LEN];
-      fcgi_si::PopulateHeader(header, fcgi_si::FCGIType::kFCGI_GET_VALUES,
+      fcgi_si::PopulateHeader(header, fcgi_si::FcgiType::kFCGI_GET_VALUES,
         0U, 0U, 0U);
     struct iovec iovec_array[1] = {};
     iovec_array[0].iov_base = &header;
@@ -1193,10 +1194,10 @@ TEST(FCGIServerInterface, FCGIGetValues)
     args.iovec_count     = 1;
     args.number_to_write = fcgi_si::FCGI_HEADER_LEN;
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> pair_map {};
-    FCGIGetValuesTest(args, pair_map, 1);
+    FcgiGetValuesTest(args, pair_map, 1);
   }
   
-  auto TestCaseRunner = [&FCGIGetValuesTest](pair_vector input_pairs, 
+  auto TestCaseRunner = [&FcgiGetValuesTest](pair_vector input_pairs, 
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> input_map,
     int test_case)
   {
@@ -1204,7 +1205,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
       std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
     returned_encoding_information {fcgi_si::EncodeNameValuePairs(
       input_pairs.begin(), input_pairs.end(), 
-      fcgi_si::FCGIType::kFCGI_GET_VALUES, 0U, 0U)};
+      fcgi_si::FcgiType::kFCGI_GET_VALUES, 0U, 0U)};
     if((!std::get<0>(returned_encoding_information))      || 
        (std::get<4>(returned_encoding_information) != 0U) || 
        (std::get<5>(returned_encoding_information) != input_pairs.end()))
@@ -1218,7 +1219,7 @@ TEST(FCGIServerInterface, FCGIGetValues)
     args.iovec_count     = std::get<2>(returned_encoding_information).size();
     args.number_to_write = std::get<1>(returned_encoding_information);
 
-    FCGIGetValuesTest(args, input_map, test_case);
+    FcgiGetValuesTest(args, input_map, test_case);
   };
 
   // Case 2: Only known names. All three known names.
@@ -1325,10 +1326,10 @@ TEST(FCGIServerInterface, FCGIGetValues)
     TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 8);
   }
 
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "FCGIGetValues");
+  GTestCheckAndReportDescriptorLeaks(&fdlc, "FcgiGetValues");
 }
 
-TEST(FCGIServerInterface, UnknownManagementRequests)
+TEST(FcgiServerInterface, UnknownManagementRequests)
 {
   // Testing explanation
   // This test examines the behavior of a new interface to unknown management
@@ -1364,7 +1365,7 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
 
   auto UnknownManagementRecordTester = [](
     struct InterfaceCreationArguments args, std::uint8_t* buffer_ptr,
-    std::size_t count, fcgi_si::FCGIType type, int test_case)->void
+    std::size_t count, fcgi_si::FcgiType type, int test_case)->void
   {
     std::string case_suffix {CaseSuffix(test_case)};
     try
@@ -1396,7 +1397,7 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
       EXPECT_EQ(1U, read_buffer[0]) << "The FastCGI protocol version was "
         "incorrect in the response in" << case_suffix;
       EXPECT_EQ(read_buffer[fcgi_si::kHeaderTypeIndex], 
-        static_cast<std::uint8_t>(fcgi_si::FCGIType::kFCGI_UNKNOWN_TYPE)) <<
+        static_cast<std::uint8_t>(fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE)) <<
         "The type was not equal to FCGI_UNKNOWN_TYPE in" << case_suffix;
       EXPECT_EQ(0, (std::int_fast32_t(
         read_buffer[fcgi_si::kHeaderRequestIDB1Index]) << 8) + 
@@ -1456,10 +1457,10 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.unix_path       = nullptr;
     
     std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(header, fcgi_si::FCGIType::kFCGI_STDIN,
+    fcgi_si::PopulateHeader(header, fcgi_si::FcgiType::kFCGI_STDIN,
       0U, 0U, 0U);
     UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN, 
-    fcgi_si::FCGIType::kFCGI_STDIN, 1);
+    fcgi_si::FcgiType::kFCGI_STDIN, 1);
   }
 
   // Case 2: The management request type has value 25. No content is present.
@@ -1473,10 +1474,10 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.unix_path       = nullptr;
 
     std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(25),
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FcgiType>(25),
       0U, 0U, 0U);
     UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN, 
-    static_cast<fcgi_si::FCGIType>(25), 2);
+    static_cast<fcgi_si::FcgiType>(25), 2);
   }
 
   // Case 3: The management request type has value 100. A body of bytes where
@@ -1492,11 +1493,11 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.unix_path       = nullptr;
 
     std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FcgiType>(100),
       0U, fcgi_si::FCGI_HEADER_LEN, 0U);
     std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, fcgi_si::FCGI_HEADER_LEN);
     UnknownManagementRecordTester(args, header, 2 * fcgi_si::FCGI_HEADER_LEN, 
-    static_cast<fcgi_si::FCGIType>(100) , 3);
+    static_cast<fcgi_si::FcgiType>(100) , 3);
   }
 
   // Case 4: As in 3, but the content is not aligned on an 8-byte boundary and
@@ -1511,11 +1512,11 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.unix_path       = nullptr;
 
     std::uint8_t header[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FcgiType>(100),
       0U, 3U, 5U);
     std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, 3);
     UnknownManagementRecordTester(args, header, 2 * fcgi_si::FCGI_HEADER_LEN, 
-    static_cast<fcgi_si::FCGIType>(100) , 4);
+    static_cast<fcgi_si::FcgiType>(100) , 4);
   }
 
   // Case 5: As in 3, but content is not aligned on an 8-byte boundary and no
@@ -1530,11 +1531,11 @@ TEST(FCGIServerInterface, UnknownManagementRequests)
     args.unix_path       = nullptr;
 
     std::uint8_t header[fcgi_si::FCGI_HEADER_LEN + 3U] = {};
-    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FCGIType>(100),
+    fcgi_si::PopulateHeader(header, static_cast<fcgi_si::FcgiType>(100),
       0U, 3U, 0U);
     std::memset(header + fcgi_si::FCGI_HEADER_LEN, 1, 3);
     UnknownManagementRecordTester(args, header, fcgi_si::FCGI_HEADER_LEN + 3, 
-    static_cast<fcgi_si::FCGIType>(100) , 5);
+    static_cast<fcgi_si::FcgiType>(100) , 5);
   }
 
   GTestCheckAndReportDescriptorLeaks(&fdlc, "UnknownManagementRequests");
@@ -1595,7 +1596,7 @@ class ConnectionAcceptanceAndRejectionTest
 
   // Resource information for conditional deallocation:
   int socket_pair_array_[2] = {-1, -1};
-  std::tuple<std::unique_ptr<fcgi_si::FCGIServerInterface>, int, in_port_t>
+  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
   inter_tuple_ {};
 };
 
@@ -1946,7 +1947,7 @@ RunTest()
       return;     
     }
     // Allow the interface to process the connection.
-    std::vector<fcgi_si::FCGIRequest> result {};
+    std::vector<fcgi_si::FcgiRequest> result {};
     const char* exception_message {"An exception was caught when "
       "AcceptRequests was called in"};
     alarm(1U); // If AcceptRequests blocks, kill the process quickly.
@@ -1970,7 +1971,7 @@ RunTest()
     alarm(0U);
     if(result.size())
     {
-      ADD_FAILURE() << "An FCGIRequest object was returned when none was "
+      ADD_FAILURE() << "An FcgiRequest object was returned when none was "
         "expected in" << case_suffix_;
       return;
     } 
@@ -2036,10 +2037,10 @@ RunTest()
 
 } // namespace
 
-TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
+TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
 {
   // Testing explanation
-  //    This test examines the behavior of a newly-created FCGIServerInterface
+  //    This test examines the behavior of a newly-created FcgiServerInterface
   // in relation to accepting and rejecting connections. No FastCGI requests
   // are made of the interfaces constructed in this test.
   //
@@ -2261,7 +2262,7 @@ TEST(FCGIServerInterface, ConnectionAcceptanceAndRejection)
   GTestFatalRestoreSignal(SIGPIPE);
 }
 
-TEST(FCGIServerInterface, FCGIRequestGeneration)
+TEST(FcgiServerInterface, FcgiRequestGeneration)
 {
   // Testing explanation
   //  
@@ -2416,7 +2417,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
   struct RequestData
   {
-    std::uint16_t FCGI_id;
+    std::uint16_t Fcgi_id;
     std::uint16_t role;
     std::map<std::vector<uint8_t>, std::vector<uint8_t>> fcgi_params;
     std::vector<std::uint8_t> fcgi_stdin;
@@ -2424,11 +2425,11 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     bool fcgi_keep_conn;
   };
 
-  auto RequestInspector = [](const fcgi_si::FCGIRequest& output, 
+  auto RequestInspector = [](const fcgi_si::FcgiRequest& output, 
     const struct RequestData& input, const std::string& message)->void
   {
-    EXPECT_EQ(output.get_request_identifier().FCGI_id(), 
-      input.FCGI_id) << message;
+    EXPECT_EQ(output.get_request_identifier().Fcgi_id(), 
+      input.Fcgi_id) << message;
     EXPECT_EQ(output.get_role(), input.role) << message;
     EXPECT_EQ(output.get_environment_map(), input.fcgi_params) << message;
     EXPECT_EQ(output.get_STDIN(), input.fcgi_stdin) << message;
@@ -2446,7 +2447,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     const struct RequestData& request_data)->void
   {
     fcgi_si::PopulateHeader(buffer_ptr,
-      fcgi_si::FCGIType::kFCGI_BEGIN_REQUEST, request_data.FCGI_id, 
+      fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, request_data.Fcgi_id, 
       fcgi_si::FCGI_HEADER_LEN, 0U);
     PopulateRole(buffer_ptr + fcgi_si::FCGI_HEADER_LEN, request_data.role);
     if(request_data.fcgi_keep_conn)
@@ -2457,16 +2458,16 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   auto AcceptAndAddRequests = []
   (
     SingleProcessInterfaceAndClients* spiac_ptr,
-    std::vector<fcgi_si::FCGIRequest>* request_list_ptr
+    std::vector<fcgi_si::FcgiRequest>* request_list_ptr
   )->void
   {
-    std::vector<fcgi_si::FCGIRequest> new_requests 
+    std::vector<fcgi_si::FcgiRequest> new_requests 
       {spiac_ptr->interface().AcceptRequests()};
     request_list_ptr->insert(
       request_list_ptr->end(), 
-      std::move_iterator<std::vector<fcgi_si::FCGIRequest>::iterator>(
+      std::move_iterator<std::vector<fcgi_si::FcgiRequest>::iterator>(
         new_requests.begin()), 
-      std::move_iterator<std::vector<fcgi_si::FCGIRequest>::iterator>(
+      std::move_iterator<std::vector<fcgi_si::FcgiRequest>::iterator>(
         new_requests.end()));
   };
 
@@ -2493,7 +2494,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     if(write_count < 3)
       return;
 
-    std::vector<fcgi_si::FCGIRequest> request_list 
+    std::vector<fcgi_si::FcgiRequest> request_list 
       {spiac_ptr->interface().AcceptRequests()};
     if(request_list.size() != 1U)
     {
@@ -2530,10 +2531,10 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(record_array, request_data);
     // FCGI_PARAMS record
     fcgi_si::PopulateHeader(record_array + (2 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     // FCGI_STDIN record
     fcgi_si::PopulateHeader(record_array + (3 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
     
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
       record_array, request_length) < request_length)
@@ -2544,7 +2545,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     else
     {
       // Allow the interface to process the request.
-      std::vector<fcgi_si::FCGIRequest> request_list
+      std::vector<fcgi_si::FcgiRequest> request_list
         {spiac.interface().AcceptRequests()};
       EXPECT_EQ(request_list.size(), 1U) << "An incorrect number of requests "
         "was generated in " << case_message;
@@ -2559,7 +2560,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case a."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
 
@@ -2571,7 +2572,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case b."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = true;
 
@@ -2583,7 +2584,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case c."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_AUTHORIZER;
     request_data.fcgi_keep_conn = false;
 
@@ -2610,13 +2611,13 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(record_array, request_data);
     // FCGI_PARAMS record
     fcgi_si::PopulateHeader(record_array + (2 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     // FCGI_DATA record
     fcgi_si::PopulateHeader(record_array + (3 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_DATA, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_DATA, request_data.Fcgi_id, 0U, 0U);
     // FCGI_STDIN record
     fcgi_si::PopulateHeader(record_array + (4 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
     
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
       record_array, (4 * fcgi_si::FCGI_HEADER_LEN)) < 
@@ -2628,7 +2629,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     else
     {
       // Allow the interface to process the first part of the request.
-      std::vector<fcgi_si::FCGIRequest> request_list
+      std::vector<fcgi_si::FcgiRequest> request_list
         {spiac.interface().AcceptRequests()};
       EXPECT_EQ(request_list.size(), 0U) << "A request was generated when one "
         "was not expected in " << case_message;
@@ -2657,7 +2658,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case d."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
 
@@ -2669,7 +2670,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case e."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_AUTHORIZER;
     request_data.fcgi_keep_conn = false;
 
@@ -2696,13 +2697,13 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(record_array, request_data);
     // FCGI_PARAMS record
     fcgi_si::PopulateHeader(record_array + (2 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     // FCGI_DATA record
     fcgi_si::PopulateHeader(record_array + (3 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
     // FCGI_STDIN record
     fcgi_si::PopulateHeader(record_array + (4 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_DATA, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_DATA, request_data.Fcgi_id, 0U, 0U);
     
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
       record_array, (4 * fcgi_si::FCGI_HEADER_LEN)) < 
@@ -2714,7 +2715,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     else
     {
       // Allow the interface to process the first part of the request.
-      std::vector<fcgi_si::FCGIRequest> request_list
+      std::vector<fcgi_si::FcgiRequest> request_list
         {spiac.interface().AcceptRequests()};
       EXPECT_EQ(request_list.size(), 0U) << "A request was generated when one "
         "was not expected in " << case_message;
@@ -2745,7 +2746,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case f."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_FILTER;
     request_data.fcgi_keep_conn = false;
 
@@ -2757,7 +2758,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::string case_message {"Test Case Set 1, test case g."};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = 10U;
     request_data.fcgi_keep_conn = false;
 
@@ -2782,7 +2783,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     SingleProcessInterfaceAndClients spiac {inter_args, 1};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.fcgi_keep_conn = false;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_params    = map_type 
@@ -2803,16 +2804,16 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       '<','/','h','t','m','l','>','\n'
     };
 
-    const char* accept_error {"FCGIRequest objects were returned when none was "
+    const char* accept_error {"FcgiRequest objects were returned when none was "
       "expected."};
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
     PopulateBeginRequestRecord(begin_record, request_data);
     std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_params_record,
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     std::uint8_t terminal_stdin_record[fcgi_si::FCGI_HEADER_LEN]  = {};
     fcgi_si::PopulateHeader(terminal_stdin_record,
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
 
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       begin_record, 2 * fcgi_si::FCGI_HEADER_LEN) 
@@ -2831,8 +2832,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
-        request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
-        request_data.FCGI_id, 0U)};
+        request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
+        request_data.Fcgi_id, 0U)};
     if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
       != 0U) || (std::get<5>(pair_encoding_return) != 
       request_data.fcgi_params.end()))
@@ -2868,8 +2869,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::size_t, std::vector<std::uint8_t>::iterator>
     partition_return 
       {fcgi_si::PartitionByteSequence(request_data.fcgi_stdin.begin(),
-        request_data.fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN,
-        request_data.FCGI_id)};
+        request_data.fcgi_stdin.end(), fcgi_si::FcgiType::kFCGI_STDIN,
+        request_data.Fcgi_id)};
     if(std::get<3>(partition_return) != request_data.fcgi_stdin.end())
     {
       ADD_FAILURE() << "Not all of the stdin data could be encoded.";
@@ -2893,7 +2894,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
         << '\n' << std::strerror(errno);
       break;
     }
-    std::vector<fcgi_si::FCGIRequest> request_list 
+    std::vector<fcgi_si::FcgiRequest> request_list 
       {spiac.interface().AcceptRequests()};
     if(request_list.size() != 1U)
     {
@@ -2921,7 +2922,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     SingleProcessInterfaceAndClients spiac {inter_args, 1};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.fcgi_keep_conn = false;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_params    = map_type 
@@ -2942,16 +2943,16 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       '<','/','h','t','m','l','>','\n'
     };
 
-    const char* accept_error {"FCGIRequest objects were returned when none was "
+    const char* accept_error {"FcgiRequest objects were returned when none was "
       "expected."};
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
     PopulateBeginRequestRecord(begin_record, request_data);
     std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_params_record,
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     std::uint8_t terminal_stdin_record[fcgi_si::FCGI_HEADER_LEN]  = {};
     fcgi_si::PopulateHeader(terminal_stdin_record,
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
     
     // Write the FCGI_BEGIN_REQUEST record. 
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
@@ -2984,8 +2985,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
-        request_data.fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
-        request_data.FCGI_id, 0U)};
+        request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
+        request_data.Fcgi_id, 0U)};
     if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
       != 0U) || (std::get<5>(pair_encoding_return) != 
       request_data.fcgi_params.end()))
@@ -3047,8 +3048,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::size_t, std::vector<std::uint8_t>::iterator>
     partition_return 
       {fcgi_si::PartitionByteSequence(request_data.fcgi_stdin.begin(),
-        request_data.fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN,
-        request_data.FCGI_id)};
+        request_data.fcgi_stdin.end(), fcgi_si::FcgiType::kFCGI_STDIN,
+        request_data.Fcgi_id)};
     if(std::get<3>(partition_return) != request_data.fcgi_stdin.end())
     {
       ADD_FAILURE() << "Not all of the stdin data could be encoded.";
@@ -3084,7 +3085,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
         "not sent in full." << '\n' << std::strerror(errno);
       break;
     }
-    std::vector<fcgi_si::FCGIRequest> request_list 
+    std::vector<fcgi_si::FcgiRequest> request_list 
       {spiac.interface().AcceptRequests()};
     if(request_list.size() != 1U)
     {
@@ -3106,7 +3107,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
   auto RecordTypeOrderTester = [&RequestInspector, &PopulateBeginRequestRecord]
   (const struct InterfaceCreationArguments& inter_args,
    const struct RequestData& request_data, 
-   const std::vector<fcgi_si::FCGIType>& type_sequence, 
+   const std::vector<fcgi_si::FcgiType>& type_sequence, 
    const std::string& test_case_name)->void
   {
     SingleProcessInterfaceAndClients spiac {inter_args, 1};
@@ -3120,7 +3121,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
     encoded_pairs_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U)};
     if(!std::get<0>(encoded_pairs_return) || (std::get<4>(encoded_pairs_return)
        != 0U) || (std::get<5>(encoded_pairs_return) != 
        request_data.fcgi_params.cend()))
@@ -3130,15 +3131,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       return;
     }
     std::uint8_t terminal_params[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(terminal_params, fcgi_si::FCGIType::kFCGI_PARAMS,
-      request_data.FCGI_id, 0U, 0U);
+    fcgi_si::PopulateHeader(terminal_params, fcgi_si::FcgiType::kFCGI_PARAMS,
+      request_data.Fcgi_id, 0U, 0U);
     
     // Populate the FCGI_STDIN records.
     std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
       std::size_t, std::vector<std::uint8_t>::const_iterator>
     encoded_stdin_return {fcgi_si::PartitionByteSequence(
       request_data.fcgi_stdin.cbegin(), request_data.fcgi_stdin.cend(),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id)};
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id)};
     if(std::get<3>(encoded_stdin_return) != request_data.fcgi_stdin.cend())
     {
       ADD_FAILURE() << "Not all of fcgi_stdin could be encoded in "
@@ -3146,15 +3147,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       return;
     }
     std::uint8_t terminal_stdin[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(terminal_stdin, fcgi_si::FCGIType::kFCGI_STDIN,
-      request_data.FCGI_id, 0U, 0U);
+    fcgi_si::PopulateHeader(terminal_stdin, fcgi_si::FcgiType::kFCGI_STDIN,
+      request_data.Fcgi_id, 0U, 0U);
 
     // Populate the FCGI_DATA records.
     std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
       std::size_t, std::vector<std::uint8_t>::const_iterator>
     encoded_data_return {fcgi_si::PartitionByteSequence(
       request_data.fcgi_data.cbegin(), request_data.fcgi_data.cend(),
-      fcgi_si::FCGIType::kFCGI_DATA, request_data.FCGI_id)};
+      fcgi_si::FcgiType::kFCGI_DATA, request_data.Fcgi_id)};
     if(std::get<3>(encoded_data_return) != request_data.fcgi_data.cend())
     {
       ADD_FAILURE() << "Not all of fcgi_data could be encoded in "
@@ -3162,8 +3163,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       return;
     }
     std::uint8_t terminal_data[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(terminal_data, fcgi_si::FCGIType::kFCGI_DATA,
-      request_data.FCGI_id, 0U, 0U);
+    fcgi_si::PopulateHeader(terminal_data, fcgi_si::FcgiType::kFCGI_DATA,
+      request_data.Fcgi_id, 0U, 0U);
 
     // Write the begin record.
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
@@ -3209,10 +3210,10 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       }
     };
 
-    for(fcgi_si::FCGIType type : type_sequence)
+    for(fcgi_si::FcgiType type : type_sequence)
     {
       switch(type) {
-        case fcgi_si::FCGIType::kFCGI_PARAMS : {
+        case fcgi_si::FcgiType::kFCGI_PARAMS : {
           std::tuple<struct iovec*, int, std::size_t> sgsw_return
             {socket_functions::ScatterGatherSocketWrite(
               spiac.client_descriptors()[0],
@@ -3235,11 +3236,11 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
           }
           break;
         }
-        case fcgi_si::FCGIType::kFCGI_STDIN : {
+        case fcgi_si::FcgiType::kFCGI_STDIN : {
           StdinDataWriter(&encoded_stdin_return, terminal_stdin, "FCGI_STDIN");
           break;
         }
-        case fcgi_si::FCGIType::kFCGI_DATA : {
+        case fcgi_si::FcgiType::kFCGI_DATA : {
           StdinDataWriter(&encoded_data_return, terminal_data, "FCGI_DATA");
           break;
         }
@@ -3251,11 +3252,11 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       }
     }
 
-    std::vector<fcgi_si::FCGIRequest> request_list 
+    std::vector<fcgi_si::FcgiRequest> request_list 
       {spiac.interface().AcceptRequests()};
     if(request_list.size() != 1U)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was "
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was "
         "returned in " << test_case_name << '\n' << request_list.size();
       return;
     }
@@ -3280,7 +3281,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     
     struct RequestData request_data {};
     request_data.role           = fcgi_si::FCGI_RESPONDER;
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.fcgi_keep_conn = false;
     request_data.fcgi_params    = map_type 
     {
@@ -3293,12 +3294,12 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // request_data.fcgi_data is empty (value initialization)
   
     RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_PARAMS, 
-        fcgi_si::FCGIType::kFCGI_STDIN}, "Record Type Order case a");
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_PARAMS, 
+        fcgi_si::FcgiType::kFCGI_STDIN}, "Record Type Order case a");
 
      RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_STDIN,
-        fcgi_si::FCGIType::kFCGI_PARAMS}, "Record Type Order case b");
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_STDIN,
+        fcgi_si::FcgiType::kFCGI_PARAMS}, "Record Type Order case b");
   }
 
   // c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
@@ -3321,7 +3322,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     
     struct RequestData request_data {};
     request_data.role           = fcgi_si::FCGI_RESPONDER;
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.fcgi_keep_conn = false;
     request_data.fcgi_params    = map_type 
     {
@@ -3338,12 +3339,12 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // request_data.fcgi_data is empty (value initialization)
 
     RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_PARAMS,
-        fcgi_si::FCGIType::kFCGI_STDIN}, "Record Type Order case c");
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_PARAMS,
+        fcgi_si::FcgiType::kFCGI_STDIN}, "Record Type Order case c");
 
     RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_STDIN,
-        fcgi_si::FCGIType::kFCGI_PARAMS}, "Record Type Order case f");
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_STDIN,
+        fcgi_si::FcgiType::kFCGI_PARAMS}, "Record Type Order case f");
 
     // Case d
     do
@@ -3363,8 +3364,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       // The padding length is arbitrary.
       constexpr std::size_t params_length {(3 * fcgi_si::FCGI_HEADER_LEN) + 7};
       std::uint8_t params_record[params_length] = {};
-      fcgi_si::PopulateHeader(params_record, fcgi_si::FCGIType::kFCGI_PARAMS,
-        request_data.FCGI_id, 8U, 7U);
+      fcgi_si::PopulateHeader(params_record, fcgi_si::FcgiType::kFCGI_PARAMS,
+        request_data.Fcgi_id, 8U, 7U);
       params_record[fcgi_si::FCGI_HEADER_LEN]     = 1U;
       params_record[fcgi_si::FCGI_HEADER_LEN + 1] = 1U;
       params_record[fcgi_si::FCGI_HEADER_LEN + 2] = 'A';
@@ -3374,7 +3375,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       params_record[fcgi_si::FCGI_HEADER_LEN + 6] = 'B';
       params_record[fcgi_si::FCGI_HEADER_LEN + 7] = '2';
       fcgi_si::PopulateHeader(params_record + (2*fcgi_si::FCGI_HEADER_LEN) + 7,
-        fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+        fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
 
       // The below record encoding is specific to the value of
       // request_data.fcgi_stdin.
@@ -3383,14 +3384,14 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       constexpr std::size_t stdin_length 
         {(2 * fcgi_si::FCGI_HEADER_LEN) + 4 + 2};
       std::uint8_t stdin_record[stdin_length] = {};
-      fcgi_si::PopulateHeader(stdin_record, fcgi_si::FCGIType::kFCGI_STDIN,
-        request_data.FCGI_id, 4U, 2U);
+      fcgi_si::PopulateHeader(stdin_record, fcgi_si::FcgiType::kFCGI_STDIN,
+        request_data.Fcgi_id, 4U, 2U);
       stdin_record[fcgi_si::FCGI_HEADER_LEN]     = 1U;
       stdin_record[fcgi_si::FCGI_HEADER_LEN + 1] = 1U;
       stdin_record[fcgi_si::FCGI_HEADER_LEN + 2] = 0U;
       stdin_record[fcgi_si::FCGI_HEADER_LEN + 3] = 1U;
       fcgi_si::PopulateHeader(stdin_record + fcgi_si::FCGI_HEADER_LEN + 4 + 2,
-        fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+        fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
 
       std::vector<std::pair<const std::uint8_t*, std::size_t>> write_pairs
       {
@@ -3414,12 +3415,12 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       constexpr std::size_t params_length {4 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t params_record[params_length] = {};
       fcgi_si::PopulateHeader(params_record,
-        fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id,
+        fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id,
         2, 0U);
       params_record[fcgi_si::FCGI_HEADER_LEN]           = 1;
       params_record[fcgi_si::FCGI_HEADER_LEN + 1]       = 1;
       fcgi_si::PopulateHeader(params_record + fcgi_si::FCGI_HEADER_LEN + 2,
-        fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 6U, 0U);
+        fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 6U, 0U);
       params_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 2] = 'A';
       params_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 3] = '1';
       params_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 4] = 1U;
@@ -3427,20 +3428,20 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       params_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 6] = 'B';
       params_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 7] = '2';
       fcgi_si::PopulateHeader(params_record + (3 * fcgi_si::FCGI_HEADER_LEN),
-        fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+        fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
       
       constexpr std::size_t stdin_length {(3 * fcgi_si::FCGI_HEADER_LEN) + 4};
       std::uint8_t stdin_record[stdin_length] = {};
-      fcgi_si::PopulateHeader(stdin_record, fcgi_si::FCGIType::kFCGI_STDIN,
-        request_data.FCGI_id, 1U, 0U);
+      fcgi_si::PopulateHeader(stdin_record, fcgi_si::FcgiType::kFCGI_STDIN,
+        request_data.Fcgi_id, 1U, 0U);
       stdin_record[fcgi_si::FCGI_HEADER_LEN] = 1U;
       fcgi_si::PopulateHeader(stdin_record + fcgi_si::FCGI_HEADER_LEN + 1,
-        fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 3U, 0U);
+        fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 3U, 0U);
       stdin_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 1] = 1U;
       stdin_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 2] = 0U;
       stdin_record[(2 * fcgi_si::FCGI_HEADER_LEN) + 3] = 1U;
       fcgi_si::PopulateHeader(stdin_record + (2 * fcgi_si::FCGI_HEADER_LEN) + 4,
-        fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0, 0U);
+        fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0, 0U);
 
       std::vector<std::pair<const std::uint8_t*, std::size_t>> write_pairs
       {
@@ -3467,7 +3468,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     
     struct RequestData request_data {};
     request_data.role           = fcgi_si::FCGI_FILTER;
-    request_data.FCGI_id        = 100U;
+    request_data.Fcgi_id        = 100U;
     request_data.fcgi_keep_conn = true;
     request_data.fcgi_params    = map_type 
     {
@@ -3480,13 +3481,13 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     request_data.fcgi_data      = std::vector<std::uint8_t> {'k','e','y','2'};
 
     RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_PARAMS,
-      fcgi_si::FCGIType::kFCGI_STDIN, fcgi_si::FCGIType::kFCGI_DATA}, 
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN, fcgi_si::FcgiType::kFCGI_DATA}, 
       "Record Type Order case g");
 
     RecordTypeOrderTester(inter_args, request_data, 
-      std::vector<fcgi_si::FCGIType> {fcgi_si::FCGIType::kFCGI_DATA,
-      fcgi_si::FCGIType::kFCGI_PARAMS, fcgi_si::FCGIType::kFCGI_STDIN}, 
+      std::vector<fcgi_si::FcgiType> {fcgi_si::FcgiType::kFCGI_DATA,
+      fcgi_si::FcgiType::kFCGI_PARAMS, fcgi_si::FcgiType::kFCGI_STDIN}, 
       "Record Type Order case h");
   }
 
@@ -3508,7 +3509,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     SingleProcessInterfaceAndClients spiac {inter_args, 1};
 
     struct RequestData request_data {};
-    request_data.FCGI_id        = 1U;
+    request_data.Fcgi_id        = 1U;
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
     request_data.fcgi_params    = map_type
@@ -3528,27 +3529,27 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::uint8_t records[record_array_length] = {};
     PopulateBeginRequestRecord(records, request_data);
     fcgi_si::PopulateHeader(records + (2 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 2U, 6U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 2U, 6U);
     records[3 * fcgi_si::FCGI_HEADER_LEN]       = 14U;
     records[(3 * fcgi_si::FCGI_HEADER_LEN) + 1] = 4U;
     fcgi_si::PopulateHeader(records + (4 * fcgi_si::FCGI_HEADER_LEN), 
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 12U, 4U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 12U, 4U);
     std::memcpy(records + (5 * fcgi_si::FCGI_HEADER_LEN), 
       request_data.fcgi_stdin.data(), 12U);
     fcgi_si::PopulateHeader(records + (7 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 18U, 6U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 18U, 6U);
     std::memcpy(records + (8 * fcgi_si::FCGI_HEADER_LEN), 
       request_data.fcgi_params.begin()->first.data(), 14U);
     std::memcpy(records + (8 * fcgi_si::FCGI_HEADER_LEN) + 14, 
       request_data.fcgi_params.begin()->second.data(), 4U);
     fcgi_si::PopulateHeader(records + (11 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(records + (12 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 6U, 2U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 6U, 2U);
     std::memcpy(records + (13 * fcgi_si::FCGI_HEADER_LEN), 
       request_data.fcgi_stdin.data() + 12, 6U);
     fcgi_si::PopulateHeader(records + (14 * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FCGIType::kFCGI_STDIN, request_data.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
 
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0], records,
       record_array_length) < record_array_length)
@@ -3557,7 +3558,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       break;
     }
     
-    std::vector<fcgi_si::FCGIRequest> request_list
+    std::vector<fcgi_si::FcgiRequest> request_list
       {spiac.interface().AcceptRequests()};
     if(request_list.size() != 1U)
     {
@@ -3595,7 +3596,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     SingleProcessInterfaceAndClients spiac {inter_args, 1};
 
     struct RequestData responder_request {};
-    responder_request.FCGI_id        = 1U;
+    responder_request.Fcgi_id        = 1U;
     responder_request.role           = fcgi_si::FCGI_RESPONDER;
     responder_request.fcgi_keep_conn = true;
     responder_request.fcgi_params    = map_type 
@@ -3609,7 +3610,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // responder_request.fcgi_data is empty.
 
     struct RequestData authorizer_request {};
-    authorizer_request.FCGI_id        = 2U;
+    authorizer_request.Fcgi_id        = 2U;
     authorizer_request.role           = fcgi_si::FCGI_AUTHORIZER;
     authorizer_request.fcgi_keep_conn = true;
     authorizer_request.fcgi_params    = map_type 
@@ -3623,7 +3624,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // authorizer_request.fcgi_data is empty.
 
     struct RequestData filter_request {};
-    filter_request.FCGI_id        = 3U;
+    filter_request.Fcgi_id        = 3U;
     filter_request.role           = fcgi_si::FCGI_FILTER;
     filter_request.fcgi_keep_conn = true;
     filter_request.fcgi_params    = map_type 
@@ -3653,8 +3654,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     {
       params_encoding_list.push_back(fcgi_si::EncodeNameValuePairs(
       request_data_ptr->fcgi_params.begin(),
-      request_data_ptr->fcgi_params.end(), fcgi_si::FCGIType::kFCGI_PARAMS,
-      request_data_ptr->FCGI_id, 0U));
+      request_data_ptr->fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
+      request_data_ptr->Fcgi_id, 0U));
     }
     int number_params_correct {0};
     for(int i {0}; i < 3; ++i)
@@ -3676,7 +3677,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     std::uint8_t terminal_params_records[3][fcgi_si::FCGI_HEADER_LEN] = {};
     for(int i {0}; i < 3; ++i)
       fcgi_si::PopulateHeader(terminal_params_records[i],
-        fcgi_si::FCGIType::kFCGI_PARAMS, request_ptr_array[i]->FCGI_id, 0U, 0U);
+        fcgi_si::FcgiType::kFCGI_PARAMS, request_ptr_array[i]->Fcgi_id, 0U, 0U);
     
     // Encode and check the FCGI_STDIN records.
     std::vector<std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
@@ -3686,8 +3687,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     {
       stdin_encoding_list.push_back(fcgi_si::PartitionByteSequence(
         request_ptr_array[i]->fcgi_stdin.begin(),
-        request_ptr_array[i]->fcgi_stdin.end(), fcgi_si::FCGIType::kFCGI_STDIN,
-        request_ptr_array[i]->FCGI_id));
+        request_ptr_array[i]->fcgi_stdin.end(), fcgi_si::FcgiType::kFCGI_STDIN,
+        request_ptr_array[i]->Fcgi_id));
     }
     int number_stdin_correct {0};
     for(int i {0}; i < 3; ++i)
@@ -3710,14 +3711,14 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // have no content.
     std::uint8_t terminal_filter_stdin_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_filter_stdin_record,
-      fcgi_si::FCGIType::kFCGI_STDIN, filter_request.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, filter_request.Fcgi_id, 0U, 0U);
 
     // Encode the FCGI_DATA records for the filter request.
     std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
       std::size_t, std::vector<std::uint8_t>::iterator>
     encoded_data_records {fcgi_si::PartitionByteSequence(
       filter_request.fcgi_data.begin(), filter_request.fcgi_data.end(),
-      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id)};
+      fcgi_si::FcgiType::kFCGI_DATA, filter_request.Fcgi_id)};
     if(std::get<3>(encoded_data_records) != filter_request.fcgi_data.end())
     {
       ADD_FAILURE() << "The FCGI_DATA information was too large to be encoded "
@@ -3727,7 +3728,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // Populate the terminal FCGI_DATA record.
     std::uint8_t terminal_data_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_data_record, 
-      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_DATA, filter_request.Fcgi_id, 0U, 0U);
     
     // Begin writing to the interface. Sequence:
     // R-b, A-b, R-p, AcceptRequests, F-b, A-s, A-p, AcceptRequests, A-pe,
@@ -3736,7 +3737,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // Key: R = Responder, A = Authorizer, F = Filter; b = FCGI_BEGIN_REQUEST,
     //      s = FCGI_STDIN, p = FCGI_PARAMS, d = FCGI_DATA, *e = end of stream
     const int& in {spiac.client_descriptors()[0]};
-    std::vector<fcgi_si::FCGIRequest> request_list {};
+    std::vector<fcgi_si::FcgiRequest> request_list {};
     // R-b, A-b
     if(socket_functions::SocketWrite(in, begin_records[0], 
        4 * fcgi_si::FCGI_HEADER_LEN) < (4 * fcgi_si::FCGI_HEADER_LEN))
@@ -3778,8 +3779,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     a_params_encoded {EncodeNameValuePairs(
       authorizer_request.fcgi_params.begin(),
       authorizer_request.fcgi_params.end(),
-      fcgi_si::FCGIType::kFCGI_PARAMS,
-      authorizer_request.FCGI_id,
+      fcgi_si::FcgiType::kFCGI_PARAMS,
+      authorizer_request.Fcgi_id,
       0U)};
     socket_functions::ScatterGatherSocketWrite(
       in,
@@ -3881,14 +3882,14 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     // Validate results.
     if(request_list.size() != 3U)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was "
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was "
         "returned." << '\n' << request_list.size();
       break;
     }
     for(int i {0}; i < 3; ++i)
     {
       RequestInspector(request_list[i], 
-        *request_ptr_array[request_list[i].get_request_identifier().FCGI_id() - 1],
+        *request_ptr_array[request_list[i].get_request_identifier().Fcgi_id() - 1],
         "Single Connection Test Case Set 5: Multiple requests with record "
           "interleaving");
     }
@@ -3931,7 +3932,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
     params_encoding_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
-      fcgi_si::FCGIType::kFCGI_PARAMS, request_data.FCGI_id, 0U
+      fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U
     )};
     if(!std::get<0>(params_encoding_return)        || 
        (std::get<4>(params_encoding_return) != 0U) || 
@@ -3957,8 +3958,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       return false;
     }
     std::uint8_t params_end[fcgi_si::FCGI_HEADER_LEN] = {};
-    fcgi_si::PopulateHeader(params_end, fcgi_si::FCGIType::kFCGI_PARAMS,
-      request_data.FCGI_id, 0U, 0U);
+    fcgi_si::PopulateHeader(params_end, fcgi_si::FcgiType::kFCGI_PARAMS,
+      request_data.Fcgi_id, 0U, 0U);
     if(socket_functions::SocketWrite(socket_descriptor, params_end,
       fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
     {
@@ -3975,21 +3976,21 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::vector<std::uint8_t> RequestData::* data_or_stdin_ptm
     )->bool
     {
-      fcgi_si::FCGIType type {};
+      fcgi_si::FcgiType type {};
       const char* stdin_description {"FCGI_STDIN"};
       const char* data_description {"FCGI_DATA"};
       const char* type_description 
         {(data_or_stdin_ptm == &RequestData::fcgi_stdin) ?
           stdin_description : data_description};
       type = (data_or_stdin_ptm == &RequestData::fcgi_stdin) ? 
-        fcgi_si::FCGIType::kFCGI_STDIN : fcgi_si::FCGIType::kFCGI_DATA;
+        fcgi_si::FcgiType::kFCGI_STDIN : fcgi_si::FcgiType::kFCGI_DATA;
 
       std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, 
         std::size_t,  std::vector<std::uint8_t>::const_iterator>
       encoding_return {fcgi_si::PartitionByteSequence(
         (request_data.*data_or_stdin_ptm).cbegin(), 
         (request_data.*data_or_stdin_ptm).cend(),
-        type, request_data.FCGI_id
+        type, request_data.Fcgi_id
       )};
       if(std::get<3>(encoding_return) != 
         (request_data.*data_or_stdin_ptm).cend())
@@ -4019,7 +4020,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       if((request_data.*data_or_stdin_ptm).size() != 0U)
       {
         std::uint8_t end[fcgi_si::FCGI_HEADER_LEN] = {};
-        fcgi_si::PopulateHeader(end, type, request_data.FCGI_id, 0U, 0U);
+        fcgi_si::PopulateHeader(end, type, request_data.Fcgi_id, 0U, 0U);
         if(socket_functions::SocketWrite(socket_descriptor, end,
           fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
         {
@@ -4075,7 +4076,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     {
       request_array[i].role           = fcgi_si::FCGI_RESPONDER;
         // Assign unique FCGI_id values for identification for comparison.
-      request_array[i].FCGI_id        = std::uint16_t(i + 1); 
+      request_array[i].Fcgi_id        = std::uint16_t(i + 1); 
       request_array[i].fcgi_keep_conn = false;
       request_array[i].fcgi_params    = map_type {{{params_name}, {}}};
       request_array[i].fcgi_stdin     = std::vector<std::uint8_t> {stdin_value};
@@ -4094,18 +4095,18 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     if(!transmission_success)
       break;
 
-    std::vector<fcgi_si::FCGIRequest> fcgi_request_list 
+    std::vector<fcgi_si::FcgiRequest> fcgi_request_list 
       {spiac.interface().AcceptRequests()};
     if(fcgi_request_list.size() != client_number)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was found."
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was found."
         << '\n' << "Request number: " << fcgi_request_list.size();
       break;
     }
     for(int i {0}; i < client_number; ++i)
     {
       std::uint16_t request_id
-        {fcgi_request_list[i].get_request_identifier().FCGI_id()};
+        {fcgi_request_list[i].get_request_identifier().Fcgi_id()};
       RequestInspector(fcgi_request_list[i], request_array[request_id - 1],
         "A request mismatch occurred for request " + 
         std::to_string(request_id - 1));
@@ -4143,8 +4144,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     for(int i {0}; i < 2; ++i)
     {
       request_array[i].role           = fcgi_si::FCGI_RESPONDER;
-        // Assign unique FCGI_id values for identification for comparison.
-      request_array[i].FCGI_id        = std::uint16_t(i + 1); 
+        // Assign unique Fcgi_id values for identification for comparison.
+      request_array[i].Fcgi_id        = std::uint16_t(i + 1); 
       request_array[i].fcgi_keep_conn = false;
       request_array[i].fcgi_params    = map_type {{{params_name}, {}}};
       request_array[i].fcgi_stdin     = std::vector<std::uint8_t> {stdin_value};
@@ -4157,8 +4158,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     for(int i {2}; i < 4; ++i)
     {
       request_array[i].role           = fcgi_si::FCGI_AUTHORIZER;
-        // Assign unique FCGI_id values for identification for comparison.
-      request_array[i].FCGI_id        = std::uint16_t(i + 1); 
+        // Assign unique Fcgi_id values for identification for comparison.
+      request_array[i].Fcgi_id        = std::uint16_t(i + 1); 
       request_array[i].fcgi_keep_conn = false;
       request_array[i].fcgi_params    = map_type {{{params_name}, {}}};
       request_array[i].fcgi_stdin     = std::vector<std::uint8_t> {stdin_value};
@@ -4169,7 +4170,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
     //  Filter request
     request_array[4].role           = fcgi_si::FCGI_FILTER;
-    request_array[4].FCGI_id        = 5;
+    request_array[4].Fcgi_id        = 5;
     request_array[4].fcgi_keep_conn = false;
     request_array[4].fcgi_params    = map_type {{{params_name}, {}}};
     request_array[4].fcgi_stdin     = std::vector<std::uint8_t> {stdin_value};
@@ -4185,18 +4186,18 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     if(!transmission_success)
       break;
 
-    std::vector<fcgi_si::FCGIRequest> fcgi_request_list 
+    std::vector<fcgi_si::FcgiRequest> fcgi_request_list 
       {spiac.interface().AcceptRequests()};
     if(fcgi_request_list.size() != client_number)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was found."
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was found."
         << '\n' << "Request number: " << fcgi_request_list.size();
       break;
     }
     for(int i {0}; i < client_number; ++i)
     {
       std::uint16_t request_id
-        {fcgi_request_list[i].get_request_identifier().FCGI_id()};
+        {fcgi_request_list[i].get_request_identifier().Fcgi_id()};
       RequestInspector(fcgi_request_list[i], request_array[request_id - 1],
         "A request mismatch occurred for request " + 
         std::to_string(request_id - 1));
@@ -4237,8 +4238,8 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     for(int i {0}; i < request_number; ++i)
     {
       request_array[i].role           = fcgi_si::FCGI_RESPONDER;
-        // Assign unique FCGI_id values for identification for comparison.
-      request_array[i].FCGI_id        = std::uint16_t(i + 1);
+        // Assign unique Fcgi_id values for identification for comparison.
+      request_array[i].Fcgi_id        = std::uint16_t(i + 1);
         // The presence of multiple requests on a connections will usually
         // cause keep_conn to be set.
       request_array[i].fcgi_keep_conn = true;
@@ -4268,18 +4269,18 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     if(!transmission_success)
       break;
 
-    std::vector<fcgi_si::FCGIRequest> fcgi_request_list 
+    std::vector<fcgi_si::FcgiRequest> fcgi_request_list 
       {spiac.interface().AcceptRequests()};
     if(fcgi_request_list.size() != request_number)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was found."
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was found."
         << '\n' << "Request number: " << fcgi_request_list.size();
       break;
     }
     for(int i {0}; i < request_number; ++i)
     {
       std::uint16_t request_id
-        {fcgi_request_list[i].get_request_identifier().FCGI_id()};
+        {fcgi_request_list[i].get_request_identifier().Fcgi_id()};
       RequestInspector(fcgi_request_list[i], request_array[request_id - 1],
         "A request mismatch occurred for request " + 
         std::to_string(request_id - 1));
@@ -4310,7 +4311,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
     struct RequestData responder_request_1 {};
     responder_request_1.role = fcgi_si::FCGI_RESPONDER;
-    responder_request_1.FCGI_id = 1U;
+    responder_request_1.Fcgi_id = 1U;
     responder_request_1.fcgi_keep_conn = true;
     responder_request_1.fcgi_params = map_type
     {
@@ -4323,7 +4324,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
     struct RequestData responder_request_2 {};
     responder_request_2.role = fcgi_si::FCGI_RESPONDER;
-    responder_request_2.FCGI_id = 2U;
+    responder_request_2.Fcgi_id = 2U;
     responder_request_2.fcgi_keep_conn = true;
     responder_request_2.fcgi_params = map_type
     {
@@ -4336,7 +4337,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
 
     struct RequestData filter_request {};
     filter_request.role           = fcgi_si::FCGI_FILTER;
-    filter_request.FCGI_id        = 14U;
+    filter_request.Fcgi_id        = 14U;
     filter_request.fcgi_keep_conn = false;
     filter_request.fcgi_params    = map_type
     {
@@ -4360,15 +4361,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(responder_1_begin, responder_request_1);
     std::uint8_t responder_1_end_records[2 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(responder_1_end_records,
-      fcgi_si::FCGIType::kFCGI_PARAMS, responder_request_1.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(responder_1_end_records + fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_STDIN, responder_request_1.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, responder_request_1.Fcgi_id, 0U, 0U);
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_responder_1_params {fcgi_si::EncodeNameValuePairs(
       responder_request_1.fcgi_params.begin(), 
       responder_request_1.fcgi_params.end(),
-      fcgi_si::FCGIType::kFCGI_PARAMS, responder_request_1.FCGI_id, 0U)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U)};
     if(!std::get<0>(encoded_responder_1_params)        || 
         (std::get<4>(encoded_responder_1_params) != 0U ||
         (std::get<5>(encoded_responder_1_params) != 
@@ -4383,15 +4384,15 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(responder_2_begin, responder_request_2);
     std::uint8_t responder_2_end_records[2 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(responder_2_end_records,
-      fcgi_si::FCGIType::kFCGI_PARAMS, responder_request_2.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(responder_2_end_records + fcgi_si::FCGI_HEADER_LEN,
-      fcgi_si::FCGIType::kFCGI_STDIN, responder_request_2.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, responder_request_2.Fcgi_id, 0U, 0U);
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_responder_2_params {fcgi_si::EncodeNameValuePairs(
       responder_request_2.fcgi_params.begin(), 
       responder_request_2.fcgi_params.end(),
-      fcgi_si::FCGIType::kFCGI_PARAMS, responder_request_2.FCGI_id, 0U)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U)};
     if(!std::get<0>(encoded_responder_2_params)        || 
         (std::get<4>(encoded_responder_2_params) != 0U ||
         (std::get<5>(encoded_responder_2_params) != 
@@ -4406,17 +4407,17 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     PopulateBeginRequestRecord(filter_begin, filter_request);
     std::uint8_t filter_end_records[3 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(filter_end_records, 
-      fcgi_si::FCGIType::kFCGI_PARAMS, filter_request.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_PARAMS, filter_request.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(filter_end_records + fcgi_si::FCGI_HEADER_LEN, 
-      fcgi_si::FCGIType::kFCGI_STDIN, filter_request.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_STDIN, filter_request.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(filter_end_records + (2 * fcgi_si::FCGI_HEADER_LEN), 
-      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id, 0U, 0U);
+      fcgi_si::FcgiType::kFCGI_DATA, filter_request.Fcgi_id, 0U, 0U);
     std::tuple<bool, std::size_t, std::vector<struct iovec>, 
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_filter_params {fcgi_si::EncodeNameValuePairs(
       filter_request.fcgi_params.begin(), 
       filter_request.fcgi_params.end(),
-      fcgi_si::FCGIType::kFCGI_PARAMS, filter_request.FCGI_id, 0U)};
+      fcgi_si::FcgiType::kFCGI_PARAMS, filter_request.Fcgi_id, 0U)};
     if(!std::get<0>(encoded_filter_params)        || 
         (std::get<4>(encoded_filter_params) != 0U ||
         (std::get<5>(encoded_filter_params) != 
@@ -4430,7 +4431,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::size_t, std::vector<std::uint8_t>::iterator>
     encoded_filter_stdin {fcgi_si::PartitionByteSequence(
       filter_request.fcgi_stdin.begin(), filter_request.fcgi_stdin.end(),
-      fcgi_si::FCGIType::kFCGI_STDIN, filter_request.FCGI_id)};  
+      fcgi_si::FcgiType::kFCGI_STDIN, filter_request.Fcgi_id)};  
     if(std::get<3>(encoded_filter_stdin) != 
        filter_request.fcgi_stdin.end())
     {
@@ -4442,7 +4443,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
       std::size_t, std::vector<std::uint8_t>::iterator>
     encoded_filter_data {fcgi_si::PartitionByteSequence(
       filter_request.fcgi_data.begin(), filter_request.fcgi_data.end(),
-      fcgi_si::FCGIType::kFCGI_DATA, filter_request.FCGI_id)};  
+      fcgi_si::FcgiType::kFCGI_DATA, filter_request.Fcgi_id)};  
     if(std::get<3>(encoded_filter_data) != 
        filter_request.fcgi_data.end())
     {
@@ -4461,7 +4462,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     //      record, s = FCGI_STDIN record, *-p = partial record, 
     //      *-c = completion of previous partial record, *e = terminal record
     //      for the appropriate stream.
-    std::vector<fcgi_si::FCGIRequest> request_list {};
+    std::vector<fcgi_si::FcgiRequest> request_list {};
     std::tuple<struct iovec*, int, std::size_t> sgsw_return {};
     // R1-b-p
     if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
@@ -4621,13 +4622,13 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     AcceptAndAddRequests(&spiac, &request_list);
     if(request_list.size() != 3U)
     {
-      ADD_FAILURE() << "An unexpected number of FCGIRequest objects was "
+      ADD_FAILURE() << "An unexpected number of FcgiRequest objects was "
         "returned." << '\n' << "Request count: " << request_list.size();
       break;
     }
     for(int i {0}; i < 3; ++i)
     {
-      switch(request_list[i].get_request_identifier().FCGI_id()) {
+      switch(request_list[i].get_request_identifier().Fcgi_id()) {
         case std::uint16_t(1U) : {
           RequestInspector(request_list[i], responder_request_1,
             "responder_request_1");
@@ -4644,7 +4645,7 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
           break;
         }
         default : {
-          ADD_FAILURE() << "An FCGI_id value that was not present in the "
+          ADD_FAILURE() << "An Fcgi_id value that was not present in the "
             "requests was returned.";
           break;
         }
@@ -4655,10 +4656,10 @@ TEST(FCGIServerInterface, FCGIRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
 
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "FCGIRequestGeneration");
+  GTestCheckAndReportDescriptorLeaks(&fdlc, "FcgiRequestGeneration");
 }
 
-TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
+TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
 {
   // Testing explanation
   // Examined properties:
@@ -4666,7 +4667,7 @@ TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
   //    constructor): 1 or greater than 1.
   // 2) Presence of previous connections when the interface is placed into an
   //    overloaded state: requests are present or not.
-  // 3) Incomplete requests vs. requests for which an FCGIRequest object
+  // 3) Incomplete requests vs. requests for which an FcgiRequest object
   //    has been produced.
   // 4) Multiple connections and separate request tallies.
   // 5) Request number tracking as requests are sent and completed.
@@ -4730,7 +4731,7 @@ TEST(FCGIServerInterface, RequestAcceptanceAndRejection)
   GTestFatalRestoreSignal(SIGPIPE);
 }
 
-TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
+TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)
 {
   // Testing explanation
   // Examined properties:
@@ -4740,7 +4741,7 @@ TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
   //       than the value returned by an immediately-preceding call.
   //    b) If the interface was at its connection limit, a new connection
   //       should be accepted.
-  //    c) FCGIRequest objects should be updated appropriately.
+  //    c) FcgiRequest objects should be updated appropriately.
   //       1) A call to AbortStatus should return true. 
   //       2) Calls to Complete, RejectRole, Write, and WriteError should
   //          return false.
@@ -4781,7 +4782,7 @@ TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
   //          be that given by the value of app_status_on_abort when the 
   //          interface was constructed.
   //    c) If a request was completely received and an FCGI_ABORT_STATUS record
-  //       was received for the request, the state of the FCGIRequest object
+  //       was received for the request, the state of the FcgiRequest object
   //       for the request should be appropriately updated.
   //       1) A call to AbortStatus should return true.
   //       2) Calls to Complete, RejectRole, Write, and WriteError should
@@ -4797,7 +4798,7 @@ TEST(FCGIServerInterface, ConnectionClosureAndAbortRequests)
 
 }
 
-TEST(FCGIServerInterface, FCGIRequestDataTransmissionAndCompletion)
+TEST(FcgiServerInterface, FcgiRequestDataTransmissionAndCompletion)
 {
   // Testing explanation
   // Examined properties:
@@ -4806,7 +4807,7 @@ TEST(FCGIServerInterface, FCGIRequestDataTransmissionAndCompletion)
   //    b) When data has been sent by calls to Write and WriteError.
   //    c) The occurrence of one or more than one call to Write and
   //       WriteError.
-  //    Behavior of the FCGIRequest object and interface pair includes:
+  //    Behavior of the FcgiRequest object and interface pair includes:
   //    a) The transmission of terminal records for FCGI_STDIN and FCGI_STDOUT.
   //    b) The transmission of an FCGI_END_REQUEST record with the
   //       provided value of app_status and the specified value for the
@@ -4825,7 +4826,7 @@ TEST(FCGIServerInterface, FCGIRequestDataTransmissionAndCompletion)
   //    or connection identity affect the behavior of the calls?
   // 3) Behavior of non-output methods before request completion. In
   //    particular, AbortStatus.
-  // 4) Behavior of FCGIRequest methods after the completion of the request
+  // 4) Behavior of FcgiRequest methods after the completion of the request
   //    by a call to Complete or RejectRole. This includes output methods and
   //    other methods.
   //
@@ -4838,14 +4839,14 @@ TEST(FCGIServerInterface, FCGIRequestDataTransmissionAndCompletion)
 
 }
 
-TEST(FCGIServerInterface, FCGIServerInterfaceDestructionNotSynchronization)
+TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
 {
   // Testing explanation
   // Examined properties:
-  // 1) Destruction of completed and uncompleted FCGIRequest objects followed
+  // 1) Destruction of completed and uncompleted FcgiRequest objects followed
   //    by destruction of the interface.
   // 2) Destruction of the interface while completed and uncompleted
-  //    FCGIRequest objects are present. Method calls on FCGIRequest objects
+  //    FcgiRequest objects are present. Method calls on FcgiRequest objects
   //    should behave as specified.
   // 3) Creation of a new interface which creates new requests while completed
   //    and uncompleted requests from the previous interface are present.

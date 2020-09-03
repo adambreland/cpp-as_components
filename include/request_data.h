@@ -50,7 +50,7 @@ public:
   // Attempts to convert the FCGI_PARAMS byte sequence which is encoded in the
   // FastCGI name-value pair format into a std::map object with names as 
   // map keys and values as map values. The map is held within the
-  // RequestData object and later used in the construction of an FCGIRequest
+  // RequestData object and later used in the construction of an FcgiRequest
   // object.
   //
   // Parameters: none
@@ -131,9 +131,9 @@ public:
   ~RequestData() = default;
 
 private:
-  // Make FCGIRequest a friend class as its constructor will move data
+  // Make FcgiRequest a friend class as its constructor will move data
   // from the representation of RequestData objects.
-  friend class FCGIRequest;
+  friend class FcgiRequest;
 
   // Request data and completion status
   bool FCGI_PARAMS_complete_ {false};

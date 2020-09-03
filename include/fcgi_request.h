@@ -18,11 +18,11 @@
 
 namespace fcgi_si {
 
-// Forward declaration to break the cyclic dependencies between FCGIRequest
-// and FCGIServerInterface include directives.
-class FCGIServerInterface;
+// Forward declaration to break the cyclic dependencies between FcgiRequest
+// and FcgiServerInterface include directives.
+class FcgiServerInterface;
 
-// FCGIRequest objects are produced by an instance of FCGIServerInterface. 
+// FcgiRequest objects are produced by an instance of FcgiServerInterface. 
 // A request object contains all of the information given to the interface by a
 // client for a FastCGI request. Requests are serviced by inspecting this 
 // information, writing to the FCGI_STDOUT and FCGI_STDERR streams with
@@ -55,14 +55,14 @@ class FCGIServerInterface;
 //    synchronization. This is true whether or not requests share
 //    underlying socket connections.
 // 3) An application does not need to enforce a particular order of destruction
-//    for FCGIRequest objects and the FCGIServerInterface object with which
+//    for FcgiRequest objects and the FcgiServerInterface object with which
 //    they are associated. 
-//    a) It is safe to have FCGIRequest objects which were produced from
-//       distinct FCGIServerInterface objects present at the same time.
-//    b) In general, output method calls on FCGIRequest objects whose interface
+//    a) It is safe to have FcgiRequest objects which were produced from
+//       distinct FcgiServerInterface objects present at the same time.
+//    b) In general, output method calls on FcgiRequest objects whose interface
 //       has been destroyed fail as if the connection of the request was found
 //       to be closed.
-class FCGIRequest {
+class FcgiRequest {
  public:
 
   // Returns true if the request was aborted by the client or the interface.
@@ -77,11 +77,11 @@ class FCGIRequest {
   //    should be destroyed.
   bool AbortStatus();
 
-  // Completes the response of an FCGIRequest object.
+  // Completes the response of an FcgiRequest object.
   //
-  // Note that allowing a valid FCGIRequest to be destroyed without completion
+  // Note that allowing a valid FcgiRequest to be destroyed without completion
   // prevents terminal records from being sent for the request. The destructor
-  // of FCGIRequest maintains interface invariants but does not send
+  // of FcgiRequest maintains interface invariants but does not send
   // information to the client upon request destruction.
   //
   // Parameters:
@@ -230,40 +230,40 @@ class FCGIRequest {
   template<typename ByteIter>
   bool WriteError(ByteIter begin_iter, ByteIter end_iter);
 
-  FCGIRequest();
-  FCGIRequest(FCGIRequest&&) noexcept;
+  FcgiRequest();
+  FcgiRequest(FcgiRequest&&) noexcept;
 
-  // Move assignment may only occur to FCGIRequest objects which have been 
+  // Move assignment may only occur to FcgiRequest objects which have been 
   // default-constructed, completed, or moved from. An exception is thrown if
-  // a move is attempted to an FCGIRequest object which is in any other state.
+  // a move is attempted to an FcgiRequest object which is in any other state.
   //
   // Exceptions:
   // 1) May throw exceptions derived from std::exception.
   // 2) In the event of a throw, neither the source nor the destination
-  //    FCGIRequest object were modified (strong exception guarantee).
-  FCGIRequest& operator=(FCGIRequest&&);
+  //    FcgiRequest object were modified (strong exception guarantee).
+  FcgiRequest& operator=(FcgiRequest&&);
 
   // No copy.
-  FCGIRequest(const FCGIRequest&) = delete;
-  FCGIRequest& operator=(const FCGIRequest&) = delete;
+  FcgiRequest(const FcgiRequest&) = delete;
+  FcgiRequest& operator=(const FcgiRequest&) = delete;
 
-  ~FCGIRequest();
+  ~FcgiRequest();
 
  private:
-  friend class fcgi_si::FCGIServerInterface;
+  friend class fcgi_si::FcgiServerInterface;
 
-  // The constructor is private as only an FCGIServerInterface object
-  // should create FCGIRequest objects through calls to AcceptRequests().
+  // The constructor is private as only an FcgiServerInterface object
+  // should create FcgiRequest objects through calls to AcceptRequests().
   //
   // Parameters:
   // request_id:       The RequestIdentifier used as the key for the request
   //                   request_map_.
   // interface_id:     The current value of
-  //                   FCGIServerInterface::interface_identifier_. This value
-  //                   is used by an FCGIRequest object to check if the
-  //                   interface which created an FCGIRequest object has not
+  //                   FcgiServerInterface::interface_identifier_. This value
+  //                   is used by an FcgiRequest object to check if the
+  //                   interface which created an FcgiRequest object has not
   //                   been destroyed.
-  // interface_ptr:    A pointer to the current FCGIServerInterface object.
+  // interface_ptr:    A pointer to the current FcgiServerInterface object.
   //                   The pointer is equal to this in interface method calls.
   // request_data_ptr: A pointer to the RequestData object associated the
   //                   the RequestIdentifier key of request_map_.
@@ -273,11 +273,11 @@ class FCGIRequest {
   //
   // Preconditions:
   // 1) request_id_ is a key of request_map_.
-  // 2) All pointers are associated with the FCGIServerInterface object
+  // 2) All pointers are associated with the FcgiServerInterface object
   //    of request_map_. The correct RequestData object and write mutex pair
   //    were used to initialize request_data_ptr, write_mutex_ptr, and
   //    bad_connection_state_ptr.
-  // 3) interface_id is the identifier of the FCGIServerInterface object
+  // 3) interface_id is the identifier of the FcgiServerInterface object
   //    associated with request_map_.
   //
   // Synchronization requirements and discussion:
@@ -287,13 +287,13 @@ class FCGIRequest {
   // 1) Throws std::logic_error if:
   //    a) Any of interface_ptr, request_data_ptr, write_mutex_ptr, or
   //       bad_connection_state_ptr are null.
-  //    b) An FCGIRequest has already been generated from *request_data_ptr.
+  //    b) An FcgiRequest has already been generated from *request_data_ptr.
   //
   //    If a throw occurs, bad_interface_state_detected_ is set (as this
-  //    means that the implementation of FCGIServerInterface has an error).
+  //    means that the implementation of FcgiServerInterface has an error).
   //
   // Effects:
-  // 1) Constructs an FCGIRequest which:
+  // 1) Constructs an FcgiRequest which:
   //    a) Contains the environment variable (FCGI_PARAMS), FCGI_STDIN, and
   //       FCGI_DATA information of the request.
   //    b) Contains the role and connection-closure-upon-response-completion
@@ -301,8 +301,8 @@ class FCGIRequest {
   //    c) Is associated with the interface object which created it.
   // 2) After construction, request_status_ == RequestStatus::kRequestAssigned
   //    for the RequestData object given by *request_data_ptr.
-  FCGIRequest(RequestIdentifier request_id, unsigned long interface_id,
-    FCGIServerInterface* interface_ptr, RequestData* request_data_ptr,
+  FcgiRequest(RequestIdentifier request_id, unsigned long interface_id,
+    FcgiServerInterface* interface_ptr, RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr,
     int write_fd);
 
@@ -504,13 +504,13 @@ class FCGIRequest {
   //
   // As for Write and Write error.
   template<typename ByteIter>
-  bool WriteHelper(ByteIter begin_iter, ByteIter end_iter, FCGIType type);
+  bool WriteHelper(ByteIter begin_iter, ByteIter end_iter, FcgiType type);
 
   // State for internal request management. Constant after initialization.
-    // Note that default constructed and moved-from FCGIRequest objects have
+    // Note that default constructed and moved-from FcgiRequest objects have
     // an associated_interface_id_ value of 0U.
   unsigned long associated_interface_id_;
-  FCGIServerInterface* interface_ptr_;
+  FcgiServerInterface* interface_ptr_;
   RequestIdentifier request_identifier_;
   RequestData* request_data_ptr_;
   std::mutex* write_mutex_ptr_;

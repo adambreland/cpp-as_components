@@ -1,3 +1,5 @@
+#include "include/utility.h"
+
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
@@ -5,7 +7,6 @@
 #include <vector>
 
 #include "include/protocol_constants.h"
-#include "include/utility.h"
 
 namespace fcgi_si {
 
@@ -85,15 +86,15 @@ ExtractBinaryNameValuePairs(const uint8_t* content_ptr,
   return result;
 }
 
-void PopulateHeader(std::uint8_t* byte_ptr, FCGIType type,
-  std::uint16_t FCGI_id, std::uint16_t content_length,
+void PopulateHeader(std::uint8_t* byte_ptr, FcgiType type,
+  std::uint16_t Fcgi_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept
 {
   std::uint8_t header_array[FCGI_HEADER_LEN];
   header_array[0] = FCGI_VERSION_1;
   header_array[1] = static_cast<uint8_t>(type);
-  header_array[2] = static_cast<uint8_t>(FCGI_id >> 8);
-  header_array[3] = static_cast<uint8_t>(FCGI_id);
+  header_array[2] = static_cast<uint8_t>(Fcgi_id >> 8);
+  header_array[3] = static_cast<uint8_t>(Fcgi_id);
   header_array[4] = static_cast<uint8_t>(content_length >> 8);
   header_array[5] = static_cast<uint8_t>(content_length);
   header_array[6] = padding_length;

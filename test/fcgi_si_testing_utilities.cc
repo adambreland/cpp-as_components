@@ -1,3 +1,5 @@
+#include "test/fcgi_si_testing_utilities.h"
+
 #include <dirent.h>
 #include <stdlib.h>
 #include <sys/types.h>
@@ -20,7 +22,6 @@
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
 #include "include/protocol_constants.h"
-#include "test/fcgi_si_testing_utilities.h"
 
 // Key:
 // BAZEL DEPENDENCY  This marks a feature which is provided by the Bazel
@@ -72,7 +73,7 @@ bool PrepareTemporaryFile(int descriptor)
 }
 
 std::tuple<bool, bool, bool, bool, std::vector<std::uint8_t>>
-ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id)
+ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
 {
   constexpr std::uint16_t buffer_size {1 << 10};
   std::uint8_t byte_buffer[buffer_size];
@@ -82,7 +83,7 @@ ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id)
   std::uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
   int header_bytes_read {0};
   std::vector<uint8_t> content_bytes {};
-  std::uint16_t FCGI_id {};
+  std::uint16_t Fcgi_id {};
   std::uint16_t content_length {0};
   std::uint16_t content_bytes_read {0};
   std::uint8_t padding_length {0};
@@ -126,11 +127,10 @@ ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id)
               break;
           }
           // The header is complete and there are some bytes left to process.
-
           // Extract header information.
-          (FCGI_id = local_header[fcgi_si::kHeaderRequestIDB1Index]) <<= 8; 
+          (Fcgi_id = local_header[fcgi_si::kHeaderRequestIDB1Index]) <<= 8; 
             // One byte.
-          FCGI_id += local_header[fcgi_si::kHeaderRequestIDB0Index];
+          Fcgi_id += local_header[fcgi_si::kHeaderRequestIDB0Index];
           (content_length = local_header[fcgi_si::kHeaderContentLengthB1Index]) 
             <<= 8;
           content_length += local_header[fcgi_si::kHeaderContentLengthB0Index];
@@ -138,9 +138,9 @@ ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id)
           if((content_length + padding_length) % 8 != 0)
             aligned = false;
           // Verify header information.
-          if(static_cast<fcgi_si::FCGIType>(
+          if(static_cast<fcgi_si::FcgiType>(
              local_header[fcgi_si::kHeaderTypeIndex]) != type 
-             || (FCGI_id != id))
+             || (Fcgi_id != id))
           {
             header_error = true;
             break;
@@ -212,17 +212,23 @@ ExtractContent(int fd, fcgi_si::FCGIType type, std::uint16_t id)
       case 0 : {
         if((0 < header_bytes_read) && 
            (header_bytes_read < fcgi_si::FCGI_HEADER_LEN))
+        {
           section_error = true;
+        }
         break;
       }
       case 1 : {
         if(content_bytes_read != content_length)
+        {
           section_error = true;
+        }
         break;
       }
       case 2 : {
         if(padding_bytes_read != padding_length)
+        {
           section_error = true;
+        }
         break;
       }
     }
