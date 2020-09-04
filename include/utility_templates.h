@@ -23,7 +23,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter)
   // TODO Add template type property checking with static asserts.
 
   if(length < 128)
-    throw std::invalid_argument {"A negative length was given."};
+    throw std::invalid_argument {"An invalid length was given."};
 
   // Set the leading bit to 1 to indicate that a four-byte sequence is
   // present.
@@ -434,8 +434,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     PopulateHeader(&(*header_iter), type, Fcgi_id,
       current_record_content_length, padding_length);
       
-    // The const_cast is necessary as struct iovec contains a void* member,
-    // but a client may pass in a const_iterator.
+    // The const_cast is necessary as struct iovec contains a void* member
+    // and a client may pass in a const_iterator.
     iovec_list.push_back({
       const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
       current_record_content_length
@@ -458,7 +458,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     remaining_content_length -= current_record_content_length;
     std::advance(begin_iter, current_record_content_length);
   }
-  // Relocate iovec_list.
+  // Relocate iovec_list now that the memory of noncontent_record_information
+  // is stable.
   for(std::vector<std::vector<std::uint8_t>::size_type>::size_type i {0}; 
       i < iovec_relocation.size();
       ++i)

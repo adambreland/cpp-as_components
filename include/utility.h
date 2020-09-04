@@ -246,12 +246,12 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept;
 //    invalidates the returned sequence of struct iovec instances.
 //
 // Effects:
-// 1)     A sequence of struct iovec instances is returned. This sequence
+// 1)    A sequence of struct iovec instances is returned. This sequence
 //    contains an array which can be used in a call to writev. When written
 //    with a scatter-gather write, a sequence of FastCGI records is produced
 //    whose content is a prefix of [begin_iter, end_iter). The fixed
 //    information contained in the record headers is given by type and Fcgi_id.
-//        If begin_iter == end_iter, an empty (terminal) record is produced.
+//       If begin_iter == end_iter, an empty (terminal) record is produced.
 // 2) Meaning of returned tuple elements:
 //       Access: std::get<0>; Type: std::vector<std::uint8_t>; A vector of
 //    bytes which holds information which is implicitly referenced in

@@ -1504,8 +1504,8 @@ TEST(Utility, PartitionByteSequence)
     {
       std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
         std::size_t, std::vector<std::uint8_t>::iterator> pr
-        {std::move(fcgi_si::PartitionByteSequence(begin_iter, content_seq.end(), 
-        type, Fcgi_id))};
+        {fcgi_si::PartitionByteSequence(begin_iter, content_seq.end(), 
+        type, Fcgi_id)};
 
       ssize_t writev_return {writev(temp_descriptor, std::get<1>(pr).data(),
         std::get<1>(pr).size())};
@@ -1576,94 +1576,94 @@ TEST(Utility, PartitionByteSequence)
     return;
   };
 
-  // Case 1: begin_iter == end_iter, 
-  // type == fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT, Fcgi_id == 0.
-  {
-    std::string message {"Case 1, about line: "};
-    message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> empty {};
-    PartitionByteSequenceTester(
-      message,
-      true,
-      empty, 
-      fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT,
-      0
-    );
-  }
+  // // Case 1: begin_iter == end_iter, 
+  // // type == fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT, Fcgi_id == 0.
+  // {
+  //   std::string message {"Case 1, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<std::uint8_t> empty {};
+  //   PartitionByteSequenceTester(
+  //     message,
+  //     true,
+  //     empty, 
+  //     fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT,
+  //     0
+  //   );
+  // }
 
-  // Case 2: std::distance(end_iter, begin_iter) == 3,
-  // type == fcgi_si::FcgiType::kFCGI_STDIN, Fcgi_id == 1.
-  {
-    std::string message {"Case 2, about line: "};
-    message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> content {1,2,3};
-    PartitionByteSequenceTester(
-      message,
-      false,
-      content, 
-      fcgi_si::FcgiType::kFCGI_STDIN,
-      1
-    );
-  }
+  // // Case 2: std::distance(end_iter, begin_iter) == 3,
+  // // type == fcgi_si::FcgiType::kFCGI_STDIN, Fcgi_id == 1.
+  // {
+  //   std::string message {"Case 2, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<std::uint8_t> content {1,2,3};
+  //   PartitionByteSequenceTester(
+  //     message,
+  //     false,
+  //     content, 
+  //     fcgi_si::FcgiType::kFCGI_STDIN,
+  //     1
+  //   );
+  // }
 
-  // Case 3: std::distance(end_iter, begin_iter) == 25,
-  // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 65535 ==
-  // std::numeric_limits<std::uint16_t>::max(). 
-  {
-    std::string message {"Case 3, about line: "};
-    message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> content {};
-    for(int i {0}; i < 25; ++i)
-      content.push_back(i);
-    PartitionByteSequenceTester(
-      message,
-      false,
-      content, 
-      fcgi_si::FcgiType::kFCGI_STDOUT,
-      std::numeric_limits<std::uint16_t>::max()
-    );
-  }
+  // // Case 3: std::distance(end_iter, begin_iter) == 25,
+  // // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 65535 ==
+  // // std::numeric_limits<std::uint16_t>::max(). 
+  // {
+  //   std::string message {"Case 3, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<std::uint8_t> content {};
+  //   for(int i {0}; i < 25; ++i)
+  //     content.push_back(i);
+  //   PartitionByteSequenceTester(
+  //     message,
+  //     false,
+  //     content, 
+  //     fcgi_si::FcgiType::kFCGI_STDOUT,
+  //     std::numeric_limits<std::uint16_t>::max()
+  //   );
+  // }
 
-  // Case 4: std::distance(end_iter, begin_iter) == 8,
-  // type == static_cast<fcgi_si::FcgiType>(20), Fcgi_id == 3.
-  {
-    std::string message {"Case 4, about line: "};
-    message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> content {};
-    for(int i {0}; i < 8; ++i)
-      content.push_back(i);
-    PartitionByteSequenceTester(
-      message,
-      false,
-      content, 
-      static_cast<fcgi_si::FcgiType>(20),
-      3
-    );
-  }
+  // // Case 4: std::distance(end_iter, begin_iter) == 8,
+  // // type == static_cast<fcgi_si::FcgiType>(20), Fcgi_id == 3.
+  // {
+  //   std::string message {"Case 4, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<std::uint8_t> content {};
+  //   for(int i {0}; i < 8; ++i)
+  //     content.push_back(i);
+  //   PartitionByteSequenceTester(
+  //     message,
+  //     false,
+  //     content, 
+  //     static_cast<fcgi_si::FcgiType>(20),
+  //     3
+  //   );
+  // }
 
-  // Case 5: std::distance(end_iter, begin_iter) == 65528,
-  // type == fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id == 300.
-  {
-    std::string message {"Case 5, about line: "};
-    message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> content {};
-    for(int i {0}; i < 65528; ++i)
-      content.push_back(i); // mod 256 overflow.
-    PartitionByteSequenceTester(
-      message,
-      false,
-      content, 
-      fcgi_si::FcgiType::kFCGI_PARAMS,
-      300
-    );
-  }
+  // // Case 5: std::distance(end_iter, begin_iter) == 65528,
+  // // type == fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id == 300.
+  // {
+  //   std::string message {"Case 5, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<std::uint8_t> content {};
+  //   for(int i {0}; i < 65528; ++i)
+  //     content.push_back(i); // mod 256 overflow.
+  //   PartitionByteSequenceTester(
+  //     message,
+  //     false,
+  //     content, 
+  //     fcgi_si::FcgiType::kFCGI_PARAMS,
+  //     300
+  //   );
+  // }
 
   // Case 6: std::distance(end_iter, begin_iter) == 2^25,
   // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 3.
   {
     std::string message {"Case 6, about line: "};
     message += std::to_string(__LINE__);
-    std::vector<std::uint8_t> content((1U << 16) - 7, 1U);
+    std::vector<std::uint8_t> content(1U << 25, 1U);
     PartitionByteSequenceTester(
       message,
       false,
