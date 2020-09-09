@@ -7,8 +7,10 @@
 
 #include <cstdlib>
 #include <cstdint>
+#include <list>
 #include <map>
 #include <memory>
+#include <queue>
 #include <utility>
 #include <vector>
 
@@ -20,8 +22,25 @@ namespace fcgi_si_test {
 
 using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
 
+struct FcgiRequest
+{
+  std::uint16_t       role;
+  bool                keep_conn;
+  const ParamsMap&    params_map;
+  const std::uint8_t* fcgi_stdin_ptr;
+  std::size_t         stdin_length;
+  const std::uint8_t* fcgi_data_ptr;
+  std::size_t         data_length;
+};
 
-// ServerEvent and derived classes.
+struct ManagementRequestData
+{
+  fcgi_si::FcgiType         type {};
+  ParamsMap                 params_map {};
+  std::vector<std::uint8_t> data {};
+};
+
+               ////// ServerEvent and derived classes. //////
 
 class ServerEvent
 {
@@ -81,41 +100,47 @@ class FcgiResponse : public ServerEvent
     return protocol_status_;
   }
 
+  inline const FcgiRequest& Request() const noexcept
+  {
+    return request_;
+  }
+
   inline fcgi_si::RequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
 
-  inline FcgiResponse()
-  : app_status_      {0},
-    fcgi_stderr_     {},
-    fcgi_stdout_     {},
-    protocol_status_ {0U},
-    request_id_      {-1, 0U}
-  {}
+  // The absence of an FcgiRequest instance makes default construction
+  // problematic due to the inclusion of a constant reference to a ParamsMap
+  // instance.
+  FcgiResponse() = delete;
 
   inline FcgiResponse(std::int32_t app_status, 
     const std::vector<std::uint8_t>& stderr, 
     const std::vector<std::uint8_t>& stdout,
-    std::uint8_t protocol_status, 
+    std::uint8_t protocol_status,
+    const FcgiRequest& request, 
     fcgi_si::RequestIdentifier request_id)
   : app_status_      {app_status},
     fcgi_stderr_     {stderr},
     fcgi_stdout_     {stdout},
     protocol_status_ {protocol_status},
-    request_id_ {request_id}
+    request_         {request},
+    request_id_      {request_id}
   {}
 
   inline FcgiResponse(std::int32_t app_status, 
     std::vector<std::uint8_t>&& stderr, 
     std::vector<std::uint8_t>&& stdout,
-    std::uint8_t protocol_status, 
+    std::uint8_t protocol_status,
+    FcgiRequest&& request,
     fcgi_si::RequestIdentifier request_id) noexcept
   : app_status_      {app_status},
     fcgi_stderr_     {std::move(stderr)},
     fcgi_stdout_     {std::move(stdout)},
     protocol_status_ {protocol_status},
-    request_id_ {request_id}
+    request_         {std::move(request)},
+    request_id_      {request_id}
   {}
 
   FcgiResponse(const FcgiResponse&) = default;
@@ -131,6 +156,7 @@ class FcgiResponse : public ServerEvent
   std::vector<std::uint8_t>  fcgi_stderr_;
   std::vector<std::uint8_t>  fcgi_stdout_;
   std::uint8_t               protocol_status_;
+  FcgiRequest                request_;
   fcgi_si::RequestIdentifier request_id_;
 };
 
@@ -209,30 +235,39 @@ class InvalidRecord : public ServerEvent
 class GetValuesResult : public ServerEvent
 {
  public:
+  inline const ParamsMap& RequestMap() const noexcept
+  {
+    return request_params_map_;
+  }
+
   inline fcgi_si::RequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
-
-  inline const ParamsMap& Result() const noexcept
-  {
-    return params_map_;
-  }
  
+  inline const ParamsMap& ResponseMap() const noexcept
+  {
+    return response_params_map_;
+  }
+
   inline GetValuesResult()
   : request_id_ {-1, 0U},
-    params_map_ {}
+    request_params_map_ {},
+    response_params_map_ {}
   {}
 
   inline GetValuesResult(fcgi_si::RequestIdentifier request_id, 
-    const ParamsMap& pm)
+    const ParamsMap& request, const ParamsMap& response)
   : request_id_ {request_id},
-    params_map_ {pm}
+    request_params_map_ {request},
+    response_params_map_ {response}
   {}
 
-  inline GetValuesResult(fcgi_si::RequestIdentifier request_id, ParamsMap&& pm)
+  inline GetValuesResult(fcgi_si::RequestIdentifier request_id, 
+    ParamsMap&& request, ParamsMap&& response)
   : request_id_ {request_id},
-    params_map_ {std::move(pm)}
+    request_params_map_ {std::move(request)},
+    response_params_map_ {std::move(response)}
   {}
 
   GetValuesResult(const GetValuesResult&) = default;
@@ -245,12 +280,18 @@ class GetValuesResult : public ServerEvent
 
  private:
   fcgi_si::RequestIdentifier request_id_;
-  ParamsMap                  params_map_;
+  ParamsMap                  request_params_map_;
+  ParamsMap                  response_params_map_;
 };
 
 class UnknownType : public ServerEvent
 {
  public:
+  inline const ManagementRequestData& Request() const noexcept
+  {
+    return request_;
+  }
+
   inline fcgi_si::RequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
@@ -261,15 +302,24 @@ class UnknownType : public ServerEvent
     return unknown_type_;
   }
 
-  inline UnknownType() noexcept
-  : request_id_   {-1, 0U},
-    unknown_type_ {0U}
+  inline UnknownType()
+  : request_id_         {-1, 0U},
+    unknown_type_       {0U},
+    request_ {static_cast<fcgi_si::FcgiType>(0U), {}, {}}
   {}
 
   inline UnknownType(fcgi_si::RequestIdentifier request_id,
-    std::uint8_t type) noexcept
-  : request_id_   {request_id},
-    unknown_type_ {type}
+    std::uint8_t type, const ManagementRequestData& request)
+  : request_id_         {request_id},
+    unknown_type_       {type},
+    request_ {request}
+  {}
+
+  inline UnknownType(fcgi_si::RequestIdentifier request_id,
+    std::uint8_t type, ManagementRequestData&& request)
+  : request_id_         {request_id},
+    unknown_type_       {type},
+    request_ {std::move(request)}
   {}
 
   UnknownType(const UnknownType&) = default;
@@ -283,6 +333,7 @@ class UnknownType : public ServerEvent
  private:
   fcgi_si::RequestIdentifier request_id_;
   std::uint8_t               unknown_type_;
+  ManagementRequestData      request_;
 };
 
 class OtherManagementResponse : public ServerEvent
@@ -293,6 +344,11 @@ class OtherManagementResponse : public ServerEvent
     return content_;
   }
 
+  inline const ManagementRequestData& Request() const noexcept
+  {
+    return request_;
+  }
+
   inline fcgi_si::RequestIdentifier RequestId() const noexcept
   {
     return request_id_;
@@ -300,19 +356,24 @@ class OtherManagementResponse : public ServerEvent
 
   inline OtherManagementResponse()
   : request_id_ {-1, 0U},
-    content_    {}
+    content_    {},
+    request_ {}
   {}
 
   inline OtherManagementResponse(fcgi_si::RequestIdentifier request_id, 
-    const std::vector<std::uint8_t>& content)
+    const std::vector<std::uint8_t>& content, 
+    const ManagementRequestData& request)
   : request_id_ {request_id},
-    content_    {content}
+    content_    {content},
+    request_    {request}
   {}
 
   inline OtherManagementResponse(fcgi_si::RequestIdentifier request_id, 
-    std::vector<std::uint8_t>&& content) noexcept
+    std::vector<std::uint8_t>&& content,
+    ManagementRequestData&& request)
   : request_id_ {request_id},
-    content_    {std::move(content)}
+    content_    {std::move(content)},
+    request_    {std::move(request)}
   {}
 
   OtherManagementResponse(const OtherManagementResponse&) = default;
@@ -326,21 +387,11 @@ class OtherManagementResponse : public ServerEvent
  private:
   fcgi_si::RequestIdentifier request_id_;
   std::vector<std::uint8_t>  content_;
+  ManagementRequestData      request_;
 };
 
 
-// The interface class.
-
-struct FcgiRequest
-{
-  std::uint16_t       role;
-  bool                keep_conn;
-  const ParamsMap&    params_map;
-  const std::uint8_t* fcgi_stdin_ptr;
-  std::size_t         stdin_length;
-  const std::uint8_t* fcgi_data_ptr;
-  std::size_t         data_length;
-};
+                    ////// The interface class. //////
 
 class TestFcgiClientInterface
 {
@@ -351,11 +402,16 @@ class TestFcgiClientInterface
   int Connect(const char* address, std::uint16_t port);
 
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
-  bool SendBinaryManagementRequest(int connection, const std::uint8_t* byte_ptr,
-    std::size_t length);
+  bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
+  bool SendBinaryManagementRequest(int connection, fcgi_si::FcgiType type,
+    const std::uint8_t* byte_ptr, std::size_t length);
+  bool SendBinaryManagementRequest(int connection, fcgi_si::FcgiType type,
+    std::vector<std::uint8_t>&& data);
 
   fcgi_si::RequestIdentifier SendRequest(int connection, 
     const FcgiRequest& request);
+  fcgi_si::RequestIdentifier SendRequest(int connection,
+    FcgiRequest&& request);
   bool SendAbortRequest(fcgi_si::RequestIdentifier);
   bool ReleaseId(fcgi_si::RequestIdentifier id);
   bool ReleaseId(int connection);
@@ -365,9 +421,37 @@ class TestFcgiClientInterface
   std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
 
  private:
-  std::map<int, a_component::IdManager> id_manager_map_;
+  struct RecordState
+  {
+    std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN] = {};
+    std::uint8_t              header_bytes_received {0U};
+    std::uint16_t             content_bytes_expected {};
+    std::uint16_t             content_bytes_received {};
+    std::uint8_t              padding_bytes_expected {};
+    std::uint8_t              padding_bytes_received {};
+    std::vector<std::uint8_t> local_buffer {};
+  };
+
+  struct ConnectionState
+  {
+    bool                   connected;
+    a_component::IdManager id_manager;
+    RecordState            record_state;
+    std::queue<ManagementRequestData, std::list<ManagementRequestData>> 
+                           management_queue;
+  };
+
+  struct RequestData
+  {
+    FcgiRequest               request;
+    std::vector<std::uint8_t> fcgi_stdout {};
+    std::vector<std::uint8_t> fcgi_stderr {};
+  };
+
+  std::map<int, ConnectionState>                    connection_map_;
+  std::map<fcgi_si::RequestIdentifier, RequestData> request_map_;
 };
 
-} // fcgi_si_test
+} // namespace fcgi_si_test
 
 #endif // FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
