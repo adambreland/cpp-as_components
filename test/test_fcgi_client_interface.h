@@ -396,39 +396,93 @@ class OtherManagementResponse : public ServerEvent
 class TestFcgiClientInterface
 {
  public:
-  // 1) Detect the address domain, create a socket of the detected domain, and
-  //    attempt to connect to the specified address and port pair.
-  // 2) Return the file descriptor of the socket on success and -1 on failure.
+  // Closes the socket descriptor connection when it refers to a socket
+  // opened by the TestFcgiClientInterface instance.
+  //
+  // Parameters:
+  // connection: A connection socket file descriptor.
+  //
+  // Preconditions: none
+  //
+  // Exceptions:
+  // 1) May through exceptions derived from std::exception.
+  // 2) In the event of a throw, one of the following holds:
+  //    a) The strong exception guarantee.
+  //    b) Internal state was updated to reflect connection closure, the
+  //       file descriptor was closed, and the system reported an error
+  //       during file descriptor closure. In this case, the exception is of
+  //       type std::system_error and contains the error code reported by the
+  //       system.
+  //
+  // Effects:
+  // 1) If connection is not a connected socket descriptor which was opened by
+  //    the TestFcgiClientInterface instance, then false was returned.
+  // 2) Otherwise, true was returned.
+  //    a) Requests on connection for which responses had been received
+  //       in-full and which were not released remain active.
+  //    b) Pending requests were released. The fcgi_si::RequestIdentifier
+  //       instances which were generated for them no longer refer to requests.
+  bool CloseConnection(int connection);
+
+  // Connects to an IPv4, IPv6, or UNIX domain stream socket as determined
+  // by the format of address. For UNIX domain addresses, port is disregarded
+  // and the current working directory is used to interpret relative
+  // file paths. If connection succeeded, the file descriptor of the local
+  // connected socket is returned. If connection failed, -1 is returned and
+  // errno is set accordingly.
+  //
+  // Parameters:
+  // address: A pointer to a null-terminated string. This string is interpreted
+  //          as either an IPv4 address or an IPv6 address. If neither format
+  //          applies, a UNIX domain address is assumed. A character string
+  //          length limit including the terminating null byte of 92 bytes is
+  //          enforced.
+  // port:    The port to be used with the IPv4 or IPv6 address of address.
+  //
+  // Preconditions: none
+  //
+  // Exceptions:
+  // 1) May through exceptions derived from std::exception.
+  // 2) Strong exception guarantee.
+  //
+  // Effects:
+  // 1) If connection failed, -1 was returned and errno was set accordingly.
+  // 2) If connection succeeded:
+  //    a) The file descriptor of the local connected socket was returned.
+  //    b) If the descriptor had previously been used and had requests which
+  //       were not released by a call to ReleaseId, those requests continue
+  //       to be active.
   int Connect(const char* address, std::uint16_t port);
 
-  bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
-  bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
+  std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
+
+  bool ReleaseId(fcgi_si::RequestIdentifier id);
+  bool ReleaseId(int connection);
+
+  bool SendAbortRequest(fcgi_si::RequestIdentifier);
+
   bool SendBinaryManagementRequest(int connection, fcgi_si::FcgiType type,
     const std::uint8_t* byte_ptr, std::size_t length);
   bool SendBinaryManagementRequest(int connection, fcgi_si::FcgiType type,
     std::vector<std::uint8_t>&& data);
 
+  bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
+  bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
+
   fcgi_si::RequestIdentifier SendRequest(int connection, 
     const FcgiRequest& request);
   fcgi_si::RequestIdentifier SendRequest(int connection,
     FcgiRequest&& request);
-  bool SendAbortRequest(fcgi_si::RequestIdentifier);
-  bool ReleaseId(fcgi_si::RequestIdentifier id);
-  bool ReleaseId(int connection);
-
-  bool CloseConnection(int connection);
-
-  std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
 
  private:
   struct RecordState
   {
     std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN] = {};
     std::uint8_t              header_bytes_received {0U};
-    std::uint16_t             content_bytes_expected {};
-    std::uint16_t             content_bytes_received {};
-    std::uint8_t              padding_bytes_expected {};
-    std::uint8_t              padding_bytes_received {};
+    std::uint16_t             content_bytes_expected {0U};
+    std::uint16_t             content_bytes_received {0U};
+    std::uint8_t              padding_bytes_expected {0U};
+    std::uint8_t              padding_bytes_received {0U};
     std::vector<std::uint8_t> local_buffer {};
   };
 
