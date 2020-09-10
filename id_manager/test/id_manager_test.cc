@@ -15,7 +15,27 @@ class IdTracker
   bool RegisterAndCheckNewID(int id);
   void RegisterReleasedId(int id);
 
+  inline int NumberInUse() const
+  {
+    return number_in_use_;
+  }
+
+  inline IdTracker()
+  : number_in_use_ {0},
+    used_ids_      {},
+    available_ids_ {}
+  {}
+
+  IdTracker(const IdTracker&) = default;
+  IdTracker(IdTracker&&) = default;
+
+  IdTracker& operator=(const IdTracker&) = default;
+  IdTracker& operator=(IdTracker&&) = default;
+
+  ~IdTracker() = default;
+
  private:
+  int number_in_use_;
   std::set<int> used_ids_;
   std::set<int> available_ids_;
 };
@@ -48,6 +68,7 @@ bool IdTracker::RegisterAndCheckNewID(int id)
     if(id == new_id)
     {
       used_ids_.insert(id);
+      ++number_in_use_;
       return true;
     }
     else
@@ -67,6 +88,7 @@ bool IdTracker::RegisterAndCheckNewID(int id)
     {
       available_ids_.erase(available_iter);
       used_ids_.insert(id);
+      ++number_in_use_;
       return true;
     }
   }
@@ -101,6 +123,8 @@ void IdTracker::RegisterReleasedId(int id)
   {
     available_ids_.clear();
   }
+
+  --number_in_use_;
 }
 
 // Test explanation
@@ -131,7 +155,7 @@ void IdTracker::RegisterReleasedId(int id)
 // 2) New instance. A call to GetID returns 1. The call ReleaseID(1) does not
 //    throw an exception. A call to GetID returns 1. Throughout, IsUsed
 //    behaves as specified.
-// 3) New instance. Arbitrary, valid calls are to GetId and ReleaseId are made.
+// 3) New instance. Arbitrary, valid calls to GetId and ReleaseId are made.
 //    The calls are arranged so that the used set becomes empty. Upon becoming
 //    empty, a call to GetID returns 1. Throughout, calls to IsUsed behave as
 //    expected.
@@ -147,14 +171,15 @@ void IdTracker::RegisterReleasedId(int id)
 // track used and unused IDs to validate the behavior of IdManager.
 // E.g. A GetId/ReleaseId ratio of 0 means that an ID is released as soon as
 //      it is returned. The sequence is then G1, R1, G1, R1, ... .
-// E.g. A GetId/ReleaseId ratio of 0.5 would allow some random fluctuations
+// E.g. A GetId/ReleaseId ratio of 1 would allow some random fluctuations
 //      to occur. A large number of replicates where each replciate uses a
 //      large operation count would provide a more thorough test.
 
 TEST(IdManager, NewInstanceIsUsed)
 {
-  AComponent::IdManager id_manager {};
+  a_component::IdManager id_manager {};
 
+  EXPECT_EQ(id_manager.NumberUsedIds(), 0);
   EXPECT_FALSE(id_manager.IsUsed(-1));
   EXPECT_FALSE(id_manager.IsUsed(0));
   EXPECT_FALSE(id_manager.IsUsed(1));
@@ -163,29 +188,35 @@ TEST(IdManager, NewInstanceIsUsed)
 
 TEST(IdManager, NewInstanceMinimalUse)
 {
-  AComponent::IdManager id_manager {};
+  a_component::IdManager id_manager {};
 
   int new_id {};
   ASSERT_NO_THROW(new_id = id_manager.GetId());
   EXPECT_EQ(new_id, 1);
   EXPECT_TRUE(id_manager.IsUsed(1));
+  EXPECT_EQ(id_manager.NumberUsedIds(), 1);
+
   ASSERT_NO_THROW(id_manager.ReleaseId(new_id));
   EXPECT_FALSE(id_manager.IsUsed(1));
+  EXPECT_EQ(id_manager.NumberUsedIds(), 0);
+
   EXPECT_EQ(id_manager.GetId(), 1);
   EXPECT_TRUE(id_manager.IsUsed(1));
+  EXPECT_EQ(id_manager.NumberUsedIds(), 1);
 }
 
 TEST(IdManager, NewInstanceUseAndEmpty)
 {
   std::vector<int> get_returns {};
   IdTracker id_tracker {};
-  AComponent::IdManager id_manager {};
+  a_component::IdManager id_manager {};
 
   auto GetCheckRecord = [&get_returns, &id_tracker, &id_manager]()->void
   {
     int new_id {id_manager.GetId()};
     bool valid_id {id_tracker.RegisterAndCheckNewID(new_id)};
     EXPECT_TRUE(id_manager.IsUsed(new_id));
+    EXPECT_EQ(id_manager.NumberUsedIds(), id_tracker.NumberInUse());
     ASSERT_TRUE(valid_id);
     get_returns.push_back(new_id);
   };
@@ -200,6 +231,7 @@ TEST(IdManager, NewInstanceUseAndEmpty)
     ASSERT_NO_THROW(id_manager.ReleaseId(to_release));
     EXPECT_FALSE(id_manager.IsUsed(to_release));
     ASSERT_NO_THROW(id_tracker.RegisterReleasedId(to_release));
+    EXPECT_EQ(id_manager.NumberUsedIds(), id_tracker.NumberInUse());
   };
 
   for(int i {0}; i < 10; ++i)
@@ -233,10 +265,11 @@ TEST(IdManager, NewInstanceUseAndEmpty)
 
 // TEST(IdManager, MaxIdException)
 // {
-//   AComponent::IdManager id_manager {};
+//   a_component::IdManager id_manager {};
 //   for(int i {0}; i < std::numeric_limits<int>::max(); ++i)
 //   {
 //     id_manager.GetId();
+//     EXPECT_EQ(id_manager.NumberUsedIds(), i + 1);
 //   }
 //   EXPECT_THROW(id_manager.GetId(), std::exception);
 // }

@@ -16,7 +16,7 @@
 
 #include <map>
 
-namespace AComponent {
+namespace a_component {
 
 class IdManager
 {
@@ -40,6 +40,21 @@ class IdManager
   // 4) The returned ID is regarded as used.
   int GetId();
 
+  // Returns true if the id is in use. Returns false otherwise.
+  //
+  // Preconditions: none.
+  //
+  // Exceptions: noexcept. 
+  inline bool IsUsed(int id) const noexcept
+  {
+    return FindUsedRange(id) != used_ranges_.cend();
+  }
+
+  inline int NumberUsedIds() const noexcept
+  {
+    return number_in_use_;
+  }
+
   // Informs the IdManager instance that id should no longer be regarded as
   // used.
   //
@@ -55,16 +70,19 @@ class IdManager
   // 2) Future calls to GetId may return id if it not in use and is not larger
   //    than the maximum in-use id at the time of the call to GetId.
   void ReleaseId(int id);
-  
-  // Returns true if the id is in use. Returns false otherwise.
-  //
-  // Preconditions: none.
-  //
-  // Exceptions: noexcept. 
-  inline bool IsUsed(int id) const noexcept
-  {
-    return FindUsedRange(id) != used_ranges_.cend();
-  }
+
+  inline IdManager()
+  : number_in_use_ {0},
+    used_ranges_   {}
+  {}
+
+  IdManager(const IdManager&) = default;
+  IdManager(IdManager&&) = default;
+
+  IdManager& operator=(const IdManager&) = default;
+  IdManager& operator=(IdManager&&) = default;
+
+  ~IdManager() = default;
 
  private:
   // Both functions return an iterator to the used interval which contains
@@ -76,7 +94,8 @@ class IdManager
   std::map<int, int>::iterator FindUsedRange(int id) noexcept;
   std::map<int, int>::const_iterator FindUsedRange(int id) const noexcept;
 
+  int number_in_use_;
   std::map<int, int> used_ranges_;
 };
 
-} // namespace AComponent
+} // namespace a_component
