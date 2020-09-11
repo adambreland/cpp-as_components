@@ -68,7 +68,7 @@ class IdManager
   // Effects:
   // 1) The IdManager instance recorded that id is no longer in use.
   // 2) Future calls to GetId may return id if it not in use and is not larger
-  //    than the maximum in-use id at the time of the call to GetId.
+  //    than the maximum in-use id plus one at the time of the call to GetId.
   void ReleaseId(int id);
 
   inline IdManager()
