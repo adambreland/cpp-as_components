@@ -11,6 +11,7 @@
 #include <exception>
 #include <limits>
 #include <map>
+#include <set>
 #include <system_error>
 #include <type_traits>
 
@@ -33,15 +34,15 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
   }
 
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator start
-    {request_map_.lower_bound({connection, 0U})};
+    {pending_request_map_.lower_bound({connection, 0U})};
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator end
     {(connection < std::numeric_limits<int>::max()) ?
-      request_map_.lower_bound({connection + 1, 0U}) :
-      request_map_.end()};
+      pending_request_map_.lower_bound({connection + 1, 0U}) :
+      pending_request_map_.end()};
 
-  // Determine if the item in connection_map_ should be erased. When IDs are
-  // present, the ConnectionState instance should not be erased.
-  if(state_ptr->id_manager.NumberUsedIds())
+  // Determine if the item in connection_map_ should be erased. When request
+  // IDs for completed requests are present, the item should not be erased.
+  if(completed_request_map_.size())
   {
     // Perform actions which may throw.
     std::queue<ManagementRequestData, std::list<ManagementRequestData>>
@@ -61,13 +62,14 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     );
     state_ptr->management_queue.swap(empty_queue);
     state_ptr->connected = false;
-    // Erasing pending requests requires releasing the RequestIdentifier
-    // values which are associated with the requests from id_manager.
+    // The erasure of pending requests requires releasing the RequestIdentifier
+    // values which are associated with these requests from id_manager.
     //
     // ReleaseId may throw. If this occurs, a logic error in
     // TestFcgiClientInterface has occurred which prevents a known state
-    // fromeasily being specified for recovery. Termination solves this problem.
-    try
+    // from easily being specified for recovery. Termination solves this
+    // problem.
+    try // noexcept-equivalent block
     {
       for(std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
         start_copy {start}; start_copy != end; ++start_copy)
@@ -84,7 +86,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
   {
     connection_map_.erase(connection_iter);
   }
-  request_map_.erase(start, end);
+  pending_request_map_.erase(start, end);
 
   if((close(connection) == -1) && (errno != EINTR))
   {
@@ -129,7 +131,12 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
       errno = EINVAL;
       return -1;
     }
-    char* path_ptr {static_cast<struct sockaddr_un*>(static_cast<void*>(&addr_store))->sun_path};
+    char* path_ptr {
+      static_cast<struct sockaddr_un*>(
+        static_cast<void*>(
+          &addr_store))
+      ->sun_path
+    };
     std::strcpy(path_ptr, address); // Include null byte.
   }
 
@@ -187,7 +194,8 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
       if(*conn_ptr)
       {
         throw std::logic_error {"A connection was made on a file descriptor "
-          "which was already connected according to TestFcgiClientInterface."};
+          "which was already connected in a call to "
+          "TestFcgiClientInterface::Connect."};
       }
       else
       {
@@ -219,19 +227,100 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   return socket_connection;
 }
 
-// bool TestFcgiClientInterface::SendGetValuesRequest(int connection, 
-//   const ParamsMap& params_map)
+// std::vector<std::unique_ptr<ServerEvent>>
+// TestFcgiClientInterface::ReceiveResponses()
 // {
 
 // }
 
-// bool TestFcgiClientInterface::SendGetValuesRequest(int connection, 
-//   ParamsMap&& params_map)
+bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
+{
+  std::map<int, ConnectionState>::iterator connection_iter
+    {connection_map_.find(id.descriptor())};
+  if(connection_iter == connection_map_.end())
+  {
+    return false;
+  }
+  else
+  {
+    a_component::IdManager* id_manager_ptr
+      {&(connection_iter->second.id_manager)};
+    std::uint16_t fcgi_id {id.Fcgi_id()};
+
+    bool pending {pending_request_map_.find(id) != pending_request_map_.end()};
+    std::set<fcgi_si::RequestIdentifier>::iterator completed_iter
+        {completed_request_map_.find(id)};
+    bool completed {completed_iter != completed_request_map_.end()};
+    bool used {id_manager_ptr->IsUsed(fcgi_id)};
+
+    // Once a connection entry is known to exist, of the eight permutations of
+    // the above boolean values, only three do not imply logic errors.
+    if((!used && !pending && !completed) || (used && pending && !completed))
+    {
+      return false;
+    }
+    else if(used && !pending && completed)
+    {
+      id_manager_ptr->ReleaseId(fcgi_id);
+      completed_request_map_.erase(completed_iter);
+      return true;
+    }
+    else
+    {
+      throw std::logic_error {"A discrepancy between stored request IDs was "
+        "found in an instance of TestFcgiClientInterface in a call to "
+        "ReleaseId."};
+    }
+  }
+}
+
+bool TestFcgiClientInterface::ReleaseId(int connection)
+{
+  std::map<int, ConnectionState>::iterator connection_iter
+    {connection_map_.find(connection)};
+  if(connection_iter == connection_map_.end())
+  {
+    return false;
+  }
+  a_component::IdManager* id_manager_ptr
+    {&(connection_iter->second.id_manager)};
+  std::set<fcgi_si::RequestIdentifier>::iterator start
+    {completed_request_map_.lower_bound({connection, 0U})};
+  std::set<fcgi_si::RequestIdentifier>::iterator end
+    {(connection < std::numeric_limits<int>::max()) ?
+      completed_request_map_.lower_bound({connection + 1, 0U}) :
+      completed_request_map_.end()};
+  std::vector<std::uint16_t> fcgi_id_cache {};
+  // Ensure that each completed request is present in the id_manager.
+  //
+  // Occurrence of a completed request in the pending map is not checked.
+  for(std::set<fcgi_si::RequestIdentifier>::iterator
+    start_copy {start}; start_copy != end; ++start_copy)
+  {
+    std::uint16_t local_id {start_copy->Fcgi_id()};
+    fcgi_id_cache.push_back(local_id);
+    if(!(id_manager_ptr->IsUsed(local_id)))
+    {
+      throw std::logic_error {"A completed and unreleased request was not "
+        "present in the appropriate IdManager instance in a call to "
+        "TestFcgiClientInterface::ReleaseId."};
+    }
+  }
+  for(std::vector<std::uint16_t>::iterator i {fcgi_id_cache.begin()};
+    i != fcgi_id_cache.end(); ++i)
+  {
+    id_manager_ptr->ReleaseId(*i);
+  }
+  completed_request_map_.erase(start, end);
+  return true;
+}
+
+// bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier)
 // {
 
 // }
 
-// bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection, 
+// bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
 //   fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
 // {
 
@@ -239,6 +328,30 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
 
 // bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
 //   fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)
+// {
+
+// }
+
+// bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
+//   const ParamsMap& params_map)
+// {
+
+// }
+
+// bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
+//   ParamsMap&& params_map)
+// {
+
+// }
+
+// fcgi_si::RequestIdentifier
+// TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
+// {
+
+// }
+
+// fcgi_si::RequestIdentifier
+// TestFcgiClientInterface::SendRequest(int connection, FcgiRequest&& request)
 // {
 
 // }

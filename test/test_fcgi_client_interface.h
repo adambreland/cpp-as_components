@@ -400,7 +400,7 @@ class TestFcgiClientInterface
   // opened by the TestFcgiClientInterface instance.
   //
   // Parameters:
-  // connection: A connection socket file descriptor.
+  // connection: The socket file descriptor of a connection.
   //
   // Preconditions: none
   //
@@ -415,12 +415,12 @@ class TestFcgiClientInterface
   //       system.
   //
   // Effects:
-  // 1) If connection is not a connected socket descriptor which was opened by
+  // 1) If connection was not a connected socket descriptor which was opened by
   //    the TestFcgiClientInterface instance, then false was returned.
   // 2) Otherwise, true was returned.
   //    a) Requests on connection for which responses had been received
-  //       in-full and which were not released remain active.
-  //    b) Pending requests were released. The fcgi_si::RequestIdentifier
+  //       in-full and which were not released by the user remain active.
+  //    b) Pending requests were released: the fcgi_si::RequestIdentifier
   //       instances which were generated for them no longer refer to requests.
   bool CloseConnection(int connection);
 
@@ -502,8 +502,9 @@ class TestFcgiClientInterface
     std::vector<std::uint8_t> fcgi_stderr {};
   };
 
+  std::set<fcgi_si::RequestIdentifier>              completed_request_map_;
   std::map<int, ConnectionState>                    connection_map_;
-  std::map<fcgi_si::RequestIdentifier, RequestData> request_map_;
+  std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
 };
 
 } // namespace fcgi_si_test
