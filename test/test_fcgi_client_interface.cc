@@ -19,6 +19,36 @@
 
 namespace fcgi_si_test {
 
+// Invariants and properties of completed_request_set_, connection_map_, and
+// pending_request_map_.
+// 1) If a RequestIdentifier instance ri is present in completed_request_set_
+//    or pending_request_map_, then an entry for ri.descriptor() must be
+//    present in connection_map_.
+// 2) If a connection as represented by a ConnectionState instance c of
+//    connection_map_ is not connected (c.connected == false), then no requests
+//    which are associated with the connection may be present in
+//    pending_request_map_.
+// 3) If a connection as represented by a ConnectionState instance c of
+//    connection_map_ is not connected, then there must exist
+//    completed-but-unreleased requests in completed_request_set_ which are
+//    associated with the connection of c.
+//    (In other words, if a connection is not connected and the last completed-
+//    but-unreleased request is released, then the connection must be removed
+//    from connection_map_.)
+// 4) completed_request_set_ and pending_request_map_ have disjoint sets of
+//    keys.
+// 5) The set of FCGI_id values of the id_manager instance for a connection of
+//    a ConnectionState instance c of connection_map_ is identical to the union
+//    of the sets of FCGI_id values of the RequestIdentifier instances which
+//    are associated with the connection of c and which are derived from
+//    completed_request_set_ and pending_request_map_.
+// 6) The ReleaseId overload set can only release completed-but-unreleased
+//    requests.
+//    a) Pending requests are cancelled by either closing the connection on
+//       which the request was made (which cancels all pending requests on the
+//       connection) or by calling SendAbortRequest and waiting for a response
+//       from the server about the aborted request.
+
 bool TestFcgiClientInterface::CloseConnection(int connection)
 {
   std::map<int, ConnectionState>::iterator connection_iter
@@ -33,20 +63,38 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     return false;
   }
 
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator start
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_start
     {pending_request_map_.lower_bound({connection, 0U})};
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator end
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_end
     {(connection < std::numeric_limits<int>::max()) ?
       pending_request_map_.lower_bound({connection + 1, 0U}) :
       pending_request_map_.end()};
 
   // Determine if the item in connection_map_ should be erased. When request
   // IDs for completed requests are present, the item should not be erased.
-  if(completed_request_map_.size())
+  std::set<fcgi_si::RequestIdentifier>::iterator completed_start
+    {completed_request_set_.lower_bound({connection, 0U})};
+  // Are completed-but-unreleased requests present?
+  if((completed_start != completed_request_set_.end()) &&
+     (completed_start->descriptor() == connection))
   {
     // Perform actions which may throw.
     std::queue<ManagementRequestData, std::list<ManagementRequestData>>
       empty_queue {};
+    // Check that each ID which will be released is being tracked by the
+    // id_manager.
+    a_component::IdManager* id_manager_ptr {&(state_ptr->id_manager)};
+    for(std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+      pending_start_copy {pending_start};
+      pending_start_copy != pending_end;
+      ++pending_start_copy)
+    {
+      if(!(id_manager_ptr->IsUsed(pending_start_copy->first.Fcgi_id())))
+      {
+        throw std::logic_error {"A discrepancy between stored request IDs was "
+          "found during a call to TestFcgiClientInterface::CloseConnection."};
+      }
+    }
 
     // Update state using calls which can't throw.
     state_ptr->record_state.header_bytes_received  = 0U;
@@ -65,28 +113,23 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     // The erasure of pending requests requires releasing the RequestIdentifier
     // values which are associated with these requests from id_manager.
     //
-    // ReleaseId may throw. If this occurs, a logic error in
-    // TestFcgiClientInterface has occurred which prevents a known state
-    // from easily being specified for recovery. Termination solves this
-    // problem.
-    try // noexcept-equivalent block
+    // It is assumed that ReleaseId will not throw as the check above
+    // succeeded.
+    while(pending_start != pending_end)
     {
-      for(std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
-        start_copy {start}; start_copy != end; ++start_copy)
-      {
-        state_ptr->id_manager.ReleaseId(start_copy->first.Fcgi_id());
-      }
-    }
-    catch(...)
-    {
-      std::terminate();
+      id_manager_ptr->ReleaseId(pending_start->first.Fcgi_id());
+      std::map<fcgi_si::RequestIdentifier, RequestData>::iterator safe_eraser
+        {pending_start};
+      ++pending_start;
+      pending_request_map_.erase(safe_eraser);
     }
   }
-  else
+  else // No completed-but-unreleased requests are present for connection.
   {
     connection_map_.erase(connection_iter);
+    pending_request_map_.erase(pending_start, pending_end);
   }
-  pending_request_map_.erase(start, end);
+
 
   if((close(connection) == -1) && (errno != EINTR))
   {
@@ -235,22 +278,25 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
 
 bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
 {
+  int connection {id.descriptor()};
   std::map<int, ConnectionState>::iterator connection_iter
-    {connection_map_.find(id.descriptor())};
+    {connection_map_.find(connection)};
   if(connection_iter == connection_map_.end())
   {
     return false;
   }
   else
   {
+    std::set<fcgi_si::RequestIdentifier>::iterator completed_end
+      {completed_request_set_.end()};
     a_component::IdManager* id_manager_ptr
       {&(connection_iter->second.id_manager)};
     std::uint16_t fcgi_id {id.Fcgi_id()};
 
     bool pending {pending_request_map_.find(id) != pending_request_map_.end()};
     std::set<fcgi_si::RequestIdentifier>::iterator completed_iter
-        {completed_request_map_.find(id)};
-    bool completed {completed_iter != completed_request_map_.end()};
+        {completed_request_set_.find(id)};
+    bool completed {completed_iter != completed_end};
     bool used {id_manager_ptr->IsUsed(fcgi_id)};
 
     // Once a connection entry is known to exist, of the eight permutations of
@@ -261,8 +307,37 @@ bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
     }
     else if(used && !pending && completed)
     {
-      id_manager_ptr->ReleaseId(fcgi_id);
-      completed_request_map_.erase(completed_iter);
+      // The request must be removed from completed_request_set_.
+      // If the connection is not connected and the request which will be
+      // removed is the only completed-but-unreleased request, then the
+      // entry for the connection in connection_map_ must be removed.
+      bool more_before {false};
+      if(completed_iter != completed_request_set_.begin())
+      {
+        std::set<fcgi_si::RequestIdentifier>::iterator previous_completed
+          {completed_iter};
+        --previous_completed;
+        if(previous_completed->descriptor() == connection)
+        {
+          more_before = true;
+        }
+      }
+      std::set<fcgi_si::RequestIdentifier>::iterator next_completed
+        {completed_iter};
+      next_completed++;
+      bool more_after {(next_completed != completed_end) ?
+        (next_completed->descriptor() == connection) : false};
+      bool only_one {!more_before && !more_after};
+
+      if(only_one && !(connection_iter->second.connected))
+      {
+        connection_map_.erase(connection_iter);
+      }
+      else
+      {
+        id_manager_ptr->ReleaseId(fcgi_id);
+      }
+      completed_request_set_.erase(completed_iter);
       return true;
     }
     else
@@ -282,36 +357,60 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
   {
     return false;
   }
+  bool connected {connection_iter->second.connected};
   a_component::IdManager* id_manager_ptr
     {&(connection_iter->second.id_manager)};
   std::set<fcgi_si::RequestIdentifier>::iterator start
-    {completed_request_map_.lower_bound({connection, 0U})};
+    {completed_request_set_.lower_bound({connection, 0U})};
   std::set<fcgi_si::RequestIdentifier>::iterator end
     {(connection < std::numeric_limits<int>::max()) ?
-      completed_request_map_.lower_bound({connection + 1, 0U}) :
-      completed_request_map_.end()};
-  std::vector<std::uint16_t> fcgi_id_cache {};
-  // Ensure that each completed request is present in the id_manager.
-  //
-  // Occurrence of a completed request in the pending map is not checked.
-  for(std::set<fcgi_si::RequestIdentifier>::iterator
-    start_copy {start}; start_copy != end; ++start_copy)
+      completed_request_set_.lower_bound({connection + 1, 0U}) :
+      completed_request_set_.end()};
+  // Perform actions on connection_map_ here. Actions on completed_request_set_
+  // are performed below.
+  if(connected)
   {
-    std::uint16_t local_id {start_copy->Fcgi_id()};
-    fcgi_id_cache.push_back(local_id);
-    if(!(id_manager_ptr->IsUsed(local_id)))
+    std::vector<std::uint16_t> fcgi_id_cache {};
+    // Ensure that each completed request is present in the id_manager.
+    //
+    // Absence of a completed requests in the pending map is not verified.
+    for(std::set<fcgi_si::RequestIdentifier>::iterator
+      start_copy {start}; start_copy != end; ++start_copy)
     {
-      throw std::logic_error {"A completed and unreleased request was not "
-        "present in the appropriate IdManager instance in a call to "
-        "TestFcgiClientInterface::ReleaseId."};
+      std::uint16_t local_id {start_copy->Fcgi_id()};
+      fcgi_id_cache.push_back(local_id);
+      if(!(id_manager_ptr->IsUsed(local_id)))
+      {
+        throw std::logic_error {"A completed and unreleased request was not "
+          "present in the appropriate IdManager instance in a call to "
+          "TestFcgiClientInterface::ReleaseId."};
+      }
+    }
+    // It is assumed that ReleaseId won't throw because of the success of the
+    // previous check.
+    for(std::vector<std::uint16_t>::iterator i {fcgi_id_cache.begin()};
+      i != fcgi_id_cache.end(); ++i)
+    {
+      id_manager_ptr->ReleaseId(*i);
     }
   }
-  for(std::vector<std::uint16_t>::iterator i {fcgi_id_cache.begin()};
-    i != fcgi_id_cache.end(); ++i)
+  else
   {
-    id_manager_ptr->ReleaseId(*i);
+    // If no completed-but-unreleased requests are present in
+    // completed_request_set_, an invariant has been violated.
+    //
+    // The absence of any request in pending_request_map_ for connection is not
+    // verified.
+    if(start == end)
+    {
+      throw std::logic_error {"In a call to "
+        "TestFcgiClientInterface::ReleaseId(int), a disconnected socket "
+        "descriptor was found for which no completed-but-unreleased requests "
+        "were present."};
+    }
+    connection_map_.erase(connection_iter);
   }
-  completed_request_map_.erase(start, end);
+  completed_request_set_.erase(start, end);
   return true;
 }
 

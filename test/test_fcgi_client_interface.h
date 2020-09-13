@@ -452,6 +452,7 @@ class TestFcgiClientInterface
   //    b) If the descriptor had previously been used and had requests which
   //       were not released by a call to ReleaseId, those requests continue
   //       to be active.
+  // 3) EINTR was ignored during the invocation.
   int Connect(const char* address, std::uint16_t port);
 
   std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
@@ -502,7 +503,7 @@ class TestFcgiClientInterface
     std::vector<std::uint8_t> fcgi_stderr {};
   };
 
-  std::set<fcgi_si::RequestIdentifier>              completed_request_map_;
+  std::set<fcgi_si::RequestIdentifier>              completed_request_set_;
   std::map<int, ConnectionState>                    connection_map_;
   std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
 };
