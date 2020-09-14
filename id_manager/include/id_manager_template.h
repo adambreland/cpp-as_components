@@ -105,6 +105,7 @@
 
 #include <limits>
 #include <map>
+#include <type_traits>
 
 namespace a_component {
 
@@ -140,7 +141,7 @@ class IdManager
   // 2) Strong exception guarantee.
   inline bool IsUsed(I i) const
   {
-    return (FindInterval(i) != id_intervals_.end());
+    return (FindInterval(i) != id_intervals_.cend());
   }
 
   // Informs the IdManager instance that id should no longer be regarded as
@@ -167,7 +168,9 @@ class IdManager
   inline IdManager()
   : size_         {0},
     id_intervals_ {}
-  {}
+  {
+    static_assert(std::is_integral<I>::value, "An integral type must be used.");
+  }
 
   IdManager(const IdManager&) = default;
   IdManager(IdManager&&) = default;
