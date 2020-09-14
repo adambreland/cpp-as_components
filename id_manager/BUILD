@@ -1,17 +1,15 @@
-cc_library(
-    name       = "id_manager",
-    hdrs       = ["//:include/id_manager.h"],
-    srcs       = ["//:src/id_manager.cc"],
-    deps       = [],
-    copts      = ["-iquote .", "-Wextra"],
-    visibility = ["//visibility:public"]
-)
+exports_files(["include/id_manager_template.h"])
 
 cc_test(
-    name    = "id_manager_test",
-    srcs    = ["//:test/id_manager_test.cc"],
-    deps    = ["//:id_manager", "@googletest//:gtest", 
-               "@googletest//:gtest_main"],
+    name    = "id_manager_template_test",
+    srcs    = [
+               "//:include/id_manager_template.h",
+               "//:test/id_manager_template_test.cc"
+    ],
+    deps    = [
+               "@googletest//:gtest", 
+               "@googletest//:gtest_main"
+    ],
     copts   = ["-iquote .", "-Wextra"],
     timeout = "eternal"
 )

@@ -5,7 +5,7 @@
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "include/id_manager.h"
+#include "include/id_manager_template.h"
 
 namespace {
 
@@ -177,9 +177,9 @@ void IdTracker::RegisterReleasedId(int id)
 
 TEST(IdManager, NewInstanceIsUsed)
 {
-  a_component::IdManager id_manager {};
+  a_component::IdManager<int> id_manager {};
 
-  EXPECT_EQ(id_manager.NumberUsedIds(), 0);
+  EXPECT_EQ(id_manager.NumberOfUsedIds(), 0);
   EXPECT_FALSE(id_manager.IsUsed(-1));
   EXPECT_FALSE(id_manager.IsUsed(0));
   EXPECT_FALSE(id_manager.IsUsed(1));
@@ -188,35 +188,35 @@ TEST(IdManager, NewInstanceIsUsed)
 
 TEST(IdManager, NewInstanceMinimalUse)
 {
-  a_component::IdManager id_manager {};
+  a_component::IdManager<int> id_manager {};
 
   int new_id {};
   ASSERT_NO_THROW(new_id = id_manager.GetId());
   EXPECT_EQ(new_id, 1);
   EXPECT_TRUE(id_manager.IsUsed(1));
-  EXPECT_EQ(id_manager.NumberUsedIds(), 1);
+  EXPECT_EQ(id_manager.NumberOfUsedIds(), 1);
 
   ASSERT_NO_THROW(id_manager.ReleaseId(new_id));
   EXPECT_FALSE(id_manager.IsUsed(1));
-  EXPECT_EQ(id_manager.NumberUsedIds(), 0);
+  EXPECT_EQ(id_manager.NumberOfUsedIds(), 0);
 
   EXPECT_EQ(id_manager.GetId(), 1);
   EXPECT_TRUE(id_manager.IsUsed(1));
-  EXPECT_EQ(id_manager.NumberUsedIds(), 1);
+  EXPECT_EQ(id_manager.NumberOfUsedIds(), 1);
 }
 
 TEST(IdManager, NewInstanceUseAndEmpty)
 {
   std::vector<int> get_returns {};
   IdTracker id_tracker {};
-  a_component::IdManager id_manager {};
+  a_component::IdManager<int> id_manager {};
 
   auto GetCheckRecord = [&get_returns, &id_tracker, &id_manager]()->void
   {
     int new_id {id_manager.GetId()};
     bool valid_id {id_tracker.RegisterAndCheckNewID(new_id)};
     EXPECT_TRUE(id_manager.IsUsed(new_id));
-    EXPECT_EQ(id_manager.NumberUsedIds(), id_tracker.NumberInUse());
+    EXPECT_EQ(id_manager.NumberOfUsedIds(), id_tracker.NumberInUse());
     ASSERT_TRUE(valid_id);
     get_returns.push_back(new_id);
   };
@@ -231,7 +231,7 @@ TEST(IdManager, NewInstanceUseAndEmpty)
     ASSERT_NO_THROW(id_manager.ReleaseId(to_release));
     EXPECT_FALSE(id_manager.IsUsed(to_release));
     ASSERT_NO_THROW(id_tracker.RegisterReleasedId(to_release));
-    EXPECT_EQ(id_manager.NumberUsedIds(), id_tracker.NumberInUse());
+    EXPECT_EQ(id_manager.NumberOfUsedIds(), id_tracker.NumberInUse());
   };
 
   for(int i {0}; i < 10; ++i)
@@ -265,11 +265,11 @@ TEST(IdManager, NewInstanceUseAndEmpty)
 
 // TEST(IdManager, MaxIdException)
 // {
-//   a_component::IdManager id_manager {};
+//   a_component::IdManager<int> id_manager {};
 //   for(int i {0}; i < std::numeric_limits<int>::max(); ++i)
 //   {
 //     id_manager.GetId();
-//     EXPECT_EQ(id_manager.NumberUsedIds(), i + 1);
+//     EXPECT_EQ(id_manager.NumberOfUsedIds(), i + 1);
 //   }
 //   EXPECT_THROW(id_manager.GetId(), std::exception);
 // }
