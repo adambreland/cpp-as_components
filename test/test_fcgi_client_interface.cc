@@ -15,7 +15,11 @@
 #include <system_error>
 #include <type_traits>
 
+#include "external/id_manager/include/id_manager_template.h"
+#include "external/socket_functions/include/socket_functions.h"
+
 #include "test/test_fcgi_client_interface.h"
+#include "include/utility.h"
 
 namespace fcgi_si_test {
 
@@ -42,8 +46,8 @@ namespace fcgi_si_test {
 //    of the sets of FCGI_id values of the RequestIdentifier instances which
 //    are associated with the connection of c and which are derived from
 //    completed_request_set_ and pending_request_map_.
-// 6) The ReleaseId overload set can only release completed-but-unreleased
-//    requests.
+// 6) The functions of the ReleaseId overload set can only release completed-
+//    but-unreleased requests.
 //    a) Pending requests are cancelled by either closing the connection on
 //       which the request was made (which cancels all pending requests on the
 //       connection) or by calling SendAbortRequest and waiting for a response
@@ -83,7 +87,8 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
       empty_queue {};
     // Check that each ID which will be released is being tracked by the
     // id_manager.
-    a_component::IdManager* id_manager_ptr {&(state_ptr->id_manager)};
+    a_component::IdManager<std::uint16_t>* id_manager_ptr
+      {&(state_ptr->id_manager)};
     for(std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
       pending_start_copy {pending_start};
       pending_start_copy != pending_end;
@@ -236,9 +241,9 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
       bool* conn_ptr {&(search_iter->second.connected)};
       if(*conn_ptr)
       {
-        throw std::logic_error {"A connection was made on a file descriptor "
-          "which was already connected in a call to "
-          "TestFcgiClientInterface::Connect."};
+        throw std::logic_error {"In a call to "
+          "TestFcgiClientInterface::Connect, a connection was made on a file "
+          "descriptor which was already considered to be connected."};
       }
       else
       {
@@ -271,7 +276,7 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
 }
 
 // std::vector<std::unique_ptr<ServerEvent>>
-// TestFcgiClientInterface::ReceiveResponses()
+// TestFcgiClientInterface::RetrieveServerEvents()
 // {
 
 // }
@@ -289,7 +294,7 @@ bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
   {
     std::set<fcgi_si::RequestIdentifier>::iterator completed_end
       {completed_request_set_.end()};
-    a_component::IdManager* id_manager_ptr
+    a_component::IdManager<std::uint16_t>* id_manager_ptr
       {&(connection_iter->second.id_manager)};
     std::uint16_t fcgi_id {id.Fcgi_id()};
 
@@ -358,7 +363,7 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
     return false;
   }
   bool connected {connection_iter->second.connected};
-  a_component::IdManager* id_manager_ptr
+  a_component::IdManager<std::uint16_t>* id_manager_ptr
     {&(connection_iter->second.id_manager)};
   std::set<fcgi_si::RequestIdentifier>::iterator start
     {completed_request_set_.lower_bound({connection, 0U})};
@@ -414,16 +419,71 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
   return true;
 }
 
-// bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier)
-// {
+bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
+{
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter
+    {pending_request_map_.find(id)};
+  if(pending_iter == pending_request_map_.end())
+  {
+    return false;
+  }
+  std::uint8_t abort_header[fcgi_si::FCGI_HEADER_LEN] = {};
+  fcgi_si::PopulateHeader(abort_header, fcgi_si::FcgiType::kFCGI_ABORT_REQUEST,
+    id.Fcgi_id(), 0U, 0U);
+  int connection {id.descriptor()};
+  std::size_t write_return {socket_functions::SocketWrite(connection,
+    abort_header, fcgi_si::FCGI_HEADER_LEN)};
+  if(write_return < fcgi_si::FCGI_HEADER_LEN)
+  {
+    // Either an error occurred or the server closed the connection. If nothing
+    // was written, there is the possibility to recover from the error.
+    // If some data was written, the connection is regarded as corrupted.
+    //
+    // As an exception from CloseConnection leaves the interface in an
+    // unspecified state, CloseConnection is treated as noexcept here.
+    int previous_errno {errno};
+    std::error_code ec {errno, std::system_category()};
+    std::system_error se {ec, "write"};
+    if(write_return == 0U)
+    {
+      throw se;
+    }
+    else
+    {
+      try // noexcept-equivalent block.
+      {
+        CloseConnection(connection);
+        server_event_queue_.push(std::unique_ptr<ServerEvent>
+          {new ConnectionClosure {connection}});
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+      if(previous_errno == EPIPE)
+      {
+        return false;
+      }
+      else
+      {
+        throw se;
+      }
+    }
+  }
+  return true;
+}
 
-// }
+bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
+  fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
+{
+  // 1) Check that the length of the data is less than or equal to the maximum
+  //    length of the content of a single FastCGI record.
+  // 2) Check that the connection is present and connected.
+  // 3) Try to insert the appropriate queue item.
+  // 4) Send the request
+  //    a) If an error occurs, the connection may have been corrupted.
 
-// bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-//   fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
-// {
-
-// }
+}
 
 // bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
 //   fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)

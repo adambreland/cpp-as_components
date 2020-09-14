@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "external/id_manager/include/id_manager.h"
+#include "external/id_manager/include/id_manager_template.h"
 
 #include "fcgi_si.h"
 
@@ -455,7 +455,7 @@ class TestFcgiClientInterface
   // 3) EINTR was ignored during the invocation.
   int Connect(const char* address, std::uint16_t port);
 
-  std::vector<std::unique_ptr<ServerEvent>> ReceiveResponses();
+  std::vector<std::unique_ptr<ServerEvent>> RetrieveServerEvents();
 
   bool ReleaseId(fcgi_si::RequestIdentifier id);
   bool ReleaseId(int connection);
@@ -489,11 +489,11 @@ class TestFcgiClientInterface
 
   struct ConnectionState
   {
-    bool                   connected;
-    a_component::IdManager id_manager;
-    RecordState            record_state;
+    bool                                  connected;
+    a_component::IdManager<std::uint16_t> id_manager;
+    RecordState                           record_state;
     std::queue<ManagementRequestData, std::list<ManagementRequestData>> 
-                           management_queue;
+                                          management_queue;
   };
 
   struct RequestData
@@ -506,6 +506,8 @@ class TestFcgiClientInterface
   std::set<fcgi_si::RequestIdentifier>              completed_request_set_;
   std::map<int, ConnectionState>                    connection_map_;
   std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
+  std::queue<std::unique_ptr<ServerEvent>,
+    std::list<std::unique_ptr<ServerEvent>>>        server_event_queue_;
 };
 
 } // namespace fcgi_si_test

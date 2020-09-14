@@ -4,7 +4,7 @@ cc_library(
     name       = "fcgi_si_utilities",
     srcs       = ["include/utility_templates.h", "src/utility.cc"],
     hdrs       = ["include/protocol_constants.h", "include/utility.h"],
-    copts      = ["-iquote .", "-Wextra"],
+    copts      = ["-std=c++17", "-iquote .", "-Wextra"],
     visibility = ["//visibility:public"]
 )
 
@@ -19,6 +19,6 @@ cc_library(
                   "include/fcgi_server_interface.h", "include/record_status.h",
                   "include/request_data.h", "include/request_identifier.h", 
                   "fcgi_si.h"],
-    copts      = ["-iquote .", "-Wextra"],
+    copts      = ["-std=c++17", "-iquote .", "-Wextra"],
     visibility = ["//visibility:public"]
 )
