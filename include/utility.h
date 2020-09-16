@@ -77,7 +77,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //    b) The containers of each std::pair object must store objects
 //       contiguously in memory. In particular, for container c, the
 //       expression [c.data(), c.data()+c.size()) gives a valid range of the
-//       stored objects.
+//       stored objects when c.size() is non-zero.
 //    c) For each container, let T be the type of the elements of the container.
 //       Then sizeof(T) = sizeof(uint8_t).
 // 3) Invalidation of references, pointers, or iterators to elements of the
@@ -103,12 +103,14 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //    c) Access: std::get<2>; Type: std::vector<iovec>; A list of iovec
 //       instances to be used in a call to writev or a similar function. For a
 //       returned tuple t, std::get<2>(t).data() is a pointer to the first
-//       iovec instance and may be used in a call to writev. 
-//    d) Access: std::get<3>; Type: const std::vector<uint8_t>; A byte sequence
+//       iovec instance and may be used in a call to writev.
+//    d) Access: std::get<3>; Type: int; The number of FastCGI records which
+//       are encoded in the returned struct iovec vector.
+//    e) Access: std::get<4>; Type: const std::vector<uint8_t>; A byte sequence
 //       that contains FastCGI headers and encoded name and value length
 //       information. Destruction of this vector invalidates pointers contained
 //       in the iovec instances of the vector accessed by std::get<2>.
-//    e) Access: std::get<4>; Type: std::size_t; 
+//    f) Access: std::get<5>; Type: std::size_t; 
 //       1) Zero if all name-value pairs in the encoded range were completely 
 //          encoded. 
 //       2) Non-zero if the last name-value pair of the encoded range could not
@@ -118,7 +120,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //          EncodeNameValuePairs in a subsequent call so that the list of iovec
 //          structures produced in that call does not contain duplicate
 //          information.
-//    f) Access: std::get<5>; Type: typename ByteSeqPairIter; An iterator
+//    g) Access: std::get<6>; Type: typename ByteSeqPairIter; An iterator
 //       pointing to an element of the range given by pair_iter and end. 
 //       a) If the returned boolean value is false, the iterator points
 //          to the name-value pair which caused processing to halt. 
@@ -146,7 +148,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //    header whose length is less than FCGI_HEADER_LEN, also does not occur.
 // 6) All records have a total length which is a multiple of eight bytes.
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
   std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FcgiType type, std::uint16_t Fcgi_id, std::size_t offset);

@@ -691,6 +691,7 @@ TEST(Utility, EncodeNameValuePairs)
   // 8) A large number of sequence elements. In particular, larger than
   //    the current limit for the number of struct iovec instances passed in
   //    an array to a scatter-gather operation.
+  // 9) The returned number of records.
   // Note that the use of ExtractContent and ProcessBinaryNameValuePairs
   // introduces additional checks. For example, ExtractContent checks for
   // header type and FastCGI request identifier errors.
@@ -783,22 +784,22 @@ TEST(Utility, EncodeNameValuePairs)
     }
     size_t total_to_write {std::get<1>(encoded_result)};
     // std::get<2>(encoded_result) is used in a call to writev.
-    // std::get<3>(encoded_result) is implciitly used in a call to writev.
-    if(returned_offset_test_value == 0 && std::get<4>(encoded_result) != 0)
+    // std::get<4>(encoded_result) is implciitly used in a call to writev.
+    if(returned_offset_test_value == 0 && std::get<5>(encoded_result) != 0)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
         "reported by std::get<4> when a zero offset was expected."
         << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
-    else if(returned_offset_test_value > 0 && std::get<4>(encoded_result) == 0)
+    else if(returned_offset_test_value > 0 && std::get<5>(encoded_result) == 0)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned a zero offset as "
         "reported by std::get<4> when a non-zero offset was expected."
         << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
-    if(std::get<5>(encoded_result) != expected_pair_it)
+    if(std::get<6>(encoded_result) != expected_pair_it)
     {
       ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
         "std::get<5> which did not point to the expected name-value pair."
@@ -856,10 +857,12 @@ TEST(Utility, EncodeNameValuePairs)
         << '\n' << message;
       // Don't return as we can still test name-value pairs.
     }
+    EXPECT_EQ(static_cast<std::size_t>(std::get<3>(encoded_result)),
+      std::get<4>(extract_content_result));
     std::vector<NameValuePair> pair_result_sequence {
       fcgi_si::ExtractBinaryNameValuePairs(
-        std::get<4>(extract_content_result).data(),
-        std::get<4>(extract_content_result).size()
+        std::get<5>(extract_content_result).data(),
+        std::get<5>(extract_content_result).size()
       )
     };
     EXPECT_EQ(pair_sequence, pair_result_sequence);
@@ -873,9 +876,10 @@ TEST(Utility, EncodeNameValuePairs)
     EXPECT_TRUE(std::get<0>(result));
     EXPECT_EQ(std::get<1>(result), 0);
     EXPECT_TRUE(IovecVectorEquality(std::get<2>(result), std::vector<iovec> {}));
-    EXPECT_EQ(std::get<3>(result), std::vector<uint8_t> {});
-    EXPECT_EQ(std::get<4>(result), 0);
-    EXPECT_EQ(std::get<5>(result), empty.end());
+    EXPECT_EQ(std::get<3>(result), 0);
+    EXPECT_EQ(std::get<4>(result), std::vector<uint8_t> {});
+    EXPECT_EQ(std::get<5>(result), 0);
+    EXPECT_EQ(std::get<6>(result), empty.end());
   }
 
   // Case 2: A name-value pair that requires a single FastCGI record.
@@ -1245,6 +1249,7 @@ TEST(Utility, EncodeNameValuePairs)
       if(!prepared)
         FAIL() << "A temporary file could not be prepared.";
 
+      std::size_t total_records {0U};
       bool terminal_error {false};
       ssize_t write_return {0};
       for(auto pair_iter {many_pairs.begin()}; pair_iter != many_pairs.end();
@@ -1259,6 +1264,7 @@ TEST(Utility, EncodeNameValuePairs)
           terminal_error = true;
           break;
         }
+        total_records += std::get<3>(encoded_result);
         while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
           std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
           continue;
@@ -1268,8 +1274,8 @@ TEST(Utility, EncodeNameValuePairs)
           terminal_error = true;
           break;
         }
-        offset = std::get<4>(encoded_result);
-        pair_iter = std::get<5>(encoded_result);
+        offset = std::get<5>(encoded_result);
+        pair_iter = std::get<6>(encoded_result);
       }
       if(terminal_error)
       {
@@ -1353,10 +1359,12 @@ TEST(Utility, EncodeNameValuePairs)
           "unaligned record as reported by std::get<3>.";
         break;
       }
+      EXPECT_EQ(total_records, std::get<4>(extract_content_result)) <<
+        "Unequal record counts.";
       std::vector<NameValuePair> pair_result_sequence {
         fcgi_si::ExtractBinaryNameValuePairs(
-          std::get<4>(extract_content_result).data(),
-          std::get<4>(extract_content_result).size())
+          std::get<5>(extract_content_result).data(),
+          std::get<5>(extract_content_result).size())
       };
       EXPECT_EQ(many_pairs, pair_result_sequence);
     } while(false);
@@ -1525,7 +1533,7 @@ TEST(Utility, PartitionByteSequence)
       ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
       return;
     }
-    std::tuple<bool, bool, bool, bool, std::vector<uint8_t>> ecr
+    std::tuple<bool, bool, bool, bool, std::size_t, std::vector<uint8_t>> ecr
       {fcgi_si_test::ExtractContent(temp_descriptor, type, Fcgi_id)};
     if(!std::get<0>(ecr))
     {
@@ -1550,9 +1558,12 @@ TEST(Utility, PartitionByteSequence)
     // std::get<3>(ecr) tests record alignment on 8-byte boundaries.
     // Such alignment is not specified by PartitionByteSequence.
 
+    // std::get<4>(ecr) examines the number of records. This is not currently
+    // specified by PartitionByteSequence.
+
     // This check ensures that PartitionByteSequence encodes some content
     // when content is given. The next check does not verify this property.
-    if(content_seq.size() && (!std::get<4>(ecr).size()))
+    if(content_seq.size() && (!std::get<5>(ecr).size()))
     {
       ADD_FAILURE() << "PartitionByteSequence caused nothing to be written " 
         "when content was present." << '\n' << message;
@@ -1576,87 +1587,87 @@ TEST(Utility, PartitionByteSequence)
     return;
   };
 
-  // // Case 1: begin_iter == end_iter, 
-  // // type == fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT, Fcgi_id == 0.
-  // {
-  //   std::string message {"Case 1, about line: "};
-  //   message += std::to_string(__LINE__);
-  //   std::vector<std::uint8_t> empty {};
-  //   PartitionByteSequenceTester(
-  //     message,
-  //     true,
-  //     empty, 
-  //     fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT,
-  //     0
-  //   );
-  // }
+  // Case 1: begin_iter == end_iter, 
+  // type == fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT, Fcgi_id == 0.
+  {
+    std::string message {"Case 1, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> empty {};
+    PartitionByteSequenceTester(
+      message,
+      true,
+      empty, 
+      fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT,
+      0
+    );
+  }
 
-  // // Case 2: std::distance(end_iter, begin_iter) == 3,
-  // // type == fcgi_si::FcgiType::kFCGI_STDIN, Fcgi_id == 1.
-  // {
-  //   std::string message {"Case 2, about line: "};
-  //   message += std::to_string(__LINE__);
-  //   std::vector<std::uint8_t> content {1,2,3};
-  //   PartitionByteSequenceTester(
-  //     message,
-  //     false,
-  //     content, 
-  //     fcgi_si::FcgiType::kFCGI_STDIN,
-  //     1
-  //   );
-  // }
+  // Case 2: std::distance(end_iter, begin_iter) == 3,
+  // type == fcgi_si::FcgiType::kFCGI_STDIN, Fcgi_id == 1.
+  {
+    std::string message {"Case 2, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {1,2,3};
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FcgiType::kFCGI_STDIN,
+      1
+    );
+  }
 
-  // // Case 3: std::distance(end_iter, begin_iter) == 25,
-  // // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 65535 ==
-  // // std::numeric_limits<std::uint16_t>::max(). 
-  // {
-  //   std::string message {"Case 3, about line: "};
-  //   message += std::to_string(__LINE__);
-  //   std::vector<std::uint8_t> content {};
-  //   for(int i {0}; i < 25; ++i)
-  //     content.push_back(i);
-  //   PartitionByteSequenceTester(
-  //     message,
-  //     false,
-  //     content, 
-  //     fcgi_si::FcgiType::kFCGI_STDOUT,
-  //     std::numeric_limits<std::uint16_t>::max()
-  //   );
-  // }
+  // Case 3: std::distance(end_iter, begin_iter) == 25,
+  // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 65535 ==
+  // std::numeric_limits<std::uint16_t>::max(). 
+  {
+    std::string message {"Case 3, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 25; ++i)
+      content.push_back(i);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FcgiType::kFCGI_STDOUT,
+      std::numeric_limits<std::uint16_t>::max()
+    );
+  }
 
-  // // Case 4: std::distance(end_iter, begin_iter) == 8,
-  // // type == static_cast<fcgi_si::FcgiType>(20), Fcgi_id == 3.
-  // {
-  //   std::string message {"Case 4, about line: "};
-  //   message += std::to_string(__LINE__);
-  //   std::vector<std::uint8_t> content {};
-  //   for(int i {0}; i < 8; ++i)
-  //     content.push_back(i);
-  //   PartitionByteSequenceTester(
-  //     message,
-  //     false,
-  //     content, 
-  //     static_cast<fcgi_si::FcgiType>(20),
-  //     3
-  //   );
-  // }
+  // Case 4: std::distance(end_iter, begin_iter) == 8,
+  // type == static_cast<fcgi_si::FcgiType>(20), Fcgi_id == 3.
+  {
+    std::string message {"Case 4, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 8; ++i)
+      content.push_back(i);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      static_cast<fcgi_si::FcgiType>(20),
+      3
+    );
+  }
 
-  // // Case 5: std::distance(end_iter, begin_iter) == 65528,
-  // // type == fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id == 300.
-  // {
-  //   std::string message {"Case 5, about line: "};
-  //   message += std::to_string(__LINE__);
-  //   std::vector<std::uint8_t> content {};
-  //   for(int i {0}; i < 65528; ++i)
-  //     content.push_back(i); // mod 256 overflow.
-  //   PartitionByteSequenceTester(
-  //     message,
-  //     false,
-  //     content, 
-  //     fcgi_si::FcgiType::kFCGI_PARAMS,
-  //     300
-  //   );
-  // }
+  // Case 5: std::distance(end_iter, begin_iter) == 65528,
+  // type == fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id == 300.
+  {
+    std::string message {"Case 5, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content {};
+    for(int i {0}; i < 65528; ++i)
+      content.push_back(i); // mod 256 overflow.
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FcgiType::kFCGI_PARAMS,
+      300
+    );
+  }
 
   // Case 6: std::distance(end_iter, begin_iter) == 2^25,
   // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 3.

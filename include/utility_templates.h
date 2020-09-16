@@ -56,17 +56,17 @@ std::int_fast32_t ExtractFourByteLength(ByteIter byte_iter) noexcept
 }
 
 template<typename ByteSeqPairIter>
-std::tuple<bool, std::size_t, std::vector<iovec>, 
+std::tuple<bool, std::size_t, std::vector<iovec>, int,
   std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FcgiType type, std::uint16_t Fcgi_id, std::size_t offset)
 {
   if(pair_iter == end)
-    return {true, 0U, {}, {}, 0U, end};
+    return {true, 0U, {}, 0, {}, 0U, end};
 
-  const std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
-  const ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
-  const uint16_t aligned_record_MAX {kMaxRecordContentByteLength - 7U};
+  constexpr std::size_t size_t_MAX {std::numeric_limits<std::size_t>::max()};
+  constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
+  constexpr uint16_t aligned_record_MAX {kMaxRecordContentByteLength - 7U};
   // Reduce by 7 to ensure that the length of a "full" record is a
   // multiple of 8.
 
@@ -121,13 +121,17 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   // std::pair object when such buffers exist.
   std::vector<iovec> iovec_list {};
 
-  std::size_t number_to_write {0};
-  std::size_t previous_content_length {0};
-  std::vector<uint8_t>::size_type previous_header_offset {0};
-  std::size_t nv_pair_bytes_placed {0};
-  bool incomplete_nv_write {false};
-  bool name_or_value_too_big {false};
-  bool overflow_detected {false};
+  std::size_t                     number_to_write         {0U};
+  std::size_t                     previous_content_length {0U};
+  std::vector<uint8_t>::size_type previous_header_offset  {0U};
+  std::size_t                     nv_pair_bytes_placed    {0U};
+  // Record count may be int as the number of records is always less than the
+  // number of struct iovec instances and this number is less than or equal to
+  // the maximum int value.
+  int                             record_count            {0}; 
+  bool                            incomplete_nv_write     {false};
+  bool                            name_or_value_too_big   {false};
+  bool                            overflow_detected       {false};
 
   for(/*no-op*/; pair_iter != end; ++pair_iter)
   {
@@ -223,6 +227,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
             number_to_write += FCGI_HEADER_LEN;
             remaining_byte_count -= FCGI_HEADER_LEN;
             remaining_iovec_count--;
+            record_count++;
           }
           else
           {
@@ -334,6 +339,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
     !name_or_value_too_big && !overflow_detected,
     number_to_write,
     std::move(iovec_list),
+    record_count,
     std::move(local_buffers),
     ((incomplete_nv_write) ? nv_pair_bytes_placed : 0),
     pair_iter

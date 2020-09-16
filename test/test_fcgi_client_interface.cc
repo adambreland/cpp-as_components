@@ -1,8 +1,13 @@
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/un.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -14,6 +19,7 @@
 #include <set>
 #include <system_error>
 #include <type_traits>
+#include <utility>
 
 #include "external/id_manager/include/id_manager_template.h"
 #include "external/socket_functions/include/socket_functions.h"
@@ -83,8 +89,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
      (completed_start->descriptor() == connection))
   {
     // Perform actions which may throw.
-    std::queue<ManagementRequestData, std::list<ManagementRequestData>>
-      empty_queue {};
+    std::list<ManagementRequestData> empty_queue {};
     // Check that each ID which will be released is being tracked by the
     // id_manager.
     a_component::IdManager<std::uint16_t>* id_manager_ptr
@@ -202,13 +207,14 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
       static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
       sizeof(struct sockaddr_storage)) == -1)
     {
-      // Failure of close shouldn't be relevant.
+      // An error occurred. See if connection can be retried.
       close(socket_connection);
       if(errno == EINTR)
       {
         continue;
       }
-      else if((errno == ECONNREFUSED) || (errno == EACCES))
+      else if((errno == ECONNREFUSED) || (errno == EACCES) ||
+        (errno == ETIMEDOUT))
       {
         return -1;
       }
@@ -221,6 +227,24 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
     break;
   }
   // socket_connection must now refer to a connected socket descriptor.
+  // Make the descriptor non-blocking for later I/O multiplexing.
+  auto CloseAndThrowOnError = [socket_connection](int error, const char* message)->void
+  {
+    std::error_code ec {error, std::system_category()};
+    std::system_error se {ec, message};
+    close(socket_connection);
+    throw se;
+  };
+  int flags {fcntl(socket_connection, F_GETFL)};
+  if(flags == -1)
+  {
+    CloseAndThrowOnError(errno, "fcntl with F_GETFL");
+  }
+  flags |= O_NONBLOCK;
+  if(fcntl(socket_connection, F_SETFL, flags) == -1)
+  {
+    CloseAndThrowOnError(errno, "fcntl with F_SETFL");
+  }
 
   // Update internal state.
   // Pair construction could throw. Insertion could throw.
@@ -275,11 +299,26 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   return socket_connection;
 }
 
-// std::vector<std::unique_ptr<ServerEvent>>
-// TestFcgiClientInterface::RetrieveServerEvents()
+// std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
 // {
 
 // }
+
+std::pair<const int, TestFcgiClientInterface::ConnectionState>*
+TestFcgiClientInterface::ConnectedCheck(int connection)
+{
+  std::map<int, ConnectionState>::iterator connection_iter
+    {connection_map_.find(connection)};
+  if(connection_iter == connection_map_.end())
+  {
+    return nullptr;
+  }
+  if(!(connection_iter->second.connected))
+  {
+    return nullptr;
+  }
+  return &(*connection_iter);
+}
 
 bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
 {
@@ -431,8 +470,8 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
   fcgi_si::PopulateHeader(abort_header, fcgi_si::FcgiType::kFCGI_ABORT_REQUEST,
     id.Fcgi_id(), 0U, 0U);
   int connection {id.descriptor()};
-  std::size_t write_return {socket_functions::SocketWrite(connection,
-    abort_header, fcgi_si::FCGI_HEADER_LEN)};
+  std::size_t write_return {socket_functions::WriteOnSelect(connection,
+    abort_header, fcgi_si::FCGI_HEADER_LEN, nullptr)};
   if(write_return < fcgi_si::FCGI_HEADER_LEN)
   {
     // Either an error occurred or the server closed the connection. If nothing
@@ -452,8 +491,15 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
     {
       try // noexcept-equivalent block.
       {
+        // It is assumed that connection is associated with an entry in
+        // connection_map_ and is connected. Since a pending request was
+        // present for id, if this was not true, then an invariant of the
+        // class would have been violated.
+        //
+        // It is then assumed that CloseConnection(connection) either returns
+        // true or throws.
         CloseConnection(connection);
-        server_event_queue_.push(std::unique_ptr<ServerEvent>
+        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
           {new ConnectionClosure {connection}});
       }
       catch(...)
@@ -473,35 +519,119 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
   return true;
 }
 
-bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-  fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
+bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(int connection,
+  fcgi_si::FcgiType type, ManagementRequestData&& queue_item)
 {
-  // 1) Check that the length of the data is less than or equal to the maximum
-  //    length of the content of a single FastCGI record.
-  // 2) Check that the connection is present and connected.
-  // 3) Try to insert the appropriate queue item.
-  // 4) Send the request
-  //    a) If an error occurs, the connection may have been corrupted.
+  std::size_t length {queue_item.data.size()};
+  if(length > static_cast<std::size_t>(fcgi_si::kMaxRecordContentByteLength))
+  {
+    return false;
+  }
+  std::map<int, ConnectionState>::iterator connection_iter
+    {connection_map_.find(connection)};
+  if(connection_iter == connection_map_.end())
+  {
+    return false;
+  }
+  ConnectionState* state_ptr {&(connection_iter->second)};
+  if(!(state_ptr->connected))
+  {
+    return false;
+  }
+
+  state_ptr->management_queue.push_back(std::move(queue_item));
+
+  std::uint8_t padding[7] = {}; // Aggregate initialize to zeroes.
+  // The literal value 8 comes from the alignment recommendation of the FastCGI
+  // protocol.
+  std::uint8_t mod_length {static_cast<std::uint8_t>(length % 8)};
+  std::uint8_t padding_length {static_cast<std::uint8_t>(
+    (mod_length) ? (8 - mod_length) : 0U)};
+  std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
+  fcgi_si::PopulateHeader(header, type, 0U, length, padding_length);
+  constexpr int iovec_count {3};
+  struct iovec iovec_array[iovec_count] = {};
+  iovec_array[0].iov_base = header;
+  iovec_array[0].iov_len  = fcgi_si::FCGI_HEADER_LEN;
+  iovec_array[1].iov_base = state_ptr->management_queue.back().data.data();
+  iovec_array[1].iov_len  = length;
+  iovec_array[2].iov_base = padding;
+  iovec_array[2].iov_len  = padding_length;
+  std::size_t number_to_write {fcgi_si::FCGI_HEADER_LEN + length +
+    padding_length};
+
+  return SendManagementRequestHelper(connection, state_ptr, iovec_array,
+    iovec_count, number_to_write);
+}
+
+bool TestFcgiClientInterface::SendGetValuesRequestHelper(
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+  ManagementRequestData&& queue_item)
+{
+  // Responsibilities:
+  // 1) Check that a single FCGI_GET_VALUES record, which is an FCGI_GET_VALUES
+  //    management request, will be used to encode the request.
+  // 2) Add queue_item to the appropriate management request queue.
+  // 3) Call SendManagementRequestHelper and return its return value.
+
+
+
+  // std::tuple<bool, std::size_t, std::vector<struct iovec>,
+  //   std::vector<std::uint8_t>, std::size_t, MapNameIterator> encode_return
+  //   {}
+
+  // state_ptr->management_queue.push_back(std::move(queue_item));
 
 }
 
-// bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-//   fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)
-// {
-
-// }
-
-// bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
-//   const ParamsMap& params_map)
-// {
-
-// }
-
-// bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
-//   ParamsMap&& params_map)
-// {
-
-// }
+bool TestFcgiClientInterface::SendManagementRequestHelper(int connection,
+  ConnectionState* state_ptr, struct iovec iovec_array[], int iovec_count,
+  std::size_t number_to_write)
+{
+  std::tuple<struct iovec*, int, std::size_t> write_return
+    {socket_functions::ScatterGatherSocketWrite(connection, iovec_array,
+      iovec_count, number_to_write, true, nullptr)};
+  std::size_t number_remaining {std::get<2>(write_return)};
+  if(number_remaining != 0U)
+  {
+    // An error occurred. Either the server closed the connection or
+    // a local error occurred.
+    // 1) In all cases, the item which was added to the queue should be
+    //    removed.
+    // 2) If nothing was written and the server did not close the connection,
+    //    then recovery may be possible. In this case, the entry for connection
+    //    in connection_map_ does not need to be removed.
+    // 3) If something was written or the server did close the connection,
+    //    then the entry for connection must be removed from connection_map_.
+    std::error_code ec {errno, std::system_category()};
+    std::system_error se {ec, "write or select"};
+    try
+    {
+      state_ptr->management_queue.pop_back();
+      if(!((number_remaining == number_to_write) &&
+           (se.code().value() != EPIPE)))
+      {
+        // Some data was written; the connection is now corrupt;
+        CloseConnection(connection);
+        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
+          {new ConnectionClosure {connection}});
+      }
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
+    if(se.code().value() == EPIPE)
+    {
+      return false;
+    }
+    else
+    {
+      throw se;
+    }
+  }
+  return true;
+}
 
 // fcgi_si::RequestIdentifier
 // TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)

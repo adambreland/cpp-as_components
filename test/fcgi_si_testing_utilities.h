@@ -40,7 +40,7 @@ bool PrepareTemporaryFile(int descriptor);
 // contains a sequence of FastCGI records. These records are assumed to be
 // from a single, complete record sequence. (Multiple records may be present in
 // a sequence when it is associated with a stream record type from the FastCGI
-// protocol.) Two operations are performed.
+// protocol.) Three operations are performed.
 //
 //    First, several error checks are performed.
 // 1) Each header is validated for type and request identifer. Header
@@ -53,6 +53,8 @@ bool PrepareTemporaryFile(int descriptor);
 //
 //    Second, the content byte sequence formed from the concatenation of
 // the record content sections is constructed and returned.
+//    Third, the number of FastCGI record headers, which is taken to represent
+// the number of FastCGI records, is determined and returned.
 //
 // Parameters:
 // fd:   The file descriptor of the file to be read.
@@ -86,12 +88,14 @@ bool PrepareTemporaryFile(int descriptor);
 //    record length which was a multiple of eight. The flag is false if header
 //    or incomplete section errors were present or if a record was present
 //    whose total length was not a multiple of eight bytes.
-//       Access: std::get<4>; Type: std::vector<uint8_t>; The extracted
+//       Access: std::get<4>; Type: std::size_t; The number of FastCGI record
+//    headers which were encountered. A partial header is not counted.
+//       Access: std::get<5>; Type: std::vector<uint8_t>; The extracted
 //    content of the records processed up to:
 //    a) the point of error (such as the end of a partial record)
 //    b) a record with a zero content length
 //    c) the end of the file.
-std::tuple<bool, bool, bool, bool, std::vector<std::uint8_t>>
+std::tuple<bool, bool, bool, bool, std::size_t, std::vector<std::uint8_t>>
 ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id);
 
 class FileDescriptorLeakChecker

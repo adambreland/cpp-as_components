@@ -1199,16 +1199,17 @@ TEST(FcgiServerInterface, FcgiGetValues)
   
   auto TestCaseRunner = [&FcgiGetValuesTest](pair_vector input_pairs, 
     std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> input_map,
-    int test_case)
+    int test_case)->void
   {
-    std::tuple<bool, std::size_t, std::vector<iovec>, 
+    std::tuple<bool, std::size_t, std::vector<iovec>, int,
       std::vector<std::uint8_t>, std::size_t, pair_vector::iterator>
     returned_encoding_information {fcgi_si::EncodeNameValuePairs(
       input_pairs.begin(), input_pairs.end(), 
       fcgi_si::FcgiType::kFCGI_GET_VALUES, 0U, 0U)};
-    if((!std::get<0>(returned_encoding_information))      || 
-       (std::get<4>(returned_encoding_information) != 0U) || 
-       (std::get<5>(returned_encoding_information) != input_pairs.end()))
+    if((!std::get<0>(returned_encoding_information))      ||
+       (std::get<3>(returned_encoding_information) != 1)  ||
+       (std::get<5>(returned_encoding_information) != 0U) || 
+       (std::get<6>(returned_encoding_information) != input_pairs.end()))
     {
       ADD_FAILURE() << "The name-value pairs given to EncodeNameValuePairs "
         "caused an error.";
@@ -2828,15 +2829,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       ADD_FAILURE() << accept_error;
       break;
     };
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
         request_data.Fcgi_id, 0U)};
-    if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
-      != 0U) || (std::get<5>(pair_encoding_return) != 
-      request_data.fcgi_params.end()))
+    if((!std::get<0>(pair_encoding_return))                                   ||
+       (std::get<3>(pair_encoding_return) != 1)                               ||
+       (std::get<5>(pair_encoding_return) != 0U)                              ||
+       (std::get<6>(pair_encoding_return) != request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
       break;
@@ -2981,15 +2983,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     };
   
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     pair_encoding_return 
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
         request_data.Fcgi_id, 0U)};
-    if(!std::get<0>(pair_encoding_return) || (std::get<4>(pair_encoding_return)
-      != 0U) || (std::get<5>(pair_encoding_return) != 
-      request_data.fcgi_params.end()))
+    if((!std::get<0>(pair_encoding_return))                                   ||
+       (std::get<3>(pair_encoding_return) != 1)                               ||
+       (std::get<5>(pair_encoding_return) != 0U)                              ||
+       (std::get<6>(pair_encoding_return) != request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
       break;
@@ -3117,14 +3120,15 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     PopulateBeginRequestRecord(begin_record, request_data);
 
     // Populate the the FCGI_PARAMS records.
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
     encoded_pairs_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U)};
-    if(!std::get<0>(encoded_pairs_return) || (std::get<4>(encoded_pairs_return)
-       != 0U) || (std::get<5>(encoded_pairs_return) != 
-       request_data.fcgi_params.cend()))
+    if((!std::get<0>(encoded_pairs_return))                                   ||
+       (std::get<3>(encoded_pairs_return) != 1)                               ||
+       (std::get<5>(encoded_pairs_return) != 0U)                              ||
+       (std::get<6>(encoded_pairs_return) != request_data.fcgi_params.cend()))
     {
       ADD_FAILURE() << "An error occurred while encoding FCGI_PARAMS data in "
         << test_case_name;
@@ -3647,8 +3651,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       PopulateBeginRequestRecord(begin_records[i], *request_ptr_array[i]);
     
     // Encode and check the FCGI_PARAMS records.
-    std::vector<std::tuple<bool, std::size_t, std::vector<struct iovec>, 
-      std::vector<std::uint8_t>, std::size_t, map_type::iterator>>
+    std::vector<std::tuple<bool, std::size_t, std::vector<struct iovec>,
+      int, std::vector<std::uint8_t>, std::size_t, map_type::iterator>>
     params_encoding_list {};
     for(struct RequestData* request_data_ptr : request_ptr_array)
     {
@@ -3660,9 +3664,10 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     int number_params_correct {0};
     for(int i {0}; i < 3; ++i)
     {
-      if(!std::get<0>(params_encoding_list[i])        || 
-         (std::get<4>(params_encoding_list[i]) != 0U) || 
-         (std::get<5>(params_encoding_list[i]) != 
+      if((!std::get<0>(params_encoding_list[i]))      ||
+         (std::get<3>(params_encoding_list[i]) != 1)  ||
+         (std::get<5>(params_encoding_list[i]) != 0U) || 
+         (std::get<6>(params_encoding_list[i]) != 
           request_ptr_array[i]->fcgi_params.end()))
       {
         ADD_FAILURE() << "An error occurred while encoding the name-value "
@@ -3774,7 +3779,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       ADD_FAILURE();
       break;
     }
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     a_params_encoded {EncodeNameValuePairs(
       authorizer_request.fcgi_params.begin(),
@@ -3928,15 +3933,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     }
 
     // Encode and send FCGI_PARAMS data.
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::const_iterator>
     params_encoding_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U
     )};
-    if(!std::get<0>(params_encoding_return)        || 
-       (std::get<4>(params_encoding_return) != 0U) || 
-       (std::get<5>(params_encoding_return) != 
+    if((!std::get<0>(params_encoding_return))      ||
+       (std::get<3>(params_encoding_return) != 1)  ||
+       (std::get<5>(params_encoding_return) != 0U) || 
+       (std::get<6>(params_encoding_return) != 
         request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value "
@@ -4364,15 +4370,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(responder_1_end_records + fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FcgiType::kFCGI_STDIN, responder_request_1.Fcgi_id, 0U, 0U);
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_responder_1_params {fcgi_si::EncodeNameValuePairs(
       responder_request_1.fcgi_params.begin(), 
       responder_request_1.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U)};
-    if(!std::get<0>(encoded_responder_1_params)        || 
-        (std::get<4>(encoded_responder_1_params) != 0U ||
-        (std::get<5>(encoded_responder_1_params) != 
+    if((!std::get<0>(encoded_responder_1_params))     ||
+       (std::get<3>(encoded_responder_1_params) != 1) ||
+       (std::get<5>(encoded_responder_1_params) != 0U ||
+       (std::get<6>(encoded_responder_1_params) != 
          responder_request_1.fcgi_params.end())))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "
@@ -4387,15 +4394,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(responder_2_end_records + fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FcgiType::kFCGI_STDIN, responder_request_2.Fcgi_id, 0U, 0U);
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_responder_2_params {fcgi_si::EncodeNameValuePairs(
       responder_request_2.fcgi_params.begin(), 
       responder_request_2.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U)};
-    if(!std::get<0>(encoded_responder_2_params)        || 
-        (std::get<4>(encoded_responder_2_params) != 0U ||
-        (std::get<5>(encoded_responder_2_params) != 
+    if((!std::get<0>(encoded_responder_2_params))     || 
+       (std::get<3>(encoded_responder_2_params) != 1) ||
+       (std::get<5>(encoded_responder_2_params) != 0U ||
+       (std::get<6>(encoded_responder_2_params) != 
          responder_request_2.fcgi_params.end())))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "
@@ -4412,15 +4420,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       fcgi_si::FcgiType::kFCGI_STDIN, filter_request.Fcgi_id, 0U, 0U);
     fcgi_si::PopulateHeader(filter_end_records + (2 * fcgi_si::FCGI_HEADER_LEN), 
       fcgi_si::FcgiType::kFCGI_DATA, filter_request.Fcgi_id, 0U, 0U);
-    std::tuple<bool, std::size_t, std::vector<struct iovec>, 
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
     encoded_filter_params {fcgi_si::EncodeNameValuePairs(
       filter_request.fcgi_params.begin(), 
       filter_request.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, filter_request.Fcgi_id, 0U)};
-    if(!std::get<0>(encoded_filter_params)        || 
-        (std::get<4>(encoded_filter_params) != 0U ||
-        (std::get<5>(encoded_filter_params) != 
+    if((!std::get<0>(encoded_filter_params))      || 
+       (std::get<3>(encoded_filter_params) != 1)  ||
+       (std::get<5>(encoded_filter_params) != 0U ||
+       (std::get<6>(encoded_filter_params) != 
          filter_request.fcgi_params.end())))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "

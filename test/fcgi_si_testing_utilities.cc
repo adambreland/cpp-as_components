@@ -72,27 +72,28 @@ bool PrepareTemporaryFile(int descriptor)
   return true;
 }
 
-std::tuple<bool, bool, bool, bool, std::vector<std::uint8_t>>
+std::tuple<bool, bool, bool, bool, std::size_t, std::vector<std::uint8_t>>
 ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
 {
   constexpr std::uint16_t buffer_size {1 << 10};
   std::uint8_t byte_buffer[buffer_size];
 
-  std::uint32_t local_offset {0};
-  ssize_t number_bytes_read {0};
-  std::uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
-  int header_bytes_read {0};
-  std::vector<uint8_t> content_bytes {};
-  std::uint16_t Fcgi_id {};
-  std::uint16_t content_length {0};
-  std::uint16_t content_bytes_read {0};
-  std::uint8_t padding_length {0};
-  std::uint8_t padding_bytes_read {0};
-  bool read_error {false};
-  bool header_error {false};
-  bool sequence_terminated {false};
-  bool aligned {true};
-  int state {0};
+  std::uint32_t        local_offset                             {0U};
+  ssize_t              number_bytes_read                        {0};
+  std::uint8_t         local_header[fcgi_si::FCGI_HEADER_LEN] = {};
+  int                  header_bytes_read                        {0};
+  std::vector<uint8_t> content_bytes                            {};
+  std::uint16_t        Fcgi_id                                  {};
+  std::uint16_t        content_length                           {0U};
+  std::uint16_t        content_bytes_read                       {0U};
+  std::uint8_t         padding_length                           {0U};
+  std::uint8_t         padding_bytes_read                       {0U};
+  bool                 read_error                               {false};
+  bool                 header_error                             {false};
+  bool                 sequence_terminated                      {false};
+  bool                 aligned                                  {true};
+  int                  state                                    {0};
+  std::size_t          header_count                             {0U};
 
   while((number_bytes_read = read(fd, byte_buffer, buffer_size)))
   {
@@ -124,7 +125,13 @@ ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
             local_offset += header_bytes_to_copy;
             header_bytes_read += header_bytes_to_copy;
             if(header_bytes_read < fcgi_si::FCGI_HEADER_LEN)
+            {
               break;
+            }
+            else
+            {
+              ++header_count;
+            }
           }
           // The header is complete and there are some bytes left to process.
           // Extract header information.
@@ -239,6 +246,7 @@ ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
     !(header_error || section_error),
     sequence_terminated,
     (header_error || section_error) ? false : aligned,
+    header_count,
     content_bytes
   );
 }

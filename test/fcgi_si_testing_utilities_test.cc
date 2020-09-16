@@ -30,6 +30,7 @@ TEST(Utility, ExtractContent)
   //     and FastCGI request identifier.
   //  9) Presence or absence of an incomplete section. Three sections produce
   //     three error categories.
+  // 10) Value of the returned number of headers.
   //
   // Test cases:
   //  1) Small file descriptor value, single header with a zero content length
@@ -120,8 +121,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
-      EXPECT_EQ((std::vector<std::uint8_t> {}), 
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+      EXPECT_EQ(1U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
+      EXPECT_EQ(std::vector<std::uint8_t> {}, 
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -171,8 +174,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result))  <<
         "Record alignment flag.";
+      EXPECT_EQ(1U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {0,1,0,0,0,0,0,0}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -223,8 +228,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result))  <<
         "Record alignment flag.";
+      EXPECT_EQ(1U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,1,'a','b'}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -273,8 +280,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result))  <<
         "Record alignment flag.";
+      EXPECT_EQ(1U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1, 2, 3, 4, 5}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -327,8 +336,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(2U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1, 2, 3, 4, 5}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -394,8 +405,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result))  <<
         "Record alignment flag.";
+      EXPECT_EQ(3U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -461,8 +474,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_TRUE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(4U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -546,8 +561,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(2U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -614,8 +631,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(2U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -659,8 +678,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(1U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -728,8 +749,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(4U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -800,8 +823,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(3U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -870,8 +895,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(4U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}),
-        std::get<4>(extract_content_result)) << "Content byte sequence.";
+        std::get<5>(extract_content_result)) << "Content byte sequence.";
     }
     else
     {
@@ -944,8 +971,10 @@ TEST(Utility, ExtractContent)
         "Sequence termination flag.";
       EXPECT_FALSE(std::get<3>(extract_content_result)) <<
         "Record alignment flag.";
+      EXPECT_EQ(4U, std::get<4>(extract_content_result)) <<
+        "Incorrect number of records.";
       EXPECT_EQ((std::vector<std::uint8_t> {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,
-        17,18,19,20}), std::get<4>(extract_content_result))
+        17,18,19,20}), std::get<5>(extract_content_result))
         << "Content byte sequence.";
     }
     else
