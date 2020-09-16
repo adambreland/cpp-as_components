@@ -563,20 +563,20 @@ class TestFcgiClientInterface
   //    violated, the program is terminated.
   //
   // Effects:
-  // 1) If false was returned, then either connection was not a connected
-  //    socket descriptor which was opened by the interface, or it was
-  //    discovered that the server closed the connection. When connection
-  //    closure was discovered, a ConnectionClosure instance was added to the
-  //    micro server event queue.
-  // 2) If true was returned, then the management request was sent.
-  inline bool SendBinaryManagementRequest(int connection,
-    fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
-  {
-    std::vector<std::uint8_t> local_data(byte_ptr, byte_ptr + length);
-    ManagementRequestData queue_item {type, {}, std::move(local_data)};
-    return SendBinaryManagementRequestHelper(connection, type,
-      std::move(queue_item));
-  }
+  // 1) If false was returned, then one of the following occurred:
+  //    a) connection was not a connected socket descriptor which was opened by
+  //       the interface.
+  //    b) Length was larger than fcgi_si::kMaxRecordContentByteLength.
+  //    c) It was discovered that the server closed the connection. When
+  //       connection closure was discovered, a ConnectionClosure instance was
+  //       added to the micro server event queue.
+  // 2) If true was returned:
+  //    a) The management request was sent.
+  //    b) A ManagementRequestData instance with a copy of the byte sequence 
+  //       given by [byte_ptr, byte_ptr + length) was enqueued to the
+  //       management request queue of connection.
+  bool SendBinaryManagementRequest(int connection,
+    fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length);
   
   // Attempts to send a management request with content given by data and
   // management request type given by type to connection.
@@ -605,57 +605,105 @@ class TestFcgiClientInterface
   //    violated, the program is terminated.
   //
   // Effects:
-  // 1) If false was returned, then either connection was not a connected
-  //    socket descriptor which was opened by the interface, or it was
-  //    discovered that the server closed the connection. When connection
-  //    closure was discovered, a ConnectionClosure instance was added to the
-  //    micro server event queue.
-  // 2) If true was returned, then the management request was sent.
-  inline bool SendBinaryManagementRequest(int connection,
-    fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)
-  {
-    ManagementRequestData queue_item {type, {}, std::move(data)};
-    return SendBinaryManagementRequestHelper(connection, type,
-      std::move(queue_item));
-  }
+  // 1) If false was returned, then one of the following occurred:
+  //    a) connection was not a connected socket descriptor which was opened by
+  //       the interface.
+  //    b) data.size() was larger than fcgi_si::kMaxRecordContentByteLength.
+  //    c) It was discovered that the server closed the connection. When
+  //       connection closure was discovered, a ConnectionClosure instance was
+  //       added to the micro server event queue.
+  // 2) If true was returned:
+  //    a) The management request was sent.
+  //    b) A ManagementRequestData instance with the byte sequence of data was
+  //       enqueued to the management request queue of connection.
+  bool SendBinaryManagementRequest(int connection,
+    fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data);
 
-  inline bool SendGetValuesRequest(int connection, const ParamsMap& params_map)
-  {
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr
-      {ConnectedCheck(connection)};
-    if(!(entry_ptr->second.connected))
-    {
-      return false;
-    }
-    ParamsMap map_copy {params_map};
-    // All values are supposed to be empty. This is ensured.
-    for(ParamsMap::iterator i {map_copy.begin()}; i != map_copy.end();
-      ++i)
-    {
-      i->second.clear();
-    }
-    return SendGetValuesRequestHelper(entry_ptr,
-      {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(map_copy), {}});
-  }
+  // Attempts to send an FCGI_GET_VALUES management request on connection.
+  // Names are taken from params_map. Values of the encoded name-value pairs
+  // are empty.
+  //
+  // Parameters:
+  // connection: The descriptor of a socket connection.
+  // params_map: A map of names to be encoded in the FastCGI name-value pair
+  //             format and sent to connection. Values of the map are ignored.
+  // 
+  // Preconditions: none
+  //
+  // Exceptions:
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) If a throw occurs, one of the following holds:
+  //    a) The strong exception guarantee.
+  //    b) An error occurred when writing to the connection, and the connection
+  //       was corrupted as a result. The connection was closed by a call
+  //       to CloseConnection. A ConnectionClosure instance was added to the
+  //       micro server event queue.
+  //
+  // Termination:
+  // 1) If an error or exception would cause SendAbortRequest to return or
+  //    throw when an invariant of TestFcgiClientInterface is potentially
+  //    violated, the program is terminated.
+  //
+  // Effects:
+  // 1) If false was returned, then one of the following occured:
+  //    a) connection was not a connected socket descriptor which was opened by
+  //       the interface.
+  //    b) The names of params_map and empty values required more than one
+  //       FastCGI record when they were encoded with a call to
+  //       fcgi_si::EncodeNameValuePairs.
+  //    c) It was discovered that the server closed the connection. When
+  //       connection closure was discovered, a ConnectionClosure instance was
+  //       added to the micro server event queue.
+  // 2) If true was returned:
+  //    a) The management request was sent.
+  //    b) A ManagementRequestData instance with a ParamsMap instance with the
+  //       names of params_map and empty values was enqueued to the management
+  //       request queue of connection.
+  bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
 
-  inline bool SendGetValuesRequest(int connection, ParamsMap&& params_map)
-  {
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr
-      {ConnectedCheck(connection)};
-    if(!(entry_ptr->second.connected))
-    {
-      return false;
-    }
-    // All values are supposed to be empty. This is ensured.
-    for(ParamsMap::iterator i {params_map.begin()}; i != params_map.end();
-      ++i)
-    {
-      i->second.clear();
-    }
-    return SendGetValuesRequestHelper(entry_ptr,
-      {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(params_map), {}});
-  }
+  // Attempts to send an FCGI_GET_VALUES management request on connection.
+  // Names are taken from params_map. Values of the encoded name-value pairs
+  // are empty.
+  //
+  // Parameters:
+  // connection: The descriptor of a socket connection.
+  // params_map: A map of names to be encoded in the FastCGI name-value pair
+  //             format and sent to connection. Values of the map are ignored.
+  // 
+  // Preconditions: none
+  //
+  // Exceptions:
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) If a throw occurs, one of the following holds:
+  //    a) The strong exception guarantee.
+  //    b) An error occurred when writing to the connection, and the connection
+  //       was corrupted as a result. The connection was closed by a call
+  //       to CloseConnection. A ConnectionClosure instance was added to the
+  //       micro server event queue.
+  //
+  // Termination:
+  // 1) If an error or exception would cause SendAbortRequest to return or
+  //    throw when an invariant of TestFcgiClientInterface is potentially
+  //    violated, the program is terminated.
+  //
+  // Effects:
+  // 1) If false was returned, then one of the following occured:
+  //    a) connection was not a connected socket descriptor which was opened by
+  //       the interface.
+  //    b) The names of params_map and empty values required more than one
+  //       FastCGI record when they were encoded with a call to
+  //       fcgi_si::EncodeNameValuePairs.
+  //    c) It was discovered that the server closed the connection. When
+  //       connection closure was discovered, a ConnectionClosure instance was
+  //       added to the micro server event queue.
+  // 2) If true was returned:
+  //    a) The management request was sent.
+  //    b) The values of params_map were cleared. params_map was then moved to
+  //       a ManagementRequestData instance. This instance was then enqueued
+  //       to the management request queue of connection.
+  bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
+  //
   fcgi_si::RequestIdentifier SendRequest(int connection, 
     const FcgiRequest& request);
 
@@ -703,14 +751,16 @@ class TestFcgiClientInterface
   //    connection_map_ which is associated with connection otherwise.
   std::pair<const int, ConnectionState>* ConnectedCheck(int connection);
 
-  bool SendBinaryManagementRequestHelper(int connection,
+  bool SendBinaryManagementRequestHelper(
+    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     fcgi_si::FcgiType type, ManagementRequestData&& queue_item);
 
   bool SendGetValuesRequestHelper(
     std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     ManagementRequestData&& queue_item);
   
-  bool SendManagementRequestHelper(int connection, ConnectionState* state_ptr,
+  bool SendManagementRequestHelper(
+    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     struct iovec iovec_array[], int iovec_count, std::size_t number_to_write);
 
   std::set<fcgi_si::RequestIdentifier>              completed_request_set_;

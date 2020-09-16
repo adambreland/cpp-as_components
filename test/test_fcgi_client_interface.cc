@@ -519,7 +519,35 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
   return true;
 }
 
-bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(int connection,
+bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
+    fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
+{
+  std::pair<const int, ConnectionState>* entry_ptr {ConnectedCheck(connection)};
+  if(!entry_ptr)
+  {
+    return false;
+  }
+  std::vector<std::uint8_t> local_data(byte_ptr, byte_ptr + length);
+  ManagementRequestData queue_item {type, {}, std::move(local_data)};
+  return SendBinaryManagementRequestHelper(entry_ptr, type,
+    std::move(queue_item));
+}
+
+bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
+    fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)
+{
+  std::pair<const int, ConnectionState>* entry_ptr {ConnectedCheck(connection)};
+  if(!entry_ptr)
+  {
+    return false;
+  }
+  ManagementRequestData queue_item {type, {}, std::move(data)};
+  return SendBinaryManagementRequestHelper(entry_ptr, type,
+    std::move(queue_item));
+}
+
+bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(
+  std::pair<const int, ConnectionState>* entry_ptr,
   fcgi_si::FcgiType type, ManagementRequestData&& queue_item)
 {
   std::size_t length {queue_item.data.size()};
@@ -527,19 +555,11 @@ bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(int connection,
   {
     return false;
   }
-  std::map<int, ConnectionState>::iterator connection_iter
-    {connection_map_.find(connection)};
-  if(connection_iter == connection_map_.end())
-  {
-    return false;
-  }
-  ConnectionState* state_ptr {&(connection_iter->second)};
-  if(!(state_ptr->connected))
-  {
-    return false;
-  }
+  std::uint8_t* data_ptr {queue_item.data.data()};
 
-  state_ptr->management_queue.push_back(std::move(queue_item));
+  // This action will need to be undone by SendManagementRequestHelper if
+  // and exception will be thrown.
+  entry_ptr->second.management_queue.push_back(std::move(queue_item));
 
   std::uint8_t padding[7] = {}; // Aggregate initialize to zeroes.
   // The literal value 8 comes from the alignment recommendation of the FastCGI
@@ -553,15 +573,54 @@ bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(int connection,
   struct iovec iovec_array[iovec_count] = {};
   iovec_array[0].iov_base = header;
   iovec_array[0].iov_len  = fcgi_si::FCGI_HEADER_LEN;
-  iovec_array[1].iov_base = state_ptr->management_queue.back().data.data();
+  iovec_array[1].iov_base = data_ptr;
   iovec_array[1].iov_len  = length;
   iovec_array[2].iov_base = padding;
   iovec_array[2].iov_len  = padding_length;
   std::size_t number_to_write {fcgi_si::FCGI_HEADER_LEN + length +
     padding_length};
 
-  return SendManagementRequestHelper(connection, state_ptr, iovec_array,
+  return SendManagementRequestHelper(entry_ptr, iovec_array,
     iovec_count, number_to_write);
+}
+
+bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
+  const ParamsMap& params_map)
+{
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr
+    {ConnectedCheck(connection)};
+  if(!entry_ptr)
+  {
+    return false;
+  }
+  ParamsMap map_copy {params_map};
+  // All values are supposed to be empty. This is ensured.
+  for(ParamsMap::iterator i {map_copy.begin()}; i != map_copy.end();
+    ++i)
+  {
+    i->second.clear();
+  }
+  return SendGetValuesRequestHelper(entry_ptr,
+    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(map_copy), {}});
+}
+
+bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
+  ParamsMap&& params_map)
+{
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr
+    {ConnectedCheck(connection)};
+  if(!entry_ptr)
+  {
+    return false;
+  }
+  // All values are supposed to be empty. This is ensured.
+  for(ParamsMap::iterator i {params_map.begin()}; i != params_map.end();
+    ++i)
+  {
+    i->second.clear();
+  }
+  return SendGetValuesRequestHelper(entry_ptr,
+    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(params_map), {}});
 }
 
 bool TestFcgiClientInterface::SendGetValuesRequestHelper(
@@ -574,22 +633,32 @@ bool TestFcgiClientInterface::SendGetValuesRequestHelper(
   // 2) Add queue_item to the appropriate management request queue.
   // 3) Call SendManagementRequestHelper and return its return value.
 
+  std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+    std::vector<std::uint8_t>, std::size_t, ParamsMap::iterator> encode_return
+    {fcgi_si::EncodeNameValuePairs(queue_item.params_map.begin(),
+       queue_item.params_map.end(), queue_item.type, 0U, 0U)};
+  
+  if((!std::get<0>(encode_return))      ||
+     (std::get<3>(encode_return) != 1)  ||
+     (std::get<5>(encode_return) != 0U) ||
+     (std::get<6>(encode_return) != queue_item.params_map.end()))
+  {
+    return false;
+  }
+  
+  entry_ptr->second.management_queue.push_back(std::move(queue_item));
 
-
-  // std::tuple<bool, std::size_t, std::vector<struct iovec>,
-  //   std::vector<std::uint8_t>, std::size_t, MapNameIterator> encode_return
-  //   {}
-
-  // state_ptr->management_queue.push_back(std::move(queue_item));
-
+  return SendManagementRequestHelper(entry_ptr,
+    std::get<2>(encode_return).data(), std::get<2>(encode_return).size(),
+    std::get<1>(encode_return));
 }
 
-bool TestFcgiClientInterface::SendManagementRequestHelper(int connection,
-  ConnectionState* state_ptr, struct iovec iovec_array[], int iovec_count,
-  std::size_t number_to_write)
+bool TestFcgiClientInterface::SendManagementRequestHelper(
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+  struct iovec iovec_array[], int iovec_count, std::size_t number_to_write)
 {
   std::tuple<struct iovec*, int, std::size_t> write_return
-    {socket_functions::ScatterGatherSocketWrite(connection, iovec_array,
+    {socket_functions::ScatterGatherSocketWrite(entry_ptr->first, iovec_array,
       iovec_count, number_to_write, true, nullptr)};
   std::size_t number_remaining {std::get<2>(write_return)};
   if(number_remaining != 0U)
@@ -599,22 +668,23 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(int connection,
     // 1) In all cases, the item which was added to the queue should be
     //    removed.
     // 2) If nothing was written and the server did not close the connection,
-    //    then recovery may be possible. In this case, the entry for connection
-    //    in connection_map_ does not need to be removed.
+    //    then recovery may be possible. In this case, CloseConnection
+    //    does not need to be called.
     // 3) If something was written or the server did close the connection,
     //    then the entry for connection must be removed from connection_map_.
+    //    CloseConnectio should be called.
     std::error_code ec {errno, std::system_category()};
     std::system_error se {ec, "write or select"};
     try
     {
-      state_ptr->management_queue.pop_back();
+      entry_ptr->second.management_queue.pop_back();
       if(!((number_remaining == number_to_write) &&
            (se.code().value() != EPIPE)))
       {
         // Some data was written; the connection is now corrupt;
-        CloseConnection(connection);
+        CloseConnection(entry_ptr->first);
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
-          {new ConnectionClosure {connection}});
+          {new ConnectionClosure {entry_ptr->first}});
       }
     }
     catch(...)
