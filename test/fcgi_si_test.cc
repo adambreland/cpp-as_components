@@ -1206,10 +1206,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
     returned_encoding_information {fcgi_si::EncodeNameValuePairs(
       input_pairs.begin(), input_pairs.end(), 
       fcgi_si::FcgiType::kFCGI_GET_VALUES, 0U, 0U)};
-    if((!std::get<0>(returned_encoding_information))      ||
-       (std::get<3>(returned_encoding_information) != 1)  ||
-       (std::get<5>(returned_encoding_information) != 0U) || 
-       (std::get<6>(returned_encoding_information) != input_pairs.end()))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(returned_encoding_information,
+      input_pairs.end()))
     {
       ADD_FAILURE() << "The name-value pairs given to EncodeNameValuePairs "
         "caused an error.";
@@ -2835,10 +2833,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
         request_data.Fcgi_id, 0U)};
-    if((!std::get<0>(pair_encoding_return))                                   ||
-       (std::get<3>(pair_encoding_return) != 1)                               ||
-       (std::get<5>(pair_encoding_return) != 0U)                              ||
-       (std::get<6>(pair_encoding_return) != request_data.fcgi_params.end()))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(pair_encoding_return,
+      request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
       break;
@@ -2985,14 +2981,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   
     std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
       std::vector<std::uint8_t>, std::size_t, map_type::iterator>
-    pair_encoding_return 
+    pair_encoding_return
       {fcgi_si::EncodeNameValuePairs(request_data.fcgi_params.begin(),
         request_data.fcgi_params.end(), fcgi_si::FcgiType::kFCGI_PARAMS,
         request_data.Fcgi_id, 0U)};
-    if((!std::get<0>(pair_encoding_return))                                   ||
-       (std::get<3>(pair_encoding_return) != 1)                               ||
-       (std::get<5>(pair_encoding_return) != 0U)                              ||
-       (std::get<6>(pair_encoding_return) != request_data.fcgi_params.end()))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(pair_encoding_return,
+      request_data.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value pairs.";
       break;
@@ -3125,10 +3119,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     encoded_pairs_return {fcgi_si::EncodeNameValuePairs(
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U)};
-    if((!std::get<0>(encoded_pairs_return))                                   ||
-       (std::get<3>(encoded_pairs_return) != 1)                               ||
-       (std::get<5>(encoded_pairs_return) != 0U)                              ||
-       (std::get<6>(encoded_pairs_return) != request_data.fcgi_params.cend()))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(encoded_pairs_return,
+      request_data.fcgi_params.cend()))
     {
       ADD_FAILURE() << "An error occurred while encoding FCGI_PARAMS data in "
         << test_case_name;
@@ -3664,11 +3656,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     int number_params_correct {0};
     for(int i {0}; i < 3; ++i)
     {
-      if((!std::get<0>(params_encoding_list[i]))      ||
-         (std::get<3>(params_encoding_list[i]) != 1)  ||
-         (std::get<5>(params_encoding_list[i]) != 0U) || 
-         (std::get<6>(params_encoding_list[i]) != 
-          request_ptr_array[i]->fcgi_params.end()))
+      if(fcgi_si::EncodeNVPairSingleRecordFailure(params_encoding_list[i],
+        request_ptr_array[i]->fcgi_params.end()))
       {
         ADD_FAILURE() << "An error occurred while encoding the name-value "
           "pairs.";
@@ -3939,11 +3928,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       request_data.fcgi_params.cbegin(), request_data.fcgi_params.cend(),
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U
     )};
-    if((!std::get<0>(params_encoding_return))      ||
-       (std::get<3>(params_encoding_return) != 1)  ||
-       (std::get<5>(params_encoding_return) != 0U) || 
-       (std::get<6>(params_encoding_return) != 
-        request_data.fcgi_params.end()))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(params_encoding_return,
+      request_data.fcgi_params.cend()))
     {
       ADD_FAILURE() << "An error occurred while encoding the name-value "
         "pairs in " << test_case_name;
@@ -4376,11 +4362,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       responder_request_1.fcgi_params.begin(), 
       responder_request_1.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U)};
-    if((!std::get<0>(encoded_responder_1_params))     ||
-       (std::get<3>(encoded_responder_1_params) != 1) ||
-       (std::get<5>(encoded_responder_1_params) != 0U ||
-       (std::get<6>(encoded_responder_1_params) != 
-         responder_request_1.fcgi_params.end())))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(encoded_responder_1_params,
+      responder_request_1.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "
         "information of a responder request.";
@@ -4400,11 +4383,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       responder_request_2.fcgi_params.begin(), 
       responder_request_2.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U)};
-    if((!std::get<0>(encoded_responder_2_params))     || 
-       (std::get<3>(encoded_responder_2_params) != 1) ||
-       (std::get<5>(encoded_responder_2_params) != 0U ||
-       (std::get<6>(encoded_responder_2_params) != 
-         responder_request_2.fcgi_params.end())))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(encoded_responder_2_params,
+      responder_request_2.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "
         "information of a responder request.";
@@ -4426,11 +4406,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       filter_request.fcgi_params.begin(), 
       filter_request.fcgi_params.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, filter_request.Fcgi_id, 0U)};
-    if((!std::get<0>(encoded_filter_params))      || 
-       (std::get<3>(encoded_filter_params) != 1)  ||
-       (std::get<5>(encoded_filter_params) != 0U ||
-       (std::get<6>(encoded_filter_params) != 
-         filter_request.fcgi_params.end())))
+    if(fcgi_si::EncodeNVPairSingleRecordFailure(encoded_filter_params,
+      filter_request.fcgi_params.end()))
     {
       ADD_FAILURE() << "An error occurred in the encoding of the FCGI_PARAMS "
         "information of the filter request.";

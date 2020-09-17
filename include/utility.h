@@ -121,7 +121,8 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //          structures produced in that call does not contain duplicate
 //          information.
 //    g) Access: std::get<6>; Type: typename ByteSeqPairIter; An iterator
-//       pointing to an element of the range given by pair_iter and end. 
+//       pointing to an element of the range given by pair_iter and end, or
+//       an iterator equal to end.
 //       a) If the returned boolean value is false, the iterator points
 //          to the name-value pair which caused processing to halt. 
 //       b) If the returned boolean value is true and std::get<4>(t) == 0, the 
@@ -152,6 +153,26 @@ std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
   std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>
 EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   FcgiType type, std::uint16_t Fcgi_id, std::size_t offset);
+
+// Returns true if a call to EncodeNameValuePairs could not encode all of its
+// input in a single FastCGI record. Returns false otherwise.
+//
+// Parameters:
+// result:   A reference to the return value of a call to EncodeNameValuePairs.
+// end_iter: The iterator passed as the value of end in the call to
+//           EncodeNameValuePairs whose result is referenced by result.
+template<typename ByteSeqPairIter>
+inline bool EncodeNVPairSingleRecordFailure(
+  const std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+    std::vector<std::uint8_t>, std::size_t, ByteSeqPairIter>& result,
+  ByteSeqPairIter end_iter
+)
+{
+  return ((!std::get<0>(result))              ||
+          (std::get<3>(result) != 1)          ||
+          (std::get<5>(result) != 0U)         ||
+          (std::get<6>(result) != end_iter));
+}
 
 //    Attempts to extract a collection of name-value pair byte sequences when 
 // they are encoded as a sequence of bytes in the FastCGI name-value pair

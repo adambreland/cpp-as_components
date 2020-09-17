@@ -320,6 +320,48 @@ TestFcgiClientInterface::ConnectedCheck(int connection)
   return &(*connection_iter);
 }
 
+void TestFcgiClientInterface::FailedWrite(
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+  int error_code,
+  bool nothing_written,
+  bool pop_management_queue,
+  const char* system_error_message
+)
+{
+  // An error occurred. Either the server closed the connection or
+  // a local error occurred.
+  // 1) In all cases, the item which was added to the queue should be
+  //    removed.
+  // 2) If nothing was written and the server did not close the connection,
+  //    then recovery may be possible. In this case, CloseConnection
+  //    does not need to be called.
+  // 3) If something was written or the server did close the connection,
+  //    then the entry for connection must be removed from connection_map_.
+  //    CloseConnection should be called.
+  try
+  {
+    if(pop_management_queue)
+    {
+      entry_ptr->second.management_queue.pop_back();
+    }
+    if(!(nothing_written && (error_code != EPIPE)))
+    {
+      CloseConnection(entry_ptr->first);
+      micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
+        {new ConnectionClosure {entry_ptr->first}});
+    }
+  }
+  catch(...)
+  {
+    std::terminate();
+  }
+  if(error_code != EPIPE)
+  {
+    std::error_code ec {error_code, std::system_category()};
+    throw std::system_error {ec, system_error_message};
+  }
+}
+
 bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
 {
   int connection {id.descriptor()};
@@ -466,6 +508,12 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
   {
     return false;
   }
+  std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr
+    {ConnectedCheck(id.descriptor())};
+  if(!entry_ptr)
+  {
+    return false;
+  }
   std::uint8_t abort_header[fcgi_si::FCGI_HEADER_LEN] = {};
   fcgi_si::PopulateHeader(abort_header, fcgi_si::FcgiType::kFCGI_ABORT_REQUEST,
     id.Fcgi_id(), 0U, 0U);
@@ -474,47 +522,8 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
     abort_header, fcgi_si::FCGI_HEADER_LEN, nullptr)};
   if(write_return < fcgi_si::FCGI_HEADER_LEN)
   {
-    // Either an error occurred or the server closed the connection. If nothing
-    // was written, there is the possibility to recover from the error.
-    // If some data was written, the connection is regarded as corrupted.
-    //
-    // As an exception from CloseConnection leaves the interface in an
-    // unspecified state, CloseConnection is treated as noexcept here.
-    int previous_errno {errno};
-    std::error_code ec {errno, std::system_category()};
-    std::system_error se {ec, "write"};
-    if(write_return == 0U)
-    {
-      throw se;
-    }
-    else
-    {
-      try // noexcept-equivalent block.
-      {
-        // It is assumed that connection is associated with an entry in
-        // connection_map_ and is connected. Since a pending request was
-        // present for id, if this was not true, then an invariant of the
-        // class would have been violated.
-        //
-        // It is then assumed that CloseConnection(connection) either returns
-        // true or throws.
-        CloseConnection(connection);
-        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
-          {new ConnectionClosure {connection}});
-      }
-      catch(...)
-      {
-        std::terminate();
-      }
-      if(previous_errno == EPIPE)
-      {
-        return false;
-      }
-      else
-      {
-        throw se;
-      }
-    }
+    FailedWrite(entry_ptr, errno, write_return == 0U, false, write_or_select_);
+    return false;
   }
   return true;
 }
@@ -593,15 +602,15 @@ bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
   {
     return false;
   }
-  ParamsMap map_copy {params_map};
+  ParamsMap new_map {};
   // All values are supposed to be empty. This is ensured.
-  for(ParamsMap::iterator i {map_copy.begin()}; i != map_copy.end();
+  for(ParamsMap::const_iterator i {params_map.begin()}; i != params_map.end();
     ++i)
   {
-    i->second.clear();
+    new_map.insert({i->first, {}});
   }
   return SendGetValuesRequestHelper(entry_ptr,
-    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(map_copy), {}});
+    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(new_map), {}});
 }
 
 bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
@@ -638,10 +647,8 @@ bool TestFcgiClientInterface::SendGetValuesRequestHelper(
     {fcgi_si::EncodeNameValuePairs(queue_item.params_map.begin(),
        queue_item.params_map.end(), queue_item.type, 0U, 0U)};
   
-  if((!std::get<0>(encode_return))      ||
-     (std::get<3>(encode_return) != 1)  ||
-     (std::get<5>(encode_return) != 0U) ||
-     (std::get<6>(encode_return) != queue_item.params_map.end()))
+  if(fcgi_si::EncodeNVPairSingleRecordFailure(encode_return,
+    queue_item.params_map.end()))
   {
     return false;
   }
@@ -663,42 +670,9 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   std::size_t number_remaining {std::get<2>(write_return)};
   if(number_remaining != 0U)
   {
-    // An error occurred. Either the server closed the connection or
-    // a local error occurred.
-    // 1) In all cases, the item which was added to the queue should be
-    //    removed.
-    // 2) If nothing was written and the server did not close the connection,
-    //    then recovery may be possible. In this case, CloseConnection
-    //    does not need to be called.
-    // 3) If something was written or the server did close the connection,
-    //    then the entry for connection must be removed from connection_map_.
-    //    CloseConnectio should be called.
-    std::error_code ec {errno, std::system_category()};
-    std::system_error se {ec, "write or select"};
-    try
-    {
-      entry_ptr->second.management_queue.pop_back();
-      if(!((number_remaining == number_to_write) &&
-           (se.code().value() != EPIPE)))
-      {
-        // Some data was written; the connection is now corrupt;
-        CloseConnection(entry_ptr->first);
-        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
-          {new ConnectionClosure {entry_ptr->first}});
-      }
-    }
-    catch(...)
-    {
-      std::terminate();
-    }
-    if(se.code().value() == EPIPE)
-    {
-      return false;
-    }
-    else
-    {
-      throw se;
-    }
+    FailedWrite(entry_ptr, errno, number_remaining == number_to_write, true,
+      write_or_select_);
+    return false;
   }
   return true;
 }

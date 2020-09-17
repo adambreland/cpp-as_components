@@ -751,6 +751,47 @@ class TestFcgiClientInterface
   //    connection_map_ which is associated with connection otherwise.
   std::pair<const int, ConnectionState>* ConnectedCheck(int connection);
 
+  // Performs recovery after a write to a connection failed.
+  //
+  // Parameters:
+  // entry_ptr:            A pointer to the connection_map_ entry of the
+  //                       connection which was written to.
+  // error_code:           The value of errno which was set by the I/O system
+  //                       call which failed.
+  // nothing_written:      True if nothing was written over the entire
+  //                       sequence of writes which make up the write
+  //                       transaction on the connection.
+  // pop_management_queue: True if the most recently added management queue
+  //                       entry should be removed and discarded.
+  // system_error_message: The message which will be included in a
+  //                       std::system_error instance if an exception is
+  //                       thrown.
+  //
+  // Preconditions:
+  // 1) entry_ptr is not null and points to a valid entry of connection map.
+  // 2) pop_management_queue is true if and only if the failed write
+  //    transaction added an entry to the queue which should be removed.
+  //
+  // Effects:
+  // 1) May return, throw a std::system_error instance, or terminate the
+  //    program.
+  //    a) If the call returned or threw, then entry_ptr->first was
+  //       closed by a call to CloseConnection if a partial write occurred or
+  //       error_code == EPIPE. If pop_management_queue == true, then the
+  //       item which was most recently added to the management queue of
+  //       entry_ptr->first was removed.
+  //    b) A throw occurs if error_code != EPIPE.
+  //    c) Termination occurs if an invariant of the interface could not be
+  //       maintained.
+  //    d) The function returns otherwise.
+  void FailedWrite(
+    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+    int error_code,
+    bool nothing_written,
+    bool pop_management_queue,
+    const char* system_error_message
+  );
+
   bool SendBinaryManagementRequestHelper(
     std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     fcgi_si::FcgiType type, ManagementRequestData&& queue_item);
@@ -767,6 +808,8 @@ class TestFcgiClientInterface
   std::map<int, ConnectionState>                    connection_map_;
   std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
   std::list<std::unique_ptr<ServerEvent>>           micro_event_queue_;
+
+  static constexpr const char* write_or_select_ {"write or select"};
 };
 
 } // namespace fcgi_si_test
