@@ -358,6 +358,11 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     "A call to PartitionByteSequence<> used an iterator type which did "
     "not iterate over data in units of bytes.");
 
+  static_assert(std::numeric_limits<ssize_t>::max() >=
+                std::numeric_limits<std::uint16_t>::max());
+
+  // Initialize constexpr or const variables.
+
   // The content length of a record should be a multiple of 8 whenever possible.
   // kMaxRecordContentByteLength = 2^16 - 1
   // (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
@@ -367,20 +372,106 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   // The maximum number of bytes that can be written in one call to writev.
   constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
 
-  long remaining_iovec {fcgi_si::iovec_MAX};
-  // Use the current Linux default if information cannot be obtained.
-  if(remaining_iovec == -1)
-      remaining_iovec = 1024;
-  remaining_iovec = std::min<long>(remaining_iovec, 
-    std::numeric_limits<int>::max());
-  ssize_t remaining_content_length {std::distance(begin_iter, end_iter)};
-  ssize_t remaining_ssize_t {ssize_t_MAX};
+  auto CeilingOfQuotient =
+  [](std::size_t numerator, std::size_t denominator) constexpr -> std::size_t
+  {
+    return ((numerator/denominator) + 
+            (((numerator % denominator) > 0U) ? 1U : 0U));
+  };
+
+  auto InitializeMaxForSsize_t =
+  [&max_aligned_content_length, &ssize_t_MAX, &CeilingOfQuotient]
+  () constexpr -> std::size_t
+  {
+    constexpr std::size_t macl {static_cast<std::size_t>(max_aligned_content_length)};
+    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(ssize_t_MAX)/8U)};
+    constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
+    return (inter_1 - (8U*inter_2));
+  };
+
+  auto InitializeMaxForIovec = [&max_aligned_content_length]() -> std::size_t
+  {
+    long lm {fcgi_si::iovec_MAX};
+    std::size_t i_max {(lm > 0) ? 
+      static_cast<std::size_t>(lm) :
+      1024U
+    };
+    i_max = std::min<std::size_t>(i_max, std::numeric_limits<int>::max());
+    std::size_t i_inter {(i_max - 1)/2};
+    if(i_inter >
+       (std::numeric_limits<std::size_t>::max()/max_aligned_content_length))
+    {
+      return std::numeric_limits<std::size_t>::max();
+    }
+    else
+    {
+      return i_inter*max_aligned_content_length;
+    }
+  };
+
+  auto NeededIovec =
+  [&max_aligned_content_length, &CeilingOfQuotient]
+  (std::size_t m) constexpr -> std::size_t
+  {
+    return
+      (2U*CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length))) +
+      static_cast<std::size_t>((m % 8U) > 0U);
+  };
+
+  auto NeededSsize_t =
+  [&max_aligned_content_length, &CeilingOfQuotient]
+  (std::size_t m) constexpr -> ssize_t
+  {
+    return
+      static_cast<ssize_t>(
+        m +
+        (8U*CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length))) +
+        ((8U - (m % 8U)) % 8U)
+      );
+  };
+
+  auto NeededLocalData =
+  [&max_aligned_content_length, &CeilingOfQuotient]
+  (std::size_t m) constexpr -> std::size_t
+  {
+    return
+      8U*(1U + CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length)));
+  };
+
+  constexpr std::size_t max_for_ssize_t {InitializeMaxForSsize_t()};
+  static const std::size_t max_for_iovec {InitializeMaxForIovec()};
+  static const std::size_t min_max {std::min<std::size_t>(max_for_ssize_t,
+    max_for_iovec)};
+  static const ssize_t working_ssize_t_max {NeededSsize_t(min_max)};
+  static const std::size_t working_iovec_max {NeededIovec(min_max)};
+
+  // Determine the number of bytes of the input which will be processed.
+  typename ByteIter ::difference_type s_byte_length
+    {std::distance(begin_iter, end_iter)};
+  if(s_byte_length < 0)
+  {
+    throw std::invalid_argument {"end_iter was before begin_iter or an error "
+      "occurred to a call to std::distance(begin_iter, end_iter) in "
+      "a call to fcgi_si::PartitionByteSequence."};
+  }
+  std::size_t byte_length   {static_cast<std::size_t>(s_byte_length)};
+  ssize_t working_ssize_t   {working_ssize_t_max};
+  std::size_t working_iovec {working_iovec_max};
+  std::size_t bytes_remaining {min_max};
+  if(byte_length < min_max)
+  {
+    bytes_remaining = byte_length;
+    working_ssize_t = NeededSsize_t(byte_length);
+    working_iovec   = NeededIovec(byte_length);
+  }
+  std::size_t local_length {NeededLocalData(bytes_remaining)};
 
   // The first FCGI_HEADER_LEN (8) bytes are zero for padding.
   std::vector<uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
+  noncontent_record_information.reserve(local_length);
+  std::uint8_t* padding_ptr {noncontent_record_information.data()};
   std::vector<struct iovec> iovec_list {};
-  std::vector<std::vector<uint8_t>::size_type> noncontent_index_list {};
-  std::vector<std::vector<struct iovec>::size_type> iovec_relocation {};
+  iovec_list.reserve(working_iovec);
   ssize_t number_to_write {0};
 
   // Handle the special case of no content.
@@ -393,85 +484,59 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     iovec_list.push_back({&(*header_iter), FCGI_HEADER_LEN});
     number_to_write += FCGI_HEADER_LEN;
   }
-
-  // While records can be produced and need to be produced, produce a record
-  // with the largest content length up to the contingent maximum.
-  while(true)
+  else
   {
-    // Check if any content can be written in a new record.
-    if((remaining_content_length == 0) || 
-       (remaining_ssize_t < 2*FCGI_HEADER_LEN) || (remaining_iovec < 2))
-      break;
-    // Check if unaligned content must be written so that a padding section is
-    // necessary and if this can be done.
-    if((remaining_content_length < 8) && (remaining_iovec == 2))
-      break;
-
-    uint16_t current_record_content_length {
-      std::min<ssize_t>({
-        remaining_ssize_t - FCGI_HEADER_LEN,
-        remaining_content_length,
-        max_aligned_content_length
-      })
-    };
-    uint8_t padding_length {0U};
-      
-    // Check if we must produce a record with aligned content.
-    if(remaining_iovec == 2)
+    // While records can be produced and need to be produced, produce a record
+    // with the largest content length up to the contingent maximum.
+    while(bytes_remaining)
     {
-      current_record_content_length -= current_record_content_length % 8;
+      uint16_t current_record_content_length {
+        std::min<ssize_t>(
+          static_cast<ssize_t>(bytes_remaining),
+          static_cast<ssize_t>(max_aligned_content_length)
+        )
+      };
+      // Check if we need padding.
+      uint8_t padding_length {0U};
+      if(uint8_t padding_length_complement = current_record_content_length % 8)
+      {
+        padding_length = (padding_length_complement) ?
+          (8 - padding_length_complement) : 0U;
+      }
+      // Update non-content information.
+      std::vector<uint8_t>::iterator header_iter 
+        {noncontent_record_information.insert(noncontent_record_information.end(),
+          FCGI_HEADER_LEN, 0)};
+      std::uint8_t* local_ptr {&(*header_iter)};
+      PopulateHeader(local_ptr, type, Fcgi_id,
+        current_record_content_length, padding_length);
+      // Update iovec with header.
+      iovec_list.push_back({local_ptr, FCGI_HEADER_LEN});
+      // The const_cast is necessary as struct iovec contains a void* member
+      // and a client may pass in a const_iterator.
+      iovec_list.push_back({
+        const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
+        current_record_content_length
+      });
+      // Update iovec with padding if needed. Update relocation information.
+      if(padding_length)
+      {
+        iovec_list.push_back({padding_ptr, padding_length});
+      }
+      // Update tracking variables and increment iterator.
+      number_to_write += (FCGI_HEADER_LEN + current_record_content_length 
+        + padding_length);
+      bytes_remaining -= current_record_content_length;
+      std::advance(begin_iter, current_record_content_length);
     }
-    // Check if we need padding.
-    if(uint8_t padding_length_complement = current_record_content_length % 8)
+    // Check if an error was made in the vector length calculations.
+    if((number_to_write > working_ssize_t) ||
+       (iovec_list.size() > working_iovec) ||
+       (noncontent_record_information.size() > local_length))
     {
-      padding_length = (padding_length_complement) ?
-        8 - padding_length_complement : 0U;
-    }
-
-    // Update iovec with header. Update relocation information.
-    iovec_relocation.push_back(iovec_list.size());
-    iovec_list.push_back({nullptr, FCGI_HEADER_LEN});
-    noncontent_index_list.push_back(noncontent_record_information.size());
-
-    // Update non-content information.
-    std::vector<uint8_t>::iterator header_iter 
-      {noncontent_record_information.insert(noncontent_record_information.end(),
-        FCGI_HEADER_LEN, 0)};
-    PopulateHeader(&(*header_iter), type, Fcgi_id,
-      current_record_content_length, padding_length);
-      
-    // The const_cast is necessary as struct iovec contains a void* member
-    // and a client may pass in a const_iterator.
-    iovec_list.push_back({
-      const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
-      current_record_content_length
-    });
-
-    // Update iovec with padding if needed. Update relocation information.
-    if(padding_length)
-    {
-      iovec_relocation.push_back(iovec_list.size());
-      iovec_list.push_back({nullptr, padding_length});
-      noncontent_index_list.push_back(0U);
-    }
-    
-    ssize_t total_record_bytes {FCGI_HEADER_LEN + current_record_content_length 
-      + padding_length};
-    // Update tracking variables.
-    remaining_ssize_t -= total_record_bytes;
-    number_to_write += total_record_bytes;
-    remaining_iovec -= 2 + (padding_length > 0);
-    remaining_content_length -= current_record_content_length;
-    std::advance(begin_iter, current_record_content_length);
-  }
-  // Relocate iovec_list now that the memory of noncontent_record_information
-  // is stable.
-  for(std::vector<std::vector<std::uint8_t>::size_type>::size_type i {0}; 
-      i < iovec_relocation.size();
-      ++i)
-  {
-    iovec_list[iovec_relocation[i]].iov_base = 
-      &(noncontent_record_information[noncontent_index_list[i]]);
+      throw std::logic_error {"An error in the estimation of internal vector "
+        "lengths occurred in a call to fcgi_si::PartitionByteSequence."};
+    } 
   }
   return std::make_tuple(std::move(noncontent_record_information), 
     std::move(iovec_list), number_to_write, begin_iter);
