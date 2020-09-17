@@ -23,8 +23,6 @@
 
 #include "include/protocol_constants.h"
 
-#include <iostream>
-
 // Key:
 // BAZEL DEPENDENCY  This marks a feature which is provided by the Bazel
 //                   testing run-time environment. 
@@ -106,8 +104,6 @@ ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
       else
       {
         read_error = true;
-        std::cout << errno << '\n' << std::strerror(errno) << '\n';
-        std::cout.flush();
         break;
       }
     }

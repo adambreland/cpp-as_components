@@ -361,7 +361,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   static_assert(std::numeric_limits<ssize_t>::max() >=
                 std::numeric_limits<std::uint16_t>::max());
 
-  // Initialize constexpr or const variables.
+              // Initialize constexpr and const variables.
 
   // The content length of a record should be a multiple of 8 whenever possible.
   // kMaxRecordContentByteLength = 2^16 - 1
@@ -375,7 +375,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   auto CeilingOfQuotient =
   [](std::size_t numerator, std::size_t denominator) constexpr -> std::size_t
   {
-    return ((numerator/denominator) + 
+    return ((numerator/denominator) +
             (((numerator % denominator) > 0U) ? 1U : 0U));
   };
 
@@ -383,8 +383,10 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   [&max_aligned_content_length, &ssize_t_MAX, &CeilingOfQuotient]
   () constexpr -> std::size_t
   {
-    constexpr std::size_t macl {static_cast<std::size_t>(max_aligned_content_length)};
-    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(ssize_t_MAX)/8U)};
+    constexpr std::size_t macl {static_cast<std::size_t>(
+                                  max_aligned_content_length)};
+    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(
+                                         ssize_t_MAX)/8U)};
     constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
     return (inter_1 - (8U*inter_2));
   };
@@ -392,7 +394,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   auto InitializeMaxForIovec = [&max_aligned_content_length]() -> std::size_t
   {
     long lm {fcgi_si::iovec_MAX};
-    std::size_t i_max {(lm > 0) ? 
+    std::size_t i_max {(lm > 0) ?
       static_cast<std::size_t>(lm) :
       1024U
     };
@@ -414,7 +416,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   (std::size_t m) constexpr -> std::size_t
   {
     return
-      (2U*CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length))) +
+      (2U*CeilingOfQuotient(m,
+        static_cast<std::size_t>(max_aligned_content_length))) +
       static_cast<std::size_t>((m % 8U) > 0U);
   };
 
@@ -425,7 +428,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     return
       static_cast<ssize_t>(
         m +
-        (8U*CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length))) +
+        (8U*CeilingOfQuotient(m,
+          static_cast<std::size_t>(max_aligned_content_length))) +
         ((8U - (m % 8U)) % 8U)
       );
   };
@@ -435,7 +439,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   (std::size_t m) constexpr -> std::size_t
   {
     return
-      8U*(1U + CeilingOfQuotient(m, static_cast<std::size_t>(max_aligned_content_length)));
+      8U*(1U + CeilingOfQuotient(m, static_cast<std::size_t>(
+        max_aligned_content_length)));
   };
 
   constexpr std::size_t max_for_ssize_t {InitializeMaxForSsize_t()};
@@ -444,6 +449,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     max_for_iovec)};
   static const ssize_t working_ssize_t_max {NeededSsize_t(min_max)};
   static const std::size_t working_iovec_max {NeededIovec(min_max)};
+
+                      // Begin processing input.
 
   // Determine the number of bytes of the input which will be processed.
   typename ByteIter ::difference_type s_byte_length
@@ -506,8 +513,9 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
           (8 - padding_length_complement) : 0U;
       }
       // Update non-content information.
-      std::vector<uint8_t>::iterator header_iter 
-        {noncontent_record_information.insert(noncontent_record_information.end(),
+      std::vector<uint8_t>::iterator header_iter
+        {noncontent_record_information.insert(
+          noncontent_record_information.end(),
           FCGI_HEADER_LEN, 0)};
       std::uint8_t* local_ptr {&(*header_iter)};
       PopulateHeader(local_ptr, type, Fcgi_id,
@@ -517,7 +525,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
       // The const_cast is necessary as struct iovec contains a void* member
       // and a client may pass in a const_iterator.
       iovec_list.push_back({
-        const_cast<void*>(static_cast<const void*>(&(*begin_iter))), 
+        const_cast<void*>(static_cast<const void*>(&(*begin_iter))),
         current_record_content_length
       });
       // Update iovec with padding if needed. Update relocation information.
@@ -526,7 +534,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
         iovec_list.push_back({padding_ptr, padding_length});
       }
       // Update tracking variables and increment iterator.
-      number_to_write += (FCGI_HEADER_LEN + current_record_content_length 
+      number_to_write += (FCGI_HEADER_LEN + current_record_content_length
         + padding_length);
       bytes_remaining -= current_record_content_length;
       std::advance(begin_iter, current_record_content_length);
@@ -538,7 +546,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     {
       throw std::logic_error {"An error in the estimation of internal vector "
         "lengths occurred in a call to fcgi_si::PartitionByteSequence."};
-    } 
+    }
   }
   return std::make_tuple(std::move(noncontent_record_information), 
     std::move(iovec_list), number_to_write, begin_iter);

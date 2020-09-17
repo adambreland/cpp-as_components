@@ -17,3 +17,18 @@ test/stand_alone_test.cc
 -l:libsocket_functions.a 
 -l:libgtest_main.a 
 -l:libgtest.a 
+
+# Another example command line for a standalone test. test/part_test.cc has
+# since been deleted.
+g++ -g -pthread -std=c++17 -o part_test
+-iquote .
+test/part_test.cc
+-iquote /home/adam/cpp/googletest/googletest/include
+-L/home/adam/cpp/fcgi_si/bazel-bin
+-L/home/adam/cpp/googletest/bazel-bin
+-L/home/adam/cpp/socket_functions/bazel-bin
+-l:test/libfcgi_si_testing_utilities.a
+-l:libfcgi_si_utilities.a
+-l:libsocket_functions.a
+-l:libgtest_main.a
+-l:libgtest.a
