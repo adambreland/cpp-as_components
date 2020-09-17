@@ -1683,5 +1683,21 @@ TEST(Utility, PartitionByteSequence)
       3
     );
   }
+
+  // Case 7: std::distance(end_iter, begin_iter) == 2^35,
+  // type == fcgi_si::FcgiType::kFCGI_STDOUT, Fcgi_id == 3.
+  {
+    std::string message {"Case 7, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<std::uint8_t> content(1U << 30, 1U);
+    PartitionByteSequenceTester(
+      message,
+      false,
+      content, 
+      fcgi_si::FcgiType::kFCGI_STDOUT,
+      3
+    );
+  }
+
   close(temp_descriptor);
 }

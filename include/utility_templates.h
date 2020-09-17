@@ -491,9 +491,11 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     while(bytes_remaining)
     {
       uint16_t current_record_content_length {
-        std::min<ssize_t>(
-          static_cast<ssize_t>(bytes_remaining),
-          static_cast<ssize_t>(max_aligned_content_length)
+        static_cast<std::uint16_t>(
+          std::min<ssize_t>(
+            static_cast<ssize_t>(bytes_remaining),
+            static_cast<ssize_t>(max_aligned_content_length)
+          )
         )
       };
       // Check if we need padding.
