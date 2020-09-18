@@ -376,7 +376,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   [](std::size_t numerator, std::size_t denominator) constexpr -> std::size_t
   {
     return ((numerator/denominator) +
-            (((numerator % denominator) > 0U) ? 1U : 0U));
+            (static_cast<std::size_t>((numerator % denominator) > 0U)));
   };
 
   auto InitializeMaxForSsize_t =
