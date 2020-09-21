@@ -27,7 +27,6 @@ cc_test(
     copts      = [
         "-std=c++17",
         "-g",
-        "-O2",
         "-Wextra",
         "-iquote .",
     ]
@@ -45,7 +44,6 @@ cc_test(
     copts      = [
         "-std=c++17",
         "-g",
-        "-O2",
         "-Wextra",
         "-iquote .",
     ]
@@ -64,7 +62,6 @@ cc_test(
     copts      = [
         "-std=c++17",
         "-g",
-        "-O2",
         "-Wextra",
         "-iquote .",
     ],

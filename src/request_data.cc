@@ -13,18 +13,43 @@ RequestData::RequestData(uint16_t role, bool close_connection)
 : role_ {role}, close_connection_ {close_connection}
 {}
 
-bool RequestData::IsRequestComplete() const noexcept
+bool RequestData::CheckRequestCompletionWithConditionalUpdate() noexcept
 {
-  if((role_ == FCGI_RESPONDER) || (role_ == FCGI_AUTHORIZER))
-    // If FCGI_DATA_ receives information, the FCGI_DATA stream must be 
-    // completed. This stream is not ignored even though it is not used in
-    // these roles according to the FastCGI standard.
-    return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ &&
-      ((FCGI_DATA_.size() == 0) || FCGI_DATA_complete_);
-  else 
-    // Filter roles require FCGI_DATA.
-    // For unknown roles, the interface assumes that FCGI_DATA is necessary.
+  if(role_ == FCGI_RESPONDER)
+  {
+    bool completed {FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ &&
+      ((FCGI_DATA_.size() == 0) || FCGI_DATA_complete_)};
+    if(completed)
+    {
+      if(!FCGI_DATA_complete_)
+      {
+        FCGI_DATA_complete_ = true;
+      }
+    }
+    return completed;
+  }
+  else if(role_ == FCGI_AUTHORIZER)
+  {
+    bool completed {FCGI_PARAMS_complete_                 &&
+      ((FCGI_STDIN_.size() == 0) || FCGI_STDIN_complete_) &&
+      ((FCGI_DATA_.size()  == 0) || FCGI_DATA_complete_)};
+    if(completed)
+    {
+      if(!FCGI_STDIN_complete_)
+      {
+        FCGI_STDIN_complete_ = true;
+      }
+      if(!FCGI_DATA_complete_)
+      {
+        FCGI_DATA_complete_ = true;
+      }
+    }
+    return completed;
+  }
+  else
+  {
     return FCGI_PARAMS_complete_ && FCGI_STDIN_complete_ && FCGI_DATA_complete_;
+  }
 }
 
 bool RequestData::ProcessFCGI_PARAMS()

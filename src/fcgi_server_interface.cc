@@ -848,7 +848,8 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
             
             // This is a rare instance where an FcgiRequest may be destroyed
             // within the scope of implementation code. The destructor of
-            // FcgiRequest objects tries to acquire interface_state_mutex_.
+            // FcgiRequest objects tries to acquire interface_state_mutex_
+            // if the object to be destroyed is neither completed nor null.
             // See the catch block immediately below.
             FcgiRequest request {request_id,
               FcgiServerInterface::interface_identifier_, this, 

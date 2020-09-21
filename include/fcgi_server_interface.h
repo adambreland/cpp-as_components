@@ -26,7 +26,7 @@ class RecordStatus;
 // the FastCGI protocol for application servers. This class and its associated
 // class FcgiRequest support multi-threaded applications. FcgiRequest objects
 // are produced by the AcceptRequests method of FcgiServerInterface. The thread
-// which houses the instance of FcgiServerInterface is intended to execute
+// which houses the instance of FcgiServerInterface is supposed to execute
 // calls to AcceptRequests in a loop. A request object produced by a call may
 // be moved to a worker thread and serviced from it. The methods of FcgiRequest
 // allow the response to a request to be made without explicit synchronization
@@ -38,19 +38,36 @@ class RecordStatus;
 // AcceptRequests uses I/O multiplexing on connections and will block until new
 // connection requests or request data are present.
 //
+// Request content validation relative to role expectations:
 //    FcgiServerInterface does not validate request information relative to
 // FastCGI role expectations. For example, the equality of the number of bytes
 // of FCGI_STDIN input and the CONTENT_LENGTH environment variable represented
 // as a FCGI_PARAMS name-value pair is not verified for the Responder role.
 // Moreover, the presence of expected environment variables for a request as
 // defined by the FCGI_PARAMS stream is not verified by FcgiServerInterface.
-//    The interface considers a request for a Responder and Authorizer to be
-// complete when either:
-// 1) No FCGI_DATA records have been received and FCGI_PARAMS and FCGI_STDIN
-//    are complete.
-// 2) All of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
-// The interface considers a request for a Filter and any unknown role to be
-// complete when all of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
+//
+// Request completion and roles:
+//   Three separate conditions are used to determine when a request is first
+// completed. The role of the request determines which conditions is used.
+//    Responder: (FCGI_PARAMS, FCFI_STDIN needed; FCGI_DATA optional.)
+//    A Responder request is considerd complete when either:
+//    1) No FCGI_DATA records have been received and FCGI_PARAMS and FCGI_STDIN
+//       are complete.
+//    2) Each of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA is complete.
+//
+//    Authorizer: (FCGI_PARAMS needed; FCGI_STDIN and FCGI_DATA optional.)
+//    An Authorizer request is considered complete when either:
+//    1) No FCGI_STDIN or FCGI_DATA records have been received and FCGI_PARAMS
+//       is complete.
+//    2) No FCGI_DATA records have been received and FCGI_STDIN and FCGI_PARAMS
+//       are complete.
+//    3) No FCGI_STDIN records have been received and FCGI_DATA and FCGI_PARAMS
+//       are complete.
+//    4) Each of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA is complete.
+//
+//    Filter and unknown roles: (All streams needed.)
+//    A Filter request and an unknown request are considered completed when
+//    each of FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
 //
 // Configuration:
 //    FCGI_LISTENSOCK_FILENO: The FastCGI standard specifies that the listening
@@ -111,7 +128,7 @@ class FcgiServerInterface {
   //
   // Preconditions:
   // 1) Signal handling: SIGPIPE must be appropriately handled by the
-  //    application. If SIGPIPE is not handled, the default behavior of
+  //    application. If SIGPIPE is not handled, the default system behavior of
   //    program termination will apply when it is discovered through a write
   //    operation that a connection was closed by the peer.
   //
@@ -195,8 +212,8 @@ class FcgiServerInterface {
   //       that the connection was no longer being read by the client.
   //    e) If an error during reading or writing corrupted the connection or
   //       corrupted internal state associated with the connection. Corruption
-  //       is associated with errors; exceptions are thrown at the source of
-  //       the error.
+  //       is associated with errors; an exception is thrown at the source of
+  //       an error.
   std::vector<FcgiRequest> AcceptRequests();
 
   // Gets the current number of connected sockets which were accepted by

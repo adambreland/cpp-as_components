@@ -170,8 +170,8 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   else if(inet_pton(AF_INET6, address, &addr_store) > 0)
   {
     domain = AF_INET6;
-    static_cast<struct sockaddr_in6*>(static_cast<void*>(&addr_store))->sin6_port
-      = htons(port);
+    static_cast<struct sockaddr_in6*>(
+      static_cast<void*>(&addr_store))->sin6_port = htons(port);
   }
   else
   {
@@ -228,7 +228,8 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   }
   // socket_connection must now refer to a connected socket descriptor.
   // Make the descriptor non-blocking for later I/O multiplexing.
-  auto CloseAndThrowOnError = [socket_connection](int error, const char* message)->void
+  auto CloseAndThrowOnError = [socket_connection]
+  (int error, const char* message)->void
   {
     std::error_code ec {error, std::system_category()};
     std::system_error se {ec, message};
@@ -284,7 +285,9 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
     {
       ConnectionState connection_state {};
       std::pair<std::map<int, ConnectionState>::iterator, bool> insert_return
-        {connection_map_.insert({socket_connection, std::move(connection_state)})};
+        {connection_map_.insert(
+          {socket_connection, std::move(connection_state)}
+        )};
       // Set connected to true after insertion to simplify exception handling.
       // No undo step is needed in the event of an exception when this is done.
       insert_return.first->second.connected = true;
@@ -677,11 +680,11 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   return true;
 }
 
-// fcgi_si::RequestIdentifier
-// TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
-// {
-
-// }
+fcgi_si::RequestIdentifier
+TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
+{
+  
+}
 
 // fcgi_si::RequestIdentifier
 // TestFcgiClientInterface::SendRequest(int connection, FcgiRequest&& request)

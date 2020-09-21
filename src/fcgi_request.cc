@@ -281,12 +281,36 @@ FcgiRequest::FcgiRequest(
     completed_                       {false}
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
-     || write_mutex_ptr == nullptr || bad_connection_state_ptr_ == nullptr)
-     || (request_data_ptr_->request_status_ == RequestStatus::kRequestAssigned))
+     || write_mutex_ptr == nullptr || bad_connection_state_ptr == nullptr)
+     || (request_data_ptr->request_status_ == RequestStatus::kRequestAssigned))
   {
-    interface_ptr_->bad_interface_state_detected_ = true; 
-    throw std::logic_error {"An FcgiRequest could not be "
-      "constructed."};
+    auto NullPointerCheck = [](void* ptr)->const char*
+    {
+      return (ptr == nullptr) ? "null\n" : "non-null\n";
+    };
+    interface_ptr_->bad_interface_state_detected_ = true;
+    std::string error_status {"An FcgiRequest could not be "
+      "constructed.\n"};
+    (error_status += "interface_ptr: ")    +=
+      NullPointerCheck(interface_ptr);
+    (error_status += "request_data_ptr: ") +=
+      NullPointerCheck(request_data_ptr);
+    (error_status += "write_mutex_ptr: ")  +=
+      NullPointerCheck(write_mutex_ptr);
+    (error_status += "bad_connection_state_ptr: ") +=
+      NullPointerCheck(bad_connection_state_ptr);
+    error_status  += "RequestStatus: ";
+    if(request_data_ptr == nullptr)
+    {
+      error_status += "unknown\n";
+    }
+    else
+    {
+      error_status +=
+        (request_data_ptr->request_status_ == RequestStatus::kRequestAssigned)
+        ? "assigned\n" : "unassigned\n";
+    }
+    throw std::logic_error {error_status};
   }
 
   // TODO double check noexcept specifications for move assignments.

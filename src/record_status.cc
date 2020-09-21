@@ -278,7 +278,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
             // Check if the request is complete. If it is, validate the
             // FCGI_PARAMS stream. This also puts the RequestData object into a
             // valid state to be used for construction of an FcgiRequest object.
-            if(request_data_ptr->IsRequestComplete())
+            if(request_data_ptr->CheckRequestCompletionWithConditionalUpdate())
             {
               if(request_data_ptr->ProcessFCGI_PARAMS())
                 result = request_id_;

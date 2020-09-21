@@ -45,7 +45,7 @@ public:
     return role_;
   }
 
-  bool IsRequestComplete() const noexcept;
+  bool CheckRequestCompletionWithConditionalUpdate() noexcept;
 
   // Attempts to convert the FCGI_PARAMS byte sequence which is encoded in the
   // FastCGI name-value pair format into a std::map object with names as 
@@ -136,23 +136,23 @@ private:
   friend class FcgiRequest;
 
   // Request data and completion status
-  bool FCGI_PARAMS_complete_ {false};
-  bool FCGI_STDIN_complete_ {false};
-  bool FCGI_DATA_complete_ {false};
-  std::vector<std::uint8_t> FCGI_PARAMS_ {};
-  std::vector<std::uint8_t> FCGI_STDIN_ {};
-  std::vector<std::uint8_t> FCGI_DATA_ {};
+  bool                      FCGI_PARAMS_complete_ {false};
+  bool                      FCGI_STDIN_complete_  {false};
+  bool                      FCGI_DATA_complete_   {false};
+  std::vector<std::uint8_t> FCGI_PARAMS_          {};
+  std::vector<std::uint8_t> FCGI_STDIN_           {};
+  std::vector<std::uint8_t> FCGI_DATA_            {};
 
   // Map to hold processed FCGI_PARAMS_ data.
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
-    environment_map_ {};
+                environment_map_ {};
 
   // Request metadata
   std::uint16_t role_;
-  bool client_set_abort_ {false};
-  bool close_connection_;
-  RequestStatus request_status_ {RequestStatus::kRequestPending};
-  bool connection_closed_by_interface_ {false};
+  bool          client_set_abort_               {false};
+  bool          close_connection_;
+  RequestStatus request_status_                 {RequestStatus::kRequestPending};
+  bool          connection_closed_by_interface_ {false};
 };
 
 } // namespace fcgi_si
