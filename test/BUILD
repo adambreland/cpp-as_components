@@ -3,8 +3,8 @@ cc_library(
     deps       = ["@googletest//:gtest"],
     srcs       = ["//test:fcgi_si_testing_utilities.cc"],
     hdrs       = [
-        "//:include/protocol_constants.h",
-        "//test:fcgi_si_testing_utilities.h"
+        "//test:fcgi_si_testing_utilities.h",
+        "//:include/protocol_constants.h"
     ],
     copts      = [
         "-std=c++17",
@@ -12,6 +12,28 @@ cc_library(
         "-O2",
         "-Wextra",
         "-iquote ."        
+    ]
+)
+
+cc_library(
+    name      = "test_fcgi_client_interface",
+    deps      = [
+        "//:fcgi_si_utilities",
+        "@socket_functions//:socket_functions"
+    ],
+    srcs      = ["//test:test_fcgi_client_interface.cc"],
+    hdrs      = [
+        "//test:test_fcgi_client_interface.h",
+        "//:include/protocol_constants.h",
+        "//:include/request_identifier.h",
+        "@id_manager//:include/id_manager_template.h"
+    ],
+    copts     = [
+        "-std=c++17",
+        "-g",
+        "-O2",
+        "-Wextra",
+        "-iquote ." 
     ]
 )
 

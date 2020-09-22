@@ -34,8 +34,8 @@
 #include "external/socket_functions/include/socket_functions.h"
 
 // Key:
-// BAZEL DEPENDENCY       This marks use of a feature which is provided in the
-//                        Bazel testing environment. 
+// BAZEL DEPENDENCY   Used to mark the use of a feature which is provided
+//                    by the Bazel testing environment. 
 
 // Utility functions and classes for interface tests.
 
@@ -2416,11 +2416,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //
   // Other modules whose testing depends on this module:
 
+  // Type aliases, user-defined types, and lambda functions for general use
+  // and the first case.
   using map_type = std::map<std::vector<std::uint8_t>, 
       std::vector<std::uint8_t>>;
 
-  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
-
+  // A type to hold data which describes a FastCGI request.
   struct RequestData
   {
     std::uint16_t Fcgi_id;
@@ -2431,6 +2432,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     bool fcgi_keep_conn;
   };
 
+  //    A test function which compares an FcgiRequest object with a
+  // RequestData instance. This lambda is used to determine if the
+  // FcgiRequest output of an FcgiServerInterface instance faithfully
+  // represents the request which was sent to the instance.
+  //    The message parameter provides an error message to Google Test
+  // assertions.
   auto RequestInspector = [](const fcgi_si::FcgiRequest& output, 
     const struct RequestData& input, const std::string& message)->void
   {
@@ -2443,26 +2450,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(output.get_keep_conn(), input.fcgi_keep_conn)    << message;
   };
 
-  auto PopulateRole = [](std::uint8_t* buffer_ptr, std::uint16_t role)->void
-  {
-    *buffer_ptr = (role >> 8);
-    *(buffer_ptr + 1) = role; // Truncating assignment.
-  };
-
-  auto PopulateBeginRequestRecord = [&PopulateRole](std::uint8_t* buffer_ptr,
-    const struct RequestData& request_data)->void
-  {
-    fcgi_si::PopulateHeader(buffer_ptr,
-      fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, request_data.Fcgi_id, 
-      fcgi_si::FCGI_HEADER_LEN, 0U);
-    PopulateRole(buffer_ptr + fcgi_si::FCGI_HEADER_LEN, request_data.role);
-    if(request_data.fcgi_keep_conn)
-    {
-      *(buffer_ptr + fcgi_si::FCGI_HEADER_LEN + 
-        fcgi_si::kBeginRequestFlagsIndex) = 1U;
-    }
-  };
-
+  // A lambda used with class SingleProcessInterfaceAndClients to accept
+  // requests and move the output FcgiRequest instances to a vector of such.
   auto AcceptAndAddRequests = []
   (
     SingleProcessInterfaceAndClients* spiac_ptr,
@@ -2479,55 +2468,30 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         new_requests.end()));
   };
 
-  auto SingleClientRecordWriterAndTester = [&RequestInspector]
-  (
-    SingleProcessInterfaceAndClients* spiac_ptr,
-    const struct RequestData& request_data,
-    const std::vector<std::pair<const std::uint8_t*, std::size_t>>& write_pairs,
-    const std::string& test_case_name
-  )->void
-  {
-    int write_count {0};
-    for(std::pair<const std::uint8_t*, std::size_t> write_pair : write_pairs)
-    {
-      if(socket_functions::SocketWrite(spiac_ptr->client_descriptors()[0],
-        write_pair.first, write_pair.second) < write_pair.second)
-      {
-        ADD_FAILURE() << "An error occurred while writing the request."
-          << '\n' << std::strerror(errno);
-        break;
-      }
-      write_count++;
-    }
-    if(write_count < 3)
-      return;
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
+  GTestFatalIgnoreSignal(SIGPIPE);
 
-    std::vector<fcgi_si::FcgiRequest> request_list 
-      {spiac_ptr->interface().AcceptRequests()};
-    if(request_list.size() != 1U)
-    {
-      ADD_FAILURE() << "An unexpected number of requests was returned."
-        << '\n' << request_list.size();
-      return;
-    }
-    RequestInspector(request_list[0], request_data,
-      test_case_name);
-    EXPECT_EQ(spiac_ptr->interface().connection_count(), 1U);
-    EXPECT_EQ(spiac_ptr->interface().interface_status(), true);
-    EXPECT_EQ(spiac_ptr->interface().get_overload(), false);
-  };
+                    // Single connection test cases.
 
-  // Single connection Test Case Set 1: Minimal requests
+         //
+         // Single connection Test Case Set 1: Minimal requests
+         //
 
-  // Iteratively write records to an interface and call AcceptRequests on the
-  // interface. Check if a request was generated or not generated as expected.
-  // Verify the data of the requets when one is generated.
+  // This lambda is used in the implementation of the minimal request cases.
+  // It creates an interface and a client. It then iteratively writes a record
+  // to the interface through the client and calls AcceptRequests on the
+  // interface after each record write. Record information is given by pairs.
+  // When AcceptRequests returns, it checks if a request was generated or not
+  // and compares the generation status to the expected status as determined by
+  // request_acceptance. If a request was generated as expected, it verifies
+  // the data of the request.
+  using RecordPair = std::pair<const std::uint8_t*, std::size_t>;
   auto WriteAndAccept = [&RequestInspector, &AcceptAndAddRequests]
   (
-    const struct RequestData&                                       request_data,
-    const std::vector<std::pair<const std::uint8_t*, std::size_t>>& pairs,
-    const std::vector<bool>&                                        request_acceptance,
-    const std::string&                                              case_message
+    const struct RequestData&      request_data,
+    const std::vector<RecordPair>& pairs,
+    const std::vector<bool>&       request_acceptance,
+    const std::string&             case_message
   )->void
   {
     InterfaceCreationArguments inter_args {};
@@ -2547,12 +2511,16 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       return;
     }
     // The vector requests cannot be in the loop. If it was located within the
-    // loop, FcgiRequest objects which it holds will be destroyed
+    // loop, the FcgiRequest objects which it holds will be destroyed
     // when the loop iterates and requests is destroyed. if FCGI_KEEP_CONN was
     // not set for these requests, the interface will close its connection
     // for the request as the requests will not have been completed.
-    // This will result in a failure at best in the call to SocketWrite and
-    // an error at worst.
+    //
+    // Note that, if the connection was closed by the interface, a write on the
+    // client socket derscriptor will succeed. This unusual behavior prevents
+    // connection closure detection through errno == EPIPE. In this case,
+    // a subsequent call to AcceptRequests will block as no data will be
+    // received by the interface.
     std::vector<fcgi_si::FcgiRequest> requests {};
     for(std::size_t i {0U}; i != pairs_size; ++i)
     {
@@ -2581,6 +2549,43 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     }
   };
 
+  // This lambda creates a sequence of RecordPair instances and populates
+  // an associated buffer with FastCGI record data.
+  //
+  // It is assumed that an FCGI_BEGIN_REQUEST record is always first.
+  auto MinimalRecordPairCreator = []
+  (
+    std::vector<std::uint8_t>*            record_list_ptr,
+    const std::vector<fcgi_si::FcgiType>& type_list,
+    const RequestData&                    request_data
+  )->std::vector<RecordPair>
+  {
+    if(!record_list_ptr)
+    {
+      throw std::logic_error {"A null pointer was present in a call to "
+        "PopulateMinimalRecords."};
+    }
+    if((fcgi_si::FCGI_HEADER_LEN * (2U + type_list.size())) >
+       record_list_ptr->size())
+    {
+      throw std::logic_error {"record_list_ptr length mismatch in a call to "
+        "PopulateMinimalRecords."};
+    }
+    std::vector<RecordPair> pair_list {};
+    std::uint8_t* buffer_ptr {record_list_ptr->data()};
+    fcgi_si::PopulateBeginRequestRecord(buffer_ptr, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
+    pair_list.push_back({buffer_ptr, 2U * fcgi_si::FCGI_HEADER_LEN});
+    buffer_ptr += (2U * fcgi_si::FCGI_HEADER_LEN);
+    for(auto i {type_list.begin()}; i != type_list.end(); ++i)
+    {
+      fcgi_si::PopulateHeader(buffer_ptr, *i, 1U, 0U, 0U);
+      pair_list.push_back({buffer_ptr, fcgi_si::FCGI_HEADER_LEN});
+      buffer_ptr += fcgi_si::FCGI_HEADER_LEN;
+    }
+    return pair_list;
+  };
+
   // a) Role: Responder; FCGI_PARAMS and FCGI_STDIN are terminated with
   //    empty records. No record of type FCGI_DATA is sent.
   {
@@ -2591,20 +2596,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1).
-    std::uint8_t request_array[4U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1) => 4.
+    std::vector<std::uint8_t> request_records(4U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2618,20 +2615,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = true;
 
-    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1).
-    std::uint8_t request_array[4U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1) => 4.
+    std::vector<std::uint8_t> request_records(4U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN};  
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2647,23 +2636,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_DATA (1), FCGI_PARAMS (1), FCGI_STDIN (1).
-    std::uint8_t request_array[5U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_DATA, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (4U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (4*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_DATA (1), FCGI_PARAMS (1), FCGI_STDIN (1) => 5.
+    std::vector<std::uint8_t> request_records(5U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_DATA,
+      fcgi_si::FcgiType::kFCGI_PARAMS, fcgi_si::FcgiType::kFCGI_STDIN};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2677,23 +2655,13 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_RESPONDER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1).
-    std::uint8_t request_array[5U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (4U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_DATA, 1U, 0U, 0U);
-
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (4*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1)
+    // => 5.
+    std::vector<uint8_t> request_records(5U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN, fcgi_si::FcgiType::kFCGI_DATA};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, true, false};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2708,17 +2676,11 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_AUTHORIZER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2) and FCGI_PARAMS (1).
-    std::uint8_t request_array[3U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-    };
+    // Begin request (2) and FCGI_PARAMS (1) => 3.
+    std::vector<uint8_t> request_records(3U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2733,20 +2695,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_AUTHORIZER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_STDIN (1), FCGI_PARAMS (1).
-    std::uint8_t request_array[4U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_STDIN (1), FCGI_PARAMS (1) => 4.
+    std::vector<uint8_t> request_records(4U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_STDIN,
+      fcgi_si::FcgiType::kFCGI_PARAMS};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2761,20 +2715,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_AUTHORIZER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1).
-    std::uint8_t request_array[4U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), and FCGI_STDIN (1) => 4.
+    std::vector<uint8_t> request_records(4U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, true, false};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
@@ -2791,59 +2737,41 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     request_data.role           = fcgi_si::FCGI_FILTER;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1).
-    std::uint8_t request_array[5U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (4U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_DATA, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (4*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1)
+    // => 5.
+    std::vector<uint8_t> request_records(5U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN, fcgi_si::FcgiType::kFCGI_DATA};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
 
   // i) Role: Unknown: The role field has value 10. Otherwise as h.
   {
-    std::string case_message {"Test Case Set 1, test case h."};
+    std::string case_message {"Test Case Set 1, test case i."};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
     request_data.role           = 10U;
     request_data.fcgi_keep_conn = false;
 
-    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1).
-    std::uint8_t request_array[5U * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(request_array, request_data);
-    fcgi_si::PopulateHeader(request_array + (2U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (3U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_STDIN, 1U, 0U, 0U);
-    fcgi_si::PopulateHeader(request_array + (4U * fcgi_si::FCGI_HEADER_LEN),
-      fcgi_si::FcgiType::kFCGI_DATA, 1U, 0U, 0U);
-    
-    std::vector<std::pair<const std::uint8_t*, std::size_t>> record_info
-    {
-      {request_array,                                2*fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (2*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (3*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN},
-      {request_array + (4*fcgi_si::FCGI_HEADER_LEN), fcgi_si::FCGI_HEADER_LEN}
-    };
+    // Begin request (2), FCGI_PARAMS (1), FCGI_STDIN (1), and FCGI_DATA (1)
+    // => 5.
+    std::vector<uint8_t> request_records(5U * fcgi_si::FCGI_HEADER_LEN);
+    std::vector<fcgi_si::FcgiType> type_list {fcgi_si::FcgiType::kFCGI_PARAMS,
+      fcgi_si::FcgiType::kFCGI_STDIN, fcgi_si::FcgiType::kFCGI_DATA};
+    std::vector<RecordPair> record_info {MinimalRecordPairCreator(
+      &request_records, type_list, request_data)};
     std::vector<bool> acceptance_info {false, false, false, true};
     WriteAndAccept(request_data, record_info, acceptance_info, case_message);
   }
+                  //
+                  // Single connection Test Case Set 2
+                  //
 
-  // Single connection Test Case Set 2: Partial request data receipt on a call
-  // of AcceptRequests.
+  // Partial request data receipt on a call of AcceptRequests.
 
   // a) Role: Responder. No partial records. Several cycles of request data
   //    transmission by a client and data processing by the interface are
@@ -2884,7 +2812,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const char* accept_error {"FcgiRequest objects were returned when none was "
       "expected."};
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
-    PopulateBeginRequestRecord(begin_record, request_data);
+    fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
     std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_params_record,
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
@@ -3022,7 +2951,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const char* accept_error {"FcgiRequest objects were returned when none was "
       "expected."};
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN]      = {};
-    PopulateBeginRequestRecord(begin_record, request_data);
+    fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
     std::uint8_t terminal_params_record[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(terminal_params_record,
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 0U, 0U);
@@ -3174,12 +3104,53 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().interface_status(), true);
     EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
+                  //
+                  // Single connection Test Case Set 3
+                  //
 
-  // Single connection Test Case Set 3: Single requests with varying record
-  // type orderings: Records of different types are not interleaved. Rather,
-  // the record type order is varied across requests.
+  // Single requests with varying record type orderings: Records of different
+  // types are not interleaved. Rather, the record type order is varied across
+  // requests.
 
-  auto RecordTypeOrderTester = [&RequestInspector, &PopulateBeginRequestRecord]
+  auto SingleClientRecordWriterAndTester = [&RequestInspector]
+  (
+    SingleProcessInterfaceAndClients* spiac_ptr,
+    const struct RequestData& request_data,
+    const std::vector<std::pair<const std::uint8_t*, std::size_t>>& write_pairs,
+    const std::string& test_case_name
+  )->void
+  {
+    int write_count {0};
+    for(std::pair<const std::uint8_t*, std::size_t> write_pair : write_pairs)
+    {
+      if(socket_functions::SocketWrite(spiac_ptr->client_descriptors()[0],
+        write_pair.first, write_pair.second) < write_pair.second)
+      {
+        ADD_FAILURE() << "An error occurred while writing the request."
+          << '\n' << std::strerror(errno);
+        break;
+      }
+      write_count++;
+    }
+    if(write_count < 3)
+      return;
+
+    std::vector<fcgi_si::FcgiRequest> request_list 
+      {spiac_ptr->interface().AcceptRequests()};
+    if(request_list.size() != 1U)
+    {
+      ADD_FAILURE() << "An unexpected number of requests was returned."
+        << '\n' << request_list.size();
+      return;
+    }
+    RequestInspector(request_list[0], request_data,
+      test_case_name);
+    EXPECT_EQ(spiac_ptr->interface().connection_count(), 1U);
+    EXPECT_EQ(spiac_ptr->interface().interface_status(), true);
+    EXPECT_EQ(spiac_ptr->interface().get_overload(), false);
+  };
+
+  auto RecordTypeOrderTester = [&RequestInspector]
   (const struct InterfaceCreationArguments& inter_args,
    const struct RequestData& request_data, 
    const std::vector<fcgi_si::FcgiType>& type_sequence, 
@@ -3189,7 +3160,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 
     // Populate the FCGI_BEGIN_REQUEST record.
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(begin_record, request_data);
+    fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
 
     // Populate the the FCGI_PARAMS records.
     std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
@@ -3427,7 +3399,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 
       constexpr std::size_t begin_length {2 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
-      PopulateBeginRequestRecord(begin_record, request_data);
+      fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+        request_data.role, request_data.fcgi_keep_conn);
       
       // The below record encoding is specific to the value of
       // request_data.fcgi_params.
@@ -3484,7 +3457,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 
       constexpr std::size_t begin_length {2 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
-      PopulateBeginRequestRecord(begin_record, request_data);
+      fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+        request_data.role, request_data.fcgi_keep_conn);
 
       constexpr std::size_t params_length {4 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t params_record[params_length] = {};
@@ -3564,9 +3538,12 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       fcgi_si::FcgiType::kFCGI_PARAMS, fcgi_si::FcgiType::kFCGI_STDIN}, 
       "Record Type Order case h");
   }
+                //
+                // Single Connection Test Case Set 4
+                //
+                
+  // Single requests with record type interleavings.
 
-  // Single Connection Test Case Set 4: Single requests with record type
-  // interleavings.
   // a) Role: Responder. Data is present for FCGI_PARAMS and FCGI_STDIN.
   //    No records of type FCGI_DATA are sent. The records of FCGI_PARAMS
   //    and FCGI_STDIN are interleaved before the streams are completed.
@@ -3601,7 +3578,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // request_data.
     constexpr std::size_t record_array_length {15 * fcgi_si::FCGI_HEADER_LEN};
     std::uint8_t records[record_array_length] = {};
-    PopulateBeginRequestRecord(records, request_data);
+    fcgi_si::PopulateBeginRequestRecord(records, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
     fcgi_si::PopulateHeader(records + (2 * fcgi_si::FCGI_HEADER_LEN),
       fcgi_si::FcgiType::kFCGI_PARAMS, request_data.Fcgi_id, 2U, 6U);
     records[3 * fcgi_si::FCGI_HEADER_LEN]       = 14U;
@@ -3646,9 +3624,11 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().interface_status(), true);
     EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
-
-  // Single Connection Test Case Set 5: Multiple requests with record
-  // interleaving:
+                //
+                // Single Connection Test Case Set 5
+                //
+                
+  // Multiple requests with record interleaving:
 
   // a) A Responder request, an Authorizer request, and a Filter request are
   //    sent on the same connection. Records for the requests are
@@ -3718,7 +3698,11 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // Define the FCGI_BEGIN_REQUEST records.
     std::uint8_t begin_records[3][2 * fcgi_si::FCGI_HEADER_LEN] = {};
     for(int i {0}; i < 3; ++i)
-      PopulateBeginRequestRecord(begin_records[i], *request_ptr_array[i]);
+    {
+      struct RequestData* request_ptr {request_ptr_array[i]};
+      fcgi_si::PopulateBeginRequestRecord(begin_records[i],
+        request_ptr->Fcgi_id, request_ptr->role, request_ptr->fcgi_keep_conn);
+    }
     
     // Encode and check the FCGI_PARAMS records.
     std::vector<std::tuple<bool, std::size_t, std::vector<struct iovec>,
@@ -3947,13 +3931,13 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
   } while(false);
 
-  // Multiple connection tests
+                // Multiple connection tests
 
   // FCGI_PARAMS records are sent last as every role, including an unknown role,
   // requires at least a terminal empty FCGI_PARAMS record to complete a
   // request. Sending records in this way allows data that would otherwise
   // be ignored because of request completion to be received.
-  auto SendRequestData = [&PopulateBeginRequestRecord]
+  auto SendRequestData = []
   (
     int socket_descriptor,
     const struct RequestData& request_data,
@@ -3971,7 +3955,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     constexpr std::size_t header_length 
       {std::size_t(2 * fcgi_si::FCGI_HEADER_LEN)};
     std::uint8_t begin_record[header_length] = {};
-    PopulateBeginRequestRecord(begin_record, request_data);
+    fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
+      request_data.role, request_data.fcgi_keep_conn);
     if(socket_functions::SocketWrite(socket_descriptor, begin_record,
       header_length) < header_length)
     {
@@ -4418,7 +4403,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 
     // Encode the requests.
     std::uint8_t responder_1_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(responder_1_begin, responder_request_1);
+    fcgi_si::PopulateBeginRequestRecord(responder_1_begin,
+      responder_request_1.Fcgi_id, responder_request_1.role,
+      responder_request_1.fcgi_keep_conn);
     std::uint8_t responder_1_end_records[2 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(responder_1_end_records,
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_1.Fcgi_id, 0U, 0U);
@@ -4439,7 +4426,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     }
 
     std::uint8_t responder_2_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(responder_2_begin, responder_request_2);
+    fcgi_si::PopulateBeginRequestRecord(responder_2_begin,
+      responder_request_2.Fcgi_id, responder_request_2.role,
+      responder_request_2.fcgi_keep_conn);
     std::uint8_t responder_2_end_records[2 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(responder_2_end_records,
       fcgi_si::FcgiType::kFCGI_PARAMS, responder_request_2.Fcgi_id, 0U, 0U);
@@ -4460,7 +4449,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     }
 
     std::uint8_t filter_begin[2 * fcgi_si::FCGI_HEADER_LEN] = {};
-    PopulateBeginRequestRecord(filter_begin, filter_request);
+    fcgi_si::PopulateBeginRequestRecord(filter_begin, filter_request.Fcgi_id,
+      filter_request.role, filter_request.fcgi_keep_conn);
     std::uint8_t filter_end_records[3 * fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(filter_end_records, 
       fcgi_si::FcgiType::kFCGI_PARAMS, filter_request.Fcgi_id, 0U, 0U);
@@ -4710,6 +4700,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
    } while(false);
 
+  GTestFatalRestoreSignal(SIGPIPE);
   GTestCheckAndReportDescriptorLeaks(&fdlc, "FcgiRequestGeneration");
 }
 

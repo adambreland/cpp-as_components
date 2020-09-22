@@ -86,6 +86,19 @@ ExtractBinaryNameValuePairs(const uint8_t* content_ptr,
   return result;
 }
 
+void PopulateBeginRequestRecord(std::uint8_t* byte_ptr, std::uint16_t fcgi_id,
+  std::uint16_t role, bool keep_conn) noexcept
+{
+  PopulateHeader(byte_ptr, fcgi_si::FcgiType::kFCGI_BEGIN_REQUEST, fcgi_id,
+    fcgi_si::FCGI_HEADER_LEN, 0U);
+  byte_ptr += fcgi_si::FCGI_HEADER_LEN;
+  *byte_ptr = (role >> 8U);
+  ++byte_ptr;
+  *byte_ptr = role; // Truncate role.
+  ++byte_ptr;
+  *byte_ptr = (keep_conn) ? 1U : 0U;
+}
+
 void PopulateHeader(std::uint8_t* byte_ptr, FcgiType type,
   std::uint16_t Fcgi_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept

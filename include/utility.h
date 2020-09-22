@@ -299,6 +299,9 @@ std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t,
 PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   std::uint16_t Fcgi_id);
 
+void PopulateBeginRequestRecord(std::uint8_t* byte_ptr, std::uint16_t fcgi_id,
+  std::uint16_t role, bool keep_conn) noexcept;
+
 // Generates a FastCGI header and writes it to the indicated buffer. The values
 // of the arguments are encoded per the FastCGI record header binary format.
 //
@@ -326,7 +329,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
 //    a) The first byte is given the value FCGI_VERSION_1 which equals 1.
 //    b) The last byte, which is reserved by the FastCGI protocol, is zero.
 void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FcgiType type,
-  std::uint16_t Fcgi_id, std::uint16_t content_length,
+  std::uint16_t fcgi_id, std::uint16_t content_length,
   std::uint8_t padding_length) noexcept;
 
 //    Returns a vector of bytes which represents the integer argument in decimal 

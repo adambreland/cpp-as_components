@@ -1,3 +1,5 @@
+#include "test/test_fcgi_client_interface.h"
+
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -5,10 +7,9 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/uio.h>
 #include <sys/un.h>
 #include <unistd.h>
-
+#include <sys/uio.h>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -24,7 +25,8 @@
 #include "external/id_manager/include/id_manager_template.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "test/test_fcgi_client_interface.h"
+#include "include/protocol_constants.h"
+#include "include/request_identifier.h"
 #include "include/utility.h"
 
 namespace fcgi_si_test {
@@ -683,13 +685,191 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
 fcgi_si::RequestIdentifier
 TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
 {
-  
+  std::pair<const int, ConnectionState>* entry_ptr {ConnectedCheck(connection)};
+  if(!entry_ptr)
+  {
+    return fcgi_si::RequestIdentifier {};
+  }
+  ConnectionState* state_ptr       {&(entry_ptr->second)};
+  std::uint16_t    new_id          {state_ptr->id_manager.GetId()};
+  bool             write_error     {false};
+  bool             nothing_written {true};
+  int              saved_errno     {0};
+  std::uint16_t    role            {request.role};
+  // Two kinds of errors are handled below:
+  // 1) Errors from writes to the server which cannot throw exceptions.
+  // 2) Errors which are represented as exceptions.
+  try
+  {
+    do
+    {
+      auto SocketWriteHelper = [&]
+      (
+        std::uint8_t* byte_ptr, 
+        std::size_t   write_length
+      )->bool
+      {
+        std::size_t write_return {socket_functions::SocketWrite(connection,
+          byte_ptr, write_length)};
+        if(write_return < write_length)
+        {
+          write_error = true;
+          if(write_return)
+          {
+            nothing_written = false;
+          }
+          saved_errno = errno;
+          return false;
+        }
+        return true;
+      };
+
+      constexpr int_fast32_t begin_length {2U * fcgi_si::FCGI_HEADER_LEN};
+      std::uint8_t begin_record[begin_length] = {};
+      fcgi_si::PopulateBeginRequestRecord(begin_record, new_id, role,
+        request.keep_conn);
+      if(!SocketWriteHelper(begin_record, begin_length))
+      {
+        break;
+      }
+      nothing_written = false;
+
+      // Capturing all variables up to this point by reference is simpler than
+      // specifying a parameter list.
+      auto DataAndStdinWriter = [&](fcgi_si::FcgiType type)->bool
+      {
+        bool is_data {type == fcgi_si::FcgiType::kFCGI_DATA};
+        // PartitionByteSequence will produce ending stream records if
+        // begin_iter == end_iter. terminated is used to ensure that one
+        // ending record is always produced.
+        bool terminated
+          {((is_data) ? request.data_length : request.stdin_length) == 0U};
+        const std::uint8_t* start_iter
+          {(is_data) ? request.fcgi_data_ptr : request.fcgi_stdin_ptr};
+        const std::uint8_t* end_iter 
+          {start_iter + ((is_data) ? 
+            request.data_length : request.stdin_length)};
+        do
+        {
+          std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
+            std::size_t, const std::uint8_t*> partition 
+            {fcgi_si::PartitionByteSequence(start_iter, end_iter,
+              type, new_id)};
+          std::tuple<struct iovec*, int, std::size_t> partition_write
+            {socket_functions::ScatterGatherSocketWrite(connection,
+              std::get<1>(partition).data(),
+              std::get<1>(partition).size(), std::get<2>(partition),
+              false, nullptr)};
+          if(std::get<2>(partition_write))
+          {
+            write_error = true;
+            saved_errno = errno;
+            return false;
+          }
+          start_iter = std::get<3>(partition);
+          if(!terminated && (start_iter == end_iter))
+          {
+            terminated = true;
+            continue;
+          }
+        } while(start_iter != end_iter);
+        return true;
+      };
+
+      if(!(((role == fcgi_si::FCGI_RESPONDER) ||
+            (role == fcgi_si::FCGI_AUTHORIZER))  && 
+          (request.data_length == 0U)))
+      {
+        if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_DATA))
+        {
+          break;
+        }
+      }
+
+      if(!((role == fcgi_si::FCGI_AUTHORIZER) && 
+           (request.stdin_length == 0U)))
+      {
+        if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_STDIN))
+        {
+          break;
+        }
+      }
+
+      if(!(request.params_map.empty()))
+      {
+        ParamsMap::const_iterator start_iter {request.params_map.begin()};
+        ParamsMap::const_iterator end_iter   {request.params_map.end()};
+        std::size_t offset {0U};
+        do
+        {
+          std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+            std::vector<std::uint8_t>, std::size_t, ParamsMap::const_iterator>
+          params_encoding {fcgi_si::EncodeNameValuePairs(start_iter, end_iter,
+            fcgi_si::FcgiType::kFCGI_PARAMS, new_id, offset)};
+          if(!std::get<0>(params_encoding))
+          {
+            saved_errno = EINVAL;
+            write_error = true;
+            break;
+          }
+          std::tuple<struct iovec*, int, std::size_t> params_write
+            {socket_functions::ScatterGatherSocketWrite(connection,
+              std::get<2>(params_encoding).data(),
+              std::get<2>(params_encoding).size(), false, nullptr)};
+          if(std::get<2>(params_write))
+          {
+            write_error = true;
+            saved_errno = errno;
+            break;
+          }
+          offset     = std::get<5>(params_encoding);
+          start_iter = std::get<6>(params_encoding);
+        } while(start_iter != end_iter);
+      }
+      if(!write_error)
+      {
+        // A terminal FCGI_PARAMS record must be sent in all cases.
+        std::uint8_t params_record[fcgi_si::FCGI_HEADER_LEN] = {};
+        fcgi_si::PopulateHeader(params_record, fcgi_si::FcgiType::kFCGI_PARAMS,
+          new_id, 0U, 0U);
+        SocketWriteHelper(params_record, fcgi_si::FCGI_HEADER_LEN);
+      }
+    } while(false);
+    if(write_error)
+    {
+      try // noexcept-equivalent block.
+      {
+        state_ptr->id_manager.ReleaseId(new_id);
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
+      FailedWrite(entry_ptr, saved_errno, nothing_written, false,
+        "write");
+      return fcgi_si::RequestIdentifier {};
+    }
+    // Insert a new RequestData instance to pending_request_map_.
+    pending_request_map_.insert({{connection, new_id}, {request, {}, {}}});
+  }
+  catch(...)
+  {
+    // The first write happens to be use operations which cannot throw.
+    // Accordingly, if this catch block is reached, then some data will have
+    // been written.
+    try // noexcept-equivalent block.
+    {
+      CloseConnection(entry_ptr->first);
+      micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
+        {new ConnectionClosure {entry_ptr->first}});
+    }
+    catch(...)
+    {
+      std::terminate();
+    }
+    throw;
+  }
+  return fcgi_si::RequestIdentifier {connection, new_id};
 }
-
-// fcgi_si::RequestIdentifier
-// TestFcgiClientInterface::SendRequest(int connection, FcgiRequest&& request)
-// {
-
-// }
 
 } // namespace fcgi_si_test

@@ -1,21 +1,21 @@
 #ifndef FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
 #define FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
 
-// #include <arpa/inet.h>
-// #include <netinet/in.h>
-// #include <sys/socket.h>
+#include <sys/uio.h>
 
 #include <cstdlib>
 #include <cstdint>
 #include <list>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
 #include "external/id_manager/include/id_manager_template.h"
 
-#include "fcgi_si.h"
+#include "include/protocol_constants.h"
+#include "include/request_identifier.h"
 
 namespace fcgi_si_test {
 
@@ -707,10 +707,6 @@ class TestFcgiClientInterface
   fcgi_si::RequestIdentifier SendRequest(int connection, 
     const FcgiRequest& request);
 
-
-  fcgi_si::RequestIdentifier SendRequest(int connection,
-    FcgiRequest&& request);
-
  private:
   struct RecordState
   {
@@ -770,7 +766,7 @@ class TestFcgiClientInterface
   // Preconditions:
   // 1) entry_ptr is not null and points to a valid entry of connection map.
   // 2) pop_management_queue is true if and only if the failed write
-  //    transaction added an entry to the queue which should be removed.
+  //    transaction added an entry to the end of queue which should be removed.
   //
   // Effects:
   // 1) May return, throw a std::system_error instance, or terminate the

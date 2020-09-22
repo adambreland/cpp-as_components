@@ -1,5 +1,6 @@
 exports_files([
     "include/protocol_constants.h",
+    "include/request_identifier.h",
     "include/utilities.h"
 ])
 
@@ -26,8 +27,8 @@ cc_library(
 cc_library(
     name       = "fcgi_si",
     deps       = [
+        "//:fcgi_si_utilities",
         "@socket_functions//:socket_functions",
-        "//:fcgi_si_utilities"
     ],
     srcs       = [
         "include/fcgi_request_templates.h",

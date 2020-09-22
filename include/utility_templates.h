@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <limits>
@@ -453,8 +454,10 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
                       // Begin processing input.
 
   // Determine the number of bytes of the input which will be processed.
-  typename ByteIter ::difference_type s_byte_length
-    {std::distance(begin_iter, end_iter)};
+  static_assert(
+    std::numeric_limits<decltype(std::distance(begin_iter, end_iter))>::max() <= 
+    std::numeric_limits<std::ptrdiff_t>::max());
+  std::ptrdiff_t s_byte_length {std::distance(begin_iter, end_iter)};
   if(s_byte_length < 0)
   {
     throw std::invalid_argument {"end_iter was before begin_iter or an error "
