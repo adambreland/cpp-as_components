@@ -75,6 +75,14 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     return false;
   }
 
+  // Handle the case that connection has been marked as ready for reading in
+  // a call to RetrieveServerEvent.
+  if((remaining_ready_ > 0) && (next_ready_ <= connection) &&
+     (FD_ISSET(connection, &select_set_) > 0))
+  {
+    --remaining_ready_;
+  }
+
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_start
     {pending_request_map_.lower_bound({connection, 0U})};
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_end
@@ -109,6 +117,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     }
 
     // Update state using calls which can't throw.
+    state_ptr->record_state.invalidated            = false;
     state_ptr->record_state.header_bytes_received  = 0U;
     state_ptr->record_state.content_bytes_expected = 0U;
     state_ptr->record_state.content_bytes_received = 0U;
@@ -141,7 +150,6 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     connection_map_.erase(connection_iter);
     pending_request_map_.erase(pending_start, pending_end);
   }
-
 
   if((close(connection) == -1) && (errno != EINTR))
   {
@@ -204,6 +212,15 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
     {
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "socket"};
+    }
+    if(socket_connection >= FD_SETSIZE)
+    {
+      close(socket_connection);
+      throw std::runtime_error
+        {"In a call to TestFcgiClientInterface::Connect, a file descriptor "
+         "which was returned by a call to socket was too large to be "
+         "used in a call to select in a call to "
+         "TestFcgiClientInterface::RetrieveServerEvent."};
     }
     if(connect(socket_connection, 
       static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
@@ -304,10 +321,63 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   return socket_connection;
 }
 
-// std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
-// {
-
-// }
+std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
+{
+  if(micro_event_queue_.size())
+  {
+    std::unique_ptr<ServerEvent> new_event
+      {std::move(micro_event_queue_.front())};
+    micro_event_queue_.pop_front();
+    return std::move(new_event);
+  }
+  if(remaining_ready_ > 0)
+  {
+    return ExamineSelectReturn();
+  }
+  // Prepare to call select.
+  // select_set_ is filled with all connected connections. If no connected
+  // connections are present, an exceptions is thrown.
+  FD_ZERO(&select_set_);
+  int max_for_select {-1};
+  std::map<int, ConnectionState>::reverse_iterator r_iter
+    {connection_map_.rbegin()};
+  std::map<int, ConnectionState>::reverse_iterator r_end
+    {connection_map_.rend()};
+  while(r_iter != r_end)
+  {
+    if(r_iter->second.connected)
+    {
+      max_for_select = r_iter->first;
+      break;
+    }
+    ++r_iter;
+  }
+  while(r_iter != r_end)
+  {
+    if(r_iter->second.connected)
+    {
+      FD_SET(r_iter->first, &select_set_);
+    }
+    ++r_iter;
+  }
+  if(max_for_select == -1)
+  {
+    throw std::logic_error {"A call to "
+      "TestFcgiClientInterface::RetrieveServerEvent was made when no "
+      "server connections were active."};
+  }
+  int number_ready {0};
+  while(((number_ready = select(max_for_select + 1, &select_set_, nullptr,
+    nullptr, nullptr)) == -1) && (errno == EINTR))
+    continue;
+  if(number_ready == -1)
+  {
+    std::error_code ec {errno, std::system_category()};
+    throw std::system_error {ec, "select"};
+  }
+  remaining_ready_ = number_ready;
+  return ExamineSelectReturn();
+}
 
 std::pair<const int, TestFcgiClientInterface::ConnectionState>*
 TestFcgiClientInterface::ConnectedCheck(int connection)
@@ -323,6 +393,286 @@ TestFcgiClientInterface::ConnectedCheck(int connection)
     return nullptr;
   }
   return &(*connection_iter);
+}
+
+// A helper function which is only intended to be used within
+// RetrieveServerEvent.
+//
+// Precondition: remaining_ready_ > 0
+std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
+{
+  std::map<int, ConnectionState>::iterator end_iter {connection_map_.end()};
+  std::map<int, ConnectionState>::iterator connection_iter
+    {connection_map_.lower_bound(next_ready_)};
+  while(connection_iter != end_iter)
+  {
+    if(connection_iter->second.connected)
+    {
+      int descriptor {connection_iter->first};
+      ConnectionState* state_ptr {&(connection_iter->second)};
+      if(FD_ISSET(descriptor, &select_set_))
+      {
+        // Start reading until the connection blocks.
+        constexpr std::size_t buffer_size {1U << 9U};
+        std::uint8_t buffer[buffer_size];
+        while(true)
+        {
+          std::size_t read_return {socket_functions::SocketRead(descriptor,
+            buffer, buffer_size)};
+          int saved_errno {errno};
+          std::size_t remaining_data {read_return};
+          std::uint8_t* current_byte {buffer};
+          while(remaining_data > 0U)
+          {
+            std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+            pending_end {pending_request_map_.end()};
+            std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+            pending_iter {pending_end};
+            // Header
+            std::uint8_t received_header
+              {state_ptr->record_state.header_bytes_received};
+            if(received_header < fcgi_si::FCGI_HEADER_LEN)
+            {
+              std::uint8_t remaining_header {static_cast<std::uint8_t>(
+                fcgi_si::FCGI_HEADER_LEN - received_header)};
+              std::size_t copy_size {(remaining_data >= remaining_header) ?
+                remaining_header : remaining_data};
+              std::memcpy(state_ptr->record_state.header + received_header,
+                current_byte, copy_size);
+              current_byte                                  += copy_size;
+              remaining_data                                -= copy_size;
+              state_ptr->record_state.header_bytes_received += copy_size;
+              if(copy_size == remaining_header)
+              {
+                // The header was just completed.
+                // 1) Extract the header information.
+                // 2) Determine how receipt of the record should be handled.
+                std::uint8_t protocol_version {state_ptr->record_state.
+                  header[fcgi_si::kHeaderTypeIndex]};
+
+                fcgi_si::FcgiType record_type {static_cast<fcgi_si::FcgiType>(
+                  state_ptr->record_state.header[fcgi_si::kHeaderTypeIndex])};
+                state_ptr->record_state.type = record_type;
+
+                std::uint16_t fcgi_id {state_ptr->record_state.
+                  header[fcgi_si::kHeaderRequestIDB1Index]};
+                fcgi_id <<= 8U;
+                fcgi_id += state_ptr->record_state.
+                  header[fcgi_si::kHeaderRequestIDB0Index];
+                state_ptr->record_state.fcgi_id = fcgi_id;
+
+                std::uint16_t expected_content {state_ptr->record_state.
+                  header[fcgi_si::kHeaderContentLengthB1Index]};
+                expected_content <<= 8U;
+                expected_content += state_ptr->record_state.
+                  header[fcgi_si::kHeaderContentLengthB0Index];
+                state_ptr->record_state.content_bytes_expected =
+                  expected_content;
+
+                std::uint8_t expected_padding {state_ptr->record_state.
+                  header[fcgi_si::kHeaderPaddingLengthIndex]};
+                state_ptr->record_state.padding_bytes_expected =
+                  expected_padding;
+                
+                // Validate the record.
+                bool error_detected {false};
+                if(protocol_version != 1U)
+                {
+                  error_detected = true;
+                }
+                else
+                {
+                  switch(record_type) {
+                    case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
+                      pending_iter = pending_request_map_.find(
+                        {descriptor, fcgi_id});
+                      // Does a request exist for this ending record?
+                      // If so, does it have the correct content length?
+                      if((pending_iter == pending_request_map_.end()) ||
+                        (expected_content != 8U))
+                      {
+                        error_detected = true;
+                      }
+                      break;
+                    }
+                    case fcgi_si::FcgiType::kFCGI_STDOUT : {
+                      pending_iter = pending_request_map_.find(
+                        {descriptor, fcgi_id});
+                      if((pending_iter == pending_request_map_.end()) ||
+                         (pending_iter->second.stdout_completed))
+                      {
+                        error_detected = true;
+                      }
+                      break;
+                    }
+                    case fcgi_si::FcgiType::kFCGI_STDERR : {
+                       pending_iter = pending_request_map_.find(
+                        {descriptor, fcgi_id});
+                      if((pending_iter == pending_request_map_.end()) ||
+                         (pending_iter->second.stderr_completed))
+                      {
+                        error_detected = true;
+                      }
+                      break;
+                    }
+                    case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
+
+                      if((fcgi_id != 0U)                       ||
+                         !(state_ptr->management_queue.size()) ||
+                         (fcgi_si::FcgiType::kFCGI_GET_VALUES != state_ptr->
+                            management_queue.front().type))
+                      {
+                        error_detected = true;
+                      }
+                      break;
+                    }
+                    case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE :
+                    {
+                      if((fcgi_id != 0U)                       ||
+                         !(state_ptr->management_queue.size()) ||
+                         (fcgi_si::FcgiType::kFCGI_GET_VALUES == state_ptr->
+                            management_queue.front().type))
+                      {
+                        error_detected = true;
+                      }
+                      break;
+                    }
+                    default : {
+                      error_detected = true;
+                    }
+                  }
+                }
+                if(error_detected)
+                {
+                  state_ptr->record_state.invalidated = true;
+                }
+
+                // Check if the record is complete.
+                if((expected_padding == 0U) && (expected_content == 0U)
+                {
+
+                }
+              } // header completion logic
+            } // header write block
+
+            if(remaining_data == 0U)
+              break;
+            // Content
+            std::uint16_t received_content
+              {state_ptr->record_state.content_bytes_received};
+            std::uint16_t expected_content
+              {state_ptr->record_state.content_bytes_expected};
+            if(received_content < expected_content)
+            {
+              std::size_t remaining_content
+                {expected_content - received_content};
+              std::size_t copy_size {(remaining_data >= remaining_content) ?
+                remaining_content : remaining_data};
+              fcgi_si::FcgiType record_type {state_ptr->record_state.type};
+              std::uint16_t fcgi_id {state_ptr->record_state.fcgi_id};
+              std::uint8_t* current_end {current_byte + copy_size};
+              if(!(state_ptr->record_state.invalidated) &&
+                 (fcgi_id != 0U)                        &&
+                 (record_type != fcgi_si::FcgiType::kFCGI_END_REQUEST))
+              {
+                // Type is either FCGI_STDOUT or FCGI_STDERR.
+                if(pending_iter == pending_end)
+                {
+                  pending_iter =
+                    pending_request_map_.find({descriptor, fcgi_id});
+                  // pending_iter should never be equal to the end here.
+                  if(pending_iter == pending_end)
+                  {
+                    throw std::logic_error {"A request was not present when "
+                      "expected in a call to "
+                      "TestFcgiClientInterface::RetrieveServerEvent."};
+                  }
+                }
+                bool is_out {record_type == fcgi_si::FcgiType::kFCGI_STDOUT};
+                std::vector<std::uint8_t>::iterator end_iter {(is_out) ?
+                  pending_iter->second.fcgi_stdout.end() :
+                  pending_iter->second.fcgi_stderr.end()};
+                (is_out) ?
+                  pending_iter->second.fcgi_stdout.insert(end_iter,
+                    current_byte, current_end) :
+                  pending_iter->second.fcgi_stderr.insert(end_iter,
+                    current_byte, current_end);
+              }
+              else
+              {
+                std::vector<std::uint8_t>* local_ptr
+                  {&(state_ptr->record_state.local_buffer)};
+                std::vector<std::uint8_t>::iterator local_buffer_end
+                  {local_ptr->end()};
+                local_ptr->insert(local_buffer_end, current_byte,
+                  current_byte + copy_size);
+              }
+              current_byte                                   += copy_size;
+              remaining_data                                 -= copy_size;
+              state_ptr->record_state.content_bytes_received += copy_size;
+
+              // Check if the record is complete
+            }
+
+            // Padding
+            if(state_ptr->record_state.padding_bytes_expected != 0U)
+            {
+              if(remaining_data == 0U)
+                break;
+              
+            }
+                       
+
+          } // End iterating over data received from a call to SocketRead.
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        // Update select_set_ tracking information.
+        --remaining_ready_;
+        if(remaining_ready_ == 0)
+        {
+          next_ready_ = 0;
+        }
+        else
+        {
+          std::map<int, ConnectionState>::iterator local_iter {connection_iter};
+          if(++local_iter == end_iter)
+          {
+            throw std::logic_error {"A discrepancy was detected between the "
+              "number of ready connections and the number of connections "
+              "in a call to TestFcgiClientInterface::RetrieveServerEvent."};
+          }
+          else
+          {
+            next_ready_ = local_iter->first;
+          }
+        }
+      }
+    }
+    ++connection_iter;
+  }
+  
 }
 
 void TestFcgiClientInterface::FailedWrite(
@@ -701,11 +1051,14 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
   // 2) Errors which are represented as exceptions.
   try
   {
+    // Note that the order of stream transmission is important. FCGI_PARAMS
+    // is sent last to ensure that a request is not prematurely completed as
+    // may occur for Responder and Authorizer roles.
     do
     {
       auto SocketWriteHelper = [&]
       (
-        std::uint8_t* byte_ptr, 
+        std::uint8_t* byte_ptr,
         std::size_t   write_length
       )->bool
       {
@@ -743,12 +1096,12 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
         // begin_iter == end_iter. terminated is used to ensure that one
         // ending record is always produced.
         bool terminated
-          {((is_data) ? request.data_length : request.stdin_length) == 0U};
+          {(is_data) ? request.data_begin  == request.data_end :
+                       request.stdin_begin == request.stdin_end};
         const std::uint8_t* start_iter
-          {(is_data) ? request.fcgi_data_ptr : request.fcgi_stdin_ptr};
+          {(is_data) ? request.data_begin : request.stdin_begin};
         const std::uint8_t* end_iter 
-          {start_iter + ((is_data) ? 
-            request.data_length : request.stdin_length)};
+          {(is_data) ? request.data_end : request.stdin_end};
         do
         {
           std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
@@ -778,7 +1131,7 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
 
       if(!(((role == fcgi_si::FCGI_RESPONDER) ||
             (role == fcgi_si::FCGI_AUTHORIZER))  && 
-          (request.data_length == 0U)))
+          (request.data_begin == request.data_end)))
       {
         if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_DATA))
         {
@@ -787,7 +1140,7 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
       }
 
       if(!((role == fcgi_si::FCGI_AUTHORIZER) && 
-           (request.stdin_length == 0U)))
+           (request.stdin_begin == request.stdin_end)))
       {
         if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_STDIN))
         {
@@ -795,10 +1148,11 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
         }
       }
 
-      if(!(request.params_map.empty()))
+      if((request.params_map_ptr != nullptr) &&
+         !(request.params_map_ptr->empty()))
       {
-        ParamsMap::const_iterator start_iter {request.params_map.begin()};
-        ParamsMap::const_iterator end_iter   {request.params_map.end()};
+        ParamsMap::const_iterator start_iter {request.params_map_ptr->begin()};
+        ParamsMap::const_iterator end_iter   {request.params_map_ptr->end()};
         std::size_t offset {0U};
         do
         {
@@ -850,7 +1204,10 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
       return fcgi_si::RequestIdentifier {};
     }
     // Insert a new RequestData instance to pending_request_map_.
-    pending_request_map_.insert({{connection, new_id}, {request, {}, {}}});
+    pending_request_map_.insert({
+      {connection, new_id},
+      {request, {}, false, {}, false}
+    });
   }
   catch(...)
   {

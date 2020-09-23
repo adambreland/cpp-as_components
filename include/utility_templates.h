@@ -354,9 +354,9 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   std::uint16_t Fcgi_id)
 {
   // Verify that ByteIter iterates over units of data which are the size of
-  // a byte.
+  // a byte. Note that this assertion disallows ByteIter being equal to void*.
   static_assert(sizeof(std::uint8_t) == sizeof(decltype(*begin_iter)),
-    "A call to PartitionByteSequence<> used an iterator type which did "
+    "A call to PartitionByteSequence<ByteIter> used an iterator type which did "
     "not iterate over data in units of bytes.");
 
   static_assert(std::numeric_limits<ssize_t>::max() >=
@@ -454,6 +454,7 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
                       // Begin processing input.
 
   // Determine the number of bytes of the input which will be processed.
+  // Check that ptrdiff_t can to hold the byte length.
   static_assert(
     std::numeric_limits<decltype(std::distance(begin_iter, end_iter))>::max() <= 
     std::numeric_limits<std::ptrdiff_t>::max());

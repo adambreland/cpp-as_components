@@ -1,6 +1,7 @@
 #ifndef FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
 #define FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
 
+#include <sys/select.h>
 #include <sys/uio.h>
 
 #include <cstdlib>
@@ -21,15 +22,20 @@ namespace fcgi_si_test {
 
 using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
 
+// This is a reference type which contains the metadata of a FastCGI request
+// and references to the data of the request.
 struct FcgiRequest
 {
+  // Request metadata.
   std::uint16_t       role;
   bool                keep_conn;
-  const ParamsMap&    params_map;
-  const std::uint8_t* fcgi_stdin_ptr;
-  std::size_t         stdin_length;
-  const std::uint8_t* fcgi_data_ptr;
-  std::size_t         data_length;
+
+  // Pointers to request data.
+  const ParamsMap*    params_map_ptr;
+  const std::uint8_t* stdin_begin;
+  const std::uint8_t* stdin_end;
+  const std::uint8_t* data_begin;
+  const std::uint8_t* data_end;
 };
 
 struct ManagementRequestData
@@ -109,10 +115,7 @@ class FcgiResponse : public ServerEvent
     return request_id_;
   }
 
-  // The absence of an FcgiRequest instance makes default construction
-  // problematic due to the inclusion of a constant reference to a ParamsMap
-  // instance.
-  FcgiResponse() = delete;
+  inline FcgiResponse() = delete;
 
   inline FcgiResponse(std::int32_t app_status, 
     const std::vector<std::uint8_t>& stderr, 
@@ -132,13 +135,13 @@ class FcgiResponse : public ServerEvent
     std::vector<std::uint8_t>&& stderr, 
     std::vector<std::uint8_t>&& stdout,
     std::uint8_t protocol_status,
-    FcgiRequest&& request,
+    const FcgiRequest& request,
     fcgi_si::RequestIdentifier request_id) noexcept
   : app_status_      {app_status},
     fcgi_stderr_     {std::move(stderr)},
     fcgi_stdout_     {std::move(stdout)},
     protocol_status_ {protocol_status},
-    request_         {std::move(request)},
+    request_         {request},
     request_id_      {request_id}
   {}
 
@@ -704,12 +707,15 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
   //
-  fcgi_si::RequestIdentifier SendRequest(int connection, 
+  fcgi_si::RequestIdentifier SendRequest(int connection,
     const FcgiRequest& request);
 
  private:
   struct RecordState
   {
+    bool                      invalidated {false};
+    std::uint16_t             fcgi_id {0U};
+    fcgi_si::FcgiType         type {static_cast<fcgi_si::FcgiType>(0U)};
     std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN] = {};
     std::uint8_t              header_bytes_received {0U};
     std::uint16_t             content_bytes_expected {0U};
@@ -731,7 +737,9 @@ class TestFcgiClientInterface
   {
     FcgiRequest               request;
     std::vector<std::uint8_t> fcgi_stdout {};
+    bool                      stdout_completed;
     std::vector<std::uint8_t> fcgi_stderr {};
+    bool                      stderr_completed;
   };
 
   // Preconditions: none.
@@ -746,6 +754,8 @@ class TestFcgiClientInterface
   // 2) Returns a pointer to the ConnectionState instance of the entry of
   //    connection_map_ which is associated with connection otherwise.
   std::pair<const int, ConnectionState>* ConnectedCheck(int connection);
+
+  std::unique_ptr<ServerEvent> ExamineSelectReturn();
 
   // Performs recovery after a write to a connection failed.
   //
@@ -804,6 +814,11 @@ class TestFcgiClientInterface
   std::map<int, ConnectionState>                    connection_map_;
   std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
   std::list<std::unique_ptr<ServerEvent>>           micro_event_queue_;
+  int                                               number_connected_;
+  // I/O multiplexing state
+  int                                               remaining_ready_;
+  int                                               next_ready_;
+  fd_set                                            select_set_;
 
   static constexpr const char* write_or_select_ {"write or select"};
 };
