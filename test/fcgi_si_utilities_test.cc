@@ -451,9 +451,7 @@ TEST(Utility, ExtractBinaryNameValuePairs)
   //  9) Incorrect encoding: a single pair with extra information at the end.
   // 10) Incorrect encoding: a correct pair followed by another pair with
   //     incorrect length information.
-  // 11) content_ptr == nullptr && content_length == 100.
-  // 12) content_ptr == nullptr && content_length == -100.
-  // 13) content_ptr != nullptr && content_length == -100.
+  // 11) content_ptr == nullptr and content_length == 100.
   //
   // Modules which testing depends on: none.
   //
@@ -462,195 +460,189 @@ TEST(Utility, ExtractBinaryNameValuePairs)
 
   using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
-  // Case 1: Nothing to process.
-  EXPECT_EQ(std::vector<NameValuePair> {},
-    fcgi_si::ExtractBinaryNameValuePairs(nullptr, 0));
+  const std::string case_prefix {"Case "};
+  const std::string case_suffix {", about line "};
+  std::vector<std::uint8_t> encoded_name_string {'N','a','m','e'};
+  std::vector<std::uint8_t> encoded_value_string {'V','a','l','u','e'};
+  std::vector<uint8_t> four_name_vector(256, 'b');
+  std::vector<uint8_t> four_value_vector(128, 'a');
 
-  uint8_t test_value {0};
-  EXPECT_EQ(std::vector<NameValuePair> {},
-    fcgi_si::ExtractBinaryNameValuePairs(&test_value, 0));
-  EXPECT_EQ(0, test_value);
+  auto CaseNameGenerator = [&case_prefix, &case_suffix]
+  (int case_number, int line)->std::string
+  {
+    std::string case_message {case_prefix + std::to_string(case_number)};
+    case_message += case_suffix;
+    case_message += std::to_string(line);
+    case_message += ".";
+    return case_message;
+  };
+
+  auto NonErrorCaseTester = []
+  (
+    const std::vector<NameValuePair>& nv_pair_list,
+    std::string message
+  )->void
+  {
+    std::vector<uint8_t> encoded_nv_pairs {};
+    for(std::vector<NameValuePair>::const_iterator
+      i {nv_pair_list.begin()};
+      i != nv_pair_list.end();
+      ++i)
+    {
+      // Encode the sizes.
+      std::vector<std::uint8_t>::size_type sizes[2] = 
+      {
+        {i->first.size()},
+        {i->second.size()}
+      };
+      for(int j {0}; j < 2; ++j)
+      {
+        if(sizes[j] > fcgi_si::kNameValuePairSingleByteLength)
+        {
+          std::uint8_t buffer[4];
+          fcgi_si::EncodeFourByteLength(sizes[j], buffer);
+          encoded_nv_pairs.insert(encoded_nv_pairs.end(), buffer, buffer + 4);
+        }
+        else
+        {
+          encoded_nv_pairs.push_back(sizes[j]);
+        }
+      }
+      // Encode the names.
+      encoded_nv_pairs.insert(encoded_nv_pairs.end(), 
+        i->first.begin(), i->first.end());
+      encoded_nv_pairs.insert(encoded_nv_pairs.end(), 
+        i->second.begin(), i->second.end());
+    }
+    // encode_nv_pairs should now hold all of the encoded name-value pairs.
+    std::uint8_t* data_ptr {(encoded_nv_pairs.size()) ?
+      encoded_nv_pairs.data() : nullptr};
+    std::vector<NameValuePair> result {fcgi_si::ExtractBinaryNameValuePairs(
+      data_ptr, encoded_nv_pairs.size())};
+    EXPECT_EQ(nv_pair_list, result) << message;
+  };
+
+  // Case 1: Nothing to process.
+  {
+    NonErrorCaseTester({}, CaseNameGenerator(1, __LINE__));
+
+    uint8_t test_value {0U};
+    EXPECT_EQ(
+      (std::vector<NameValuePair> {}),
+      fcgi_si::ExtractBinaryNameValuePairs(&test_value, 0U)
+    ) << "Case 1, non-null pointer and content_length == 0U.";
+  }
 
   // Case 2: Single name-value pair. (1 byte, 1 byte) for lengths. 
   // Empty name and value.
-  const char* empty_name_ptr {""};
-  const char* empty_value_ptr {""};
-  NameValuePair empty_empty_nv_pair {{empty_name_ptr, empty_name_ptr},
-    {empty_value_ptr, empty_value_ptr}};
-  std::vector<uint8_t> encoded_nv_pair {};
-  encoded_nv_pair.push_back(0);
-  encoded_nv_pair.push_back(0);
-  std::vector<NameValuePair> result {fcgi_si::ExtractBinaryNameValuePairs(
-    encoded_nv_pair.data(), encoded_nv_pair.size())};
-  EXPECT_EQ(result[0], empty_empty_nv_pair);
-
+  {
+    std::vector<NameValuePair> nv_pair_list {{{}, {}}};
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(2, __LINE__));
+  }
+  
   // Case 3: Single name-value pair. (1 byte, 1 byte) for lengths. Empty value.
-  encoded_nv_pair.clear();
-  const char* name_ptr {"Name"};
-  NameValuePair name_empty_nv_pair {{name_ptr, name_ptr + 4},
-    {empty_value_ptr, empty_value_ptr}};
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(0);
-  for(auto c : name_empty_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result[0], name_empty_nv_pair);
+  {
+    std::vector<NameValuePair> nv_pair_list {{encoded_name_string, {}}};
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(3, __LINE__));
+  }
 
   // Case 4: Single name-value pair. (1 byte, 1 byte) for lengths.
-  encoded_nv_pair.clear();
-  const char* value_ptr {"Value"};
-  NameValuePair one_one_nv_pair {{name_ptr, name_ptr + 4},
-    {value_ptr, value_ptr + 5}};
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(5);
-  for(auto c : one_one_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : one_one_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result[0], one_one_nv_pair);
+  {
+    std::vector<NameValuePair> nv_pair_list
+    {
+      {encoded_name_string, encoded_value_string}
+    };
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(4, __LINE__));
+  }
 
   // Case 5: Single name-value pair, (1 byte, 4 bytes) for lengths.
-  std::vector<uint8_t> four_value_vector(128, 'a');
-  NameValuePair one_four_nv_pair {{name_ptr, name_ptr + 4}, four_value_vector};
-  encoded_nv_pair.clear();
-  encoded_nv_pair.push_back(4);
-  fcgi_si::EncodeFourByteLength(128, std::back_inserter(encoded_nv_pair));
-  for(auto c : one_four_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : one_four_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result[0], one_four_nv_pair);
-
+  {
+    std::vector<NameValuePair> nv_pair_list 
+    {
+      {encoded_name_string, four_value_vector}
+    };
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(5, __LINE__));
+  }
+  
   // Case 6: Single name-value pair, (4 byte, 1 bytes) for lengths.
-  std::vector<uint8_t> four_name_vector(256, 'b');
-  NameValuePair four_one_nv_pair {four_name_vector, {value_ptr, value_ptr + 5}};
-  encoded_nv_pair.clear();
-  fcgi_si::EncodeFourByteLength(256, std::back_inserter(encoded_nv_pair));
-  encoded_nv_pair.push_back(5);
-  for(auto c : four_one_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : four_one_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-   result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result[0], four_one_nv_pair);
-
+  {
+    std::vector<NameValuePair> nv_pair_list
+    {
+      {four_name_vector, encoded_value_string}
+    };
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(6, __LINE__));
+  }
+  
   // Case 7: Multiple name-value pairs with names and values that need one and
   // four byte lengths. Also includes an empty value.
-  encoded_nv_pair.clear();
-  std::vector<NameValuePair> pairs {};
-  pairs.push_back({four_name_vector, four_value_vector});
-  fcgi_si::EncodeFourByteLength(four_name_vector.size(),
-    std::back_inserter(encoded_nv_pair));
-  fcgi_si::EncodeFourByteLength(four_value_vector.size(),
-    std::back_inserter(encoded_nv_pair));
-  for(auto c : pairs[0].first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : pairs[0].second)
-    encoded_nv_pair.push_back(c);
-  pairs.push_back({one_one_nv_pair});
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(5);
-  for(auto c : pairs[1].first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : pairs[1].second)
-    encoded_nv_pair.push_back(c);
-  pairs.push_back(name_empty_nv_pair);
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(0);
-  for(auto c : pairs[2].first)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result, pairs);
+  {
+    std::vector<NameValuePair> nv_pair_list
+    {
+      {four_name_vector, four_value_vector},
+      {encoded_name_string, encoded_value_string},
+      {encoded_name_string, {}}
+    };
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(7, __LINE__));
+  }
 
   // Case 8: As above, but with the empty value in the middle.
-  encoded_nv_pair.clear();
-  pairs.clear();
-  pairs.push_back({four_name_vector, four_value_vector});
-  fcgi_si::EncodeFourByteLength(four_name_vector.size(),
-    std::back_inserter(encoded_nv_pair));
-  fcgi_si::EncodeFourByteLength(four_value_vector.size(),
-    std::back_inserter(encoded_nv_pair));
-  for(auto c : pairs[0].first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : pairs[0].second)
-    encoded_nv_pair.push_back(c);
-  pairs.push_back(name_empty_nv_pair);
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(0);
-  for(auto c : pairs[1].first)
-    encoded_nv_pair.push_back(c);
-  pairs.push_back({one_one_nv_pair});
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(5);
-  for(auto c : pairs[2].first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : pairs[2].second)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result, pairs);
+  {
+    std::vector<NameValuePair> nv_pair_list
+    {
+      {four_name_vector, four_value_vector},
+      {encoded_name_string, {}},
+      {encoded_name_string, encoded_value_string}
+    };
+    NonErrorCaseTester(nv_pair_list, CaseNameGenerator(8, __LINE__));
+  }
 
   // Case 9: An incomplete encoding. A single name and value is present. Extra
   // information is added. ProcessBinaryNameValuePairs should return an
   // empty vector.
-  encoded_nv_pair.clear();
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(5);
-  for(auto c : one_one_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : one_one_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-  encoded_nv_pair.push_back(10);
-  // A byte with length information was added above, but there is no associated
-  // data.
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result, std::vector<NameValuePair> {});
-
+  {
+    std::vector<std::uint8_t> encoded_nv_pair 
+    {
+      static_cast<std::uint8_t>(encoded_name_string.size()),
+      static_cast<std::uint8_t>(encoded_value_string.size())
+    };
+    encoded_nv_pair.insert(encoded_nv_pair.end(),
+      encoded_name_string.begin(), encoded_name_string.end());
+    encoded_nv_pair.insert(encoded_nv_pair.end(),
+      encoded_value_string.begin(), encoded_value_string.end());
+    encoded_nv_pair.push_back(10U);
+    // A terminal byte with length information was added above. encoded_nv_pair
+    // is now invalid.
+    EXPECT_EQ(fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+      encoded_nv_pair.size()), std::vector<NameValuePair> {}) << 
+      CaseNameGenerator(9, __LINE__);
+  }
+  
   // Case 10: Too many bytes were specified for the last name, but the first 
   // name-value pair was correct. An empty vector should still be returned.
-  encoded_nv_pair.clear();
-  encoded_nv_pair.push_back(4);
-  encoded_nv_pair.push_back(5);
-  for(auto c : one_one_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : one_one_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-  encoded_nv_pair.push_back(100);
-  encoded_nv_pair.push_back(5);
-  for(auto c : one_one_nv_pair.first)
-    encoded_nv_pair.push_back(c);
-  for(auto c : one_one_nv_pair.second)
-    encoded_nv_pair.push_back(c);
-  result = fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
-    encoded_nv_pair.size());
-  EXPECT_EQ(result, std::vector<NameValuePair> {});
+  {
+    std::vector<std::uint8_t> encoded_nv_pair
+    {
+      static_cast<std::uint8_t>(encoded_name_string.size()),
+      static_cast<std::uint8_t>(encoded_value_string.size())
+    };
+    encoded_nv_pair.insert(encoded_nv_pair.end(),
+      encoded_name_string.begin(), encoded_name_string.end());
+    encoded_nv_pair.insert(encoded_nv_pair.end(),
+      encoded_value_string.begin(), encoded_value_string.end());
+    encoded_nv_pair.push_back(100U);
+    encoded_nv_pair.push_back(
+      static_cast<std::uint8_t>(encoded_value_string.size()));
+    encoded_nv_pair.insert(encoded_nv_pair.end(),
+      encoded_name_string.begin(), encoded_name_string.end());
+    EXPECT_EQ(fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(),
+      encoded_nv_pair.size()), std::vector<NameValuePair> {}) <<
+      CaseNameGenerator(10, __LINE__);
+  }
 
   // Case 11: content_ptr == nullptr, content_length == 100.
   EXPECT_THROW((fcgi_si::ExtractBinaryNameValuePairs(nullptr, 100)),
-    std::invalid_argument);
-
-  // Case 12: content_ptr == nullptr, content_length == -100.
-  EXPECT_THROW((fcgi_si::ExtractBinaryNameValuePairs(nullptr, -100)),
-    std::invalid_argument);
-
-  // Case 13: content_ptr != nullptr, content_length == -100
-  encoded_nv_pair.clear();
-  encoded_nv_pair.push_back(1);
-  encoded_nv_pair.push_back(1);
-  encoded_nv_pair.push_back('a');
-  encoded_nv_pair.push_back('b');
-  EXPECT_THROW(
-    (fcgi_si::ExtractBinaryNameValuePairs(encoded_nv_pair.data(), -100)),
-    std::invalid_argument
-  );
+    std::invalid_argument) << " Case 11: throw with null pointer and non-zero "
+      "length.";
 }
 
 TEST(Utility, EncodeNameValuePairs)

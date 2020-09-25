@@ -53,6 +53,12 @@ constexpr std::int_fast32_t            kHeaderReservedByteIndex       {7};
 constexpr std::int_fast32_t            kBeginRequestRoleB1Index       {0};
 constexpr std::int_fast32_t            kBeginRequestRoleB0Index       {1};
 constexpr std::int_fast32_t            kBeginRequestFlagsIndex        {2};
+  // FCGI_END_REQUEST byte position definitions
+constexpr std::int_fast32_t            kEndRequestAppStatusB3Index    {0};
+constexpr std::int_fast32_t            kEndRequestAppStatusB2Index    {1};
+constexpr std::int_fast32_t            kEndRequestAppStatusB1Index    {2};
+constexpr std::int_fast32_t            kEndRequestAppStatusB0Index    {3};
+constexpr std::int_fast32_t            kEndRequestProtocolStatusIndex {4};
   // Maximum lengths for some record fields.
 constexpr std::int_fast32_t            kNameValuePairSingleByteLength {(1LU << 7)  - 1};
 constexpr std::int_fast32_t            kNameValuePairFourByteLength   {(1LU << 31) - 1};

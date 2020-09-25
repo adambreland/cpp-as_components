@@ -8,13 +8,16 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/un.h>
-#include <unistd.h>
 #include <sys/uio.h>
+#include <unistd.h>
+
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <set>
@@ -323,60 +326,74 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
 
 std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
 {
-  if(micro_event_queue_.size())
+  // Outline:
+  // 1) The micro_event_queue is always emptied before ready descriptors are
+  //    read.
+  // 2) If the queue is empty, then the next ready descriptor is read until
+  //    it blocks.
+  // 3) Once a descriptor blocks, the microevent queue is checked as in 1. The
+  //    above process continues until some event is returned or the ready
+  //    descriptors are exhausted.
+  // 4) If the ready descriptors are exhausted, a call to select is made. When
+  //    the call returns, 2 is performed (as if the queue was empty).
+  while(true)
   {
-    std::unique_ptr<ServerEvent> new_event
-      {std::move(micro_event_queue_.front())};
-    micro_event_queue_.pop_front();
-    return std::move(new_event);
-  }
-  if(remaining_ready_ > 0)
-  {
-    return ExamineSelectReturn();
-  }
-  // Prepare to call select.
-  // select_set_ is filled with all connected connections. If no connected
-  // connections are present, an exceptions is thrown.
-  FD_ZERO(&select_set_);
-  int max_for_select {-1};
-  std::map<int, ConnectionState>::reverse_iterator r_iter
-    {connection_map_.rbegin()};
-  std::map<int, ConnectionState>::reverse_iterator r_end
-    {connection_map_.rend()};
-  while(r_iter != r_end)
-  {
-    if(r_iter->second.connected)
+    if(micro_event_queue_.size())
     {
-      max_for_select = r_iter->first;
-      break;
+      std::unique_ptr<ServerEvent> new_event
+        {std::move(micro_event_queue_.front())};
+      micro_event_queue_.pop_front();
+      return new_event;
     }
-    ++r_iter;
-  }
-  while(r_iter != r_end)
-  {
-    if(r_iter->second.connected)
+    if(remaining_ready_ > 0)
     {
-      FD_SET(r_iter->first, &select_set_);
+      ExamineSelectReturn();
+      continue;
     }
-    ++r_iter;
+    // Prepare to call select.
+    // select_set_ is filled with all connected connections. If no connected
+    // connections are present, an exceptions is thrown.
+    FD_ZERO(&select_set_);
+    int max_for_select {-1};
+    std::map<int, ConnectionState>::reverse_iterator r_iter
+      {connection_map_.rbegin()};
+    std::map<int, ConnectionState>::reverse_iterator r_end
+      {connection_map_.rend()};
+    while(r_iter != r_end)
+    {
+      if(r_iter->second.connected)
+      {
+        max_for_select = r_iter->first;
+        break;
+      }
+      ++r_iter;
+    }
+    while(r_iter != r_end)
+    {
+      if(r_iter->second.connected)
+      {
+        FD_SET(r_iter->first, &select_set_);
+      }
+      ++r_iter;
+    }
+    if(max_for_select == -1)
+    {
+      throw std::logic_error {"A call to "
+        "TestFcgiClientInterface::RetrieveServerEvent was made when no "
+        "server connections were active."};
+    }
+    int number_ready {0};
+    while(((number_ready = select(max_for_select + 1, &select_set_, nullptr,
+      nullptr, nullptr)) == -1) && (errno == EINTR))
+      continue;
+    if(number_ready == -1)
+    {
+      std::error_code ec {errno, std::system_category()};
+      throw std::system_error {ec, "select"};
+    }
+    remaining_ready_ = number_ready;
+    ExamineSelectReturn();
   }
-  if(max_for_select == -1)
-  {
-    throw std::logic_error {"A call to "
-      "TestFcgiClientInterface::RetrieveServerEvent was made when no "
-      "server connections were active."};
-  }
-  int number_ready {0};
-  while(((number_ready = select(max_for_select + 1, &select_set_, nullptr,
-    nullptr, nullptr)) == -1) && (errno == EINTR))
-    continue;
-  if(number_ready == -1)
-  {
-    std::error_code ec {errno, std::system_category()};
-    throw std::system_error {ec, "select"};
-  }
-  remaining_ready_ = number_ready;
-  return ExamineSelectReturn();
 }
 
 std::pair<const int, TestFcgiClientInterface::ConnectionState>*
@@ -395,11 +412,12 @@ TestFcgiClientInterface::ConnectedCheck(int connection)
   return &(*connection_iter);
 }
 
-// A helper function which is only intended to be used within
+// A helper function which is intended to only be used within
 // RetrieveServerEvent.
 //
-// Precondition: remaining_ready_ > 0
-std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
+// Preconditions: 
+// 1) remaining_ready_ > 0
+void TestFcgiClientInterface::ExamineSelectReturn()
 {
   std::map<int, ConnectionState>::iterator end_iter {connection_map_.end()};
   std::map<int, ConnectionState>::iterator connection_iter
@@ -412,22 +430,29 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
       ConnectionState* state_ptr {&(connection_iter->second)};
       if(FD_ISSET(descriptor, &select_set_))
       {
+        // An interator to pending_request_map_ is declared here as a way
+        // to save searches over pending_request_map_ in the likely event
+        // that multiple record parts are received in one read. Partitioning
+        // of received data by the below buffer size is irrelevant to this
+        // optimization.
+        std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+        pending_iter {pending_request_map_.end()};
+
         // Start reading until the connection blocks.
-        constexpr std::size_t buffer_size {1U << 9U};
+        constexpr unsigned int buffer_size {1U << 9U};
         std::uint8_t buffer[buffer_size];
+
+        // connection_iter must have been updated to the next connection when
+        // this loop exits.
         while(true)
         {
-          std::size_t read_return {socket_functions::SocketRead(descriptor,
-            buffer, buffer_size)};
+          unsigned int read_return {static_cast<unsigned int>(
+            socket_functions::SocketRead(descriptor, buffer, buffer_size))};
           int saved_errno {errno};
-          std::size_t remaining_data {read_return};
+          unsigned int remaining_data {read_return};
           std::uint8_t* current_byte {buffer};
           while(remaining_data > 0U)
           {
-            std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
-            pending_end {pending_request_map_.end()};
-            std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
-            pending_iter {pending_end};
             // Header
             std::uint8_t received_header
               {state_ptr->record_state.header_bytes_received};
@@ -435,128 +460,57 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
             {
               std::uint8_t remaining_header {static_cast<std::uint8_t>(
                 fcgi_si::FCGI_HEADER_LEN - received_header)};
-              std::size_t copy_size {(remaining_data >= remaining_header) ?
-                remaining_header : remaining_data};
+              std::uint8_t copy_size {(remaining_data >= remaining_header) ?
+                remaining_header : static_cast<std::uint8_t>(remaining_data)};
               std::memcpy(state_ptr->record_state.header + received_header,
                 current_byte, copy_size);
               current_byte                                  += copy_size;
               remaining_data                                -= copy_size;
-              state_ptr->record_state.header_bytes_received += copy_size;
-              if(copy_size == remaining_header)
+              received_header                               += copy_size;
+              state_ptr->record_state.header_bytes_received  = received_header;
+              if(received_header == fcgi_si::FCGI_HEADER_LEN)
               {
-                // The header was just completed.
-                // 1) Extract the header information.
-                // 2) Determine how receipt of the record should be handled.
-                std::uint8_t protocol_version {state_ptr->record_state.
-                  header[fcgi_si::kHeaderTypeIndex]};
-
-                fcgi_si::FcgiType record_type {static_cast<fcgi_si::FcgiType>(
-                  state_ptr->record_state.header[fcgi_si::kHeaderTypeIndex])};
-                state_ptr->record_state.type = record_type;
-
-                std::uint16_t fcgi_id {state_ptr->record_state.
-                  header[fcgi_si::kHeaderRequestIDB1Index]};
-                fcgi_id <<= 8U;
-                fcgi_id += state_ptr->record_state.
-                  header[fcgi_si::kHeaderRequestIDB0Index];
-                state_ptr->record_state.fcgi_id = fcgi_id;
-
-                std::uint16_t expected_content {state_ptr->record_state.
-                  header[fcgi_si::kHeaderContentLengthB1Index]};
-                expected_content <<= 8U;
-                expected_content += state_ptr->record_state.
-                  header[fcgi_si::kHeaderContentLengthB0Index];
-                state_ptr->record_state.content_bytes_expected =
-                  expected_content;
-
-                std::uint8_t expected_padding {state_ptr->record_state.
-                  header[fcgi_si::kHeaderPaddingLengthIndex]};
-                state_ptr->record_state.padding_bytes_expected =
-                  expected_padding;
-                
-                // Validate the record.
-                bool error_detected {false};
-                if(protocol_version != 1U)
+                pending_iter = UpdateOnHeaderCompletion(connection_iter,
+                  pending_iter);
+                if((state_ptr->record_state.content_bytes_expected == 0U) && 
+                   (state_ptr->record_state.padding_bytes_expected == 0U))
                 {
-                  error_detected = true;
-                }
-                else
-                {
-                  switch(record_type) {
-                    case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
-                      pending_iter = pending_request_map_.find(
-                        {descriptor, fcgi_id});
-                      // Does a request exist for this ending record?
-                      // If so, does it have the correct content length?
-                      if((pending_iter == pending_request_map_.end()) ||
-                        (expected_content != 8U))
-                      {
-                        error_detected = true;
-                      }
-                      break;
-                    }
-                    case fcgi_si::FcgiType::kFCGI_STDOUT : {
-                      pending_iter = pending_request_map_.find(
-                        {descriptor, fcgi_id});
-                      if((pending_iter == pending_request_map_.end()) ||
-                         (pending_iter->second.stdout_completed))
-                      {
-                        error_detected = true;
-                      }
-                      break;
-                    }
-                    case fcgi_si::FcgiType::kFCGI_STDERR : {
-                       pending_iter = pending_request_map_.find(
-                        {descriptor, fcgi_id});
-                      if((pending_iter == pending_request_map_.end()) ||
-                         (pending_iter->second.stderr_completed))
-                      {
-                        error_detected = true;
-                      }
-                      break;
-                    }
-                    case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
-
-                      if((fcgi_id != 0U)                       ||
-                         !(state_ptr->management_queue.size()) ||
-                         (fcgi_si::FcgiType::kFCGI_GET_VALUES != state_ptr->
-                            management_queue.front().type))
-                      {
-                        error_detected = true;
-                      }
-                      break;
-                    }
-                    case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE :
-                    {
-                      if((fcgi_id != 0U)                       ||
-                         !(state_ptr->management_queue.size()) ||
-                         (fcgi_si::FcgiType::kFCGI_GET_VALUES == state_ptr->
-                            management_queue.front().type))
-                      {
-                        error_detected = true;
-                      }
-                      break;
-                    }
-                    default : {
-                      error_detected = true;
-                    }
-                  }
-                }
-                if(error_detected)
-                {
-                  state_ptr->record_state.invalidated = true;
-                }
-
-                // Check if the record is complete.
-                if((expected_padding == 0U) && (expected_content == 0U)
-                {
-
-                }
-              } // header completion logic
-            } // header write block
+                  // ProcessCompleteRecord may invalidate pending_iter during
+                  // its execution. It is required to return a valid value
+                  // for pending_iter.
+                  pending_iter = ProcessCompleteRecord(connection_iter,
+                    pending_iter);
+                  continue;
+                }  
+              }
+            }
 
             if(remaining_data == 0U)
               break;
+            
+            // A lambda to ensure that the assumptions on pending_iter
+            // are met.
+            // Also, some common state for Content and Padding.
+            std::uint16_t fcgi_id {state_ptr->record_state.fcgi_id};
+            fcgi_si::FcgiType record_type {state_ptr->record_state.type};
+            std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+              pending_end {pending_request_map_.end()};
+            auto PendingIterCheckAndUpdate =
+            [&pending_iter, &pending_end, &descriptor, &fcgi_id, this]()->void
+            {
+              fcgi_si::RequestIdentifier id {descriptor, fcgi_id};
+              if((pending_iter == pending_end) || (pending_iter->first != id))
+              {
+                pending_iter = pending_request_map_.find(id);
+                if(pending_iter == pending_end)
+                {
+                  throw std::logic_error {"A request was not present when "
+                    "expected in a call to "
+                    "TestFcgiClientInterface::RetrieveServerEvent."};
+                }
+              }
+            };
+
             // Content
             std::uint16_t received_content
               {state_ptr->record_state.content_bytes_received};
@@ -564,30 +518,17 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
               {state_ptr->record_state.content_bytes_expected};
             if(received_content < expected_content)
             {
-              std::size_t remaining_content
-                {expected_content - received_content};
-              std::size_t copy_size {(remaining_data >= remaining_content) ?
-                remaining_content : remaining_data};
-              fcgi_si::FcgiType record_type {state_ptr->record_state.type};
-              std::uint16_t fcgi_id {state_ptr->record_state.fcgi_id};
+              std::uint16_t remaining_content {static_cast<std::uint16_t>(
+                expected_content - received_content)};
+              std::uint16_t copy_size {(remaining_data >= remaining_content) ?
+                remaining_content : static_cast<std::uint16_t>(remaining_data)};              
               std::uint8_t* current_end {current_byte + copy_size};
               if(!(state_ptr->record_state.invalidated) &&
                  (fcgi_id != 0U)                        &&
                  (record_type != fcgi_si::FcgiType::kFCGI_END_REQUEST))
               {
                 // Type is either FCGI_STDOUT or FCGI_STDERR.
-                if(pending_iter == pending_end)
-                {
-                  pending_iter =
-                    pending_request_map_.find({descriptor, fcgi_id});
-                  // pending_iter should never be equal to the end here.
-                  if(pending_iter == pending_end)
-                  {
-                    throw std::logic_error {"A request was not present when "
-                      "expected in a call to "
-                      "TestFcgiClientInterface::RetrieveServerEvent."};
-                  }
-                }
+                PendingIterCheckAndUpdate();               
                 bool is_out {record_type == fcgi_si::FcgiType::kFCGI_STDOUT};
                 std::vector<std::uint8_t>::iterator end_iter {(is_out) ?
                   pending_iter->second.fcgi_stdout.end() :
@@ -600,6 +541,10 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
               }
               else
               {
+                if(record_type == fcgi_si::FcgiType::kFCGI_END_REQUEST)
+                {
+                  PendingIterCheckAndUpdate();
+                }
                 std::vector<std::uint8_t>* local_ptr
                   {&(state_ptr->record_state.local_buffer)};
                 std::vector<std::uint8_t>::iterator local_buffer_end
@@ -607,67 +552,111 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::ExamineSelectReturn()
                 local_ptr->insert(local_buffer_end, current_byte,
                   current_byte + copy_size);
               }
-              current_byte                                   += copy_size;
-              remaining_data                                 -= copy_size;
-              state_ptr->record_state.content_bytes_received += copy_size;
-
-              // Check if the record is complete
+              current_byte                                  += copy_size;
+              remaining_data                                -= copy_size;
+              received_content                              += copy_size;
+              state_ptr->record_state.content_bytes_received = received_content;
+              // Check if the record is complete.
+              if((received_content == expected_content) &&
+                 (state_ptr->record_state.padding_bytes_expected == 0U))
+              {
+                // Note that PendingIterCheckAndUpdate was called in the
+                // three cases in which this is required, i.e. record_type is
+                // FCGI_END_REQUEST, FCGI_STDERR, or FCGI_STDOUT).
+                pending_iter = ProcessCompleteRecord(connection_iter,
+                  pending_iter);
+                continue;
+              }
             }
+
+            if(remaining_data == 0U)
+              break;
 
             // Padding
-            if(state_ptr->record_state.padding_bytes_expected != 0U)
+            std::uint8_t expected_padding
+              {state_ptr->record_state.padding_bytes_expected};
+            std::uint8_t received_padding
+              {state_ptr->record_state.padding_bytes_received};
+            if(received_padding < expected_padding)
             {
-              if(remaining_data == 0U)
-                break;
-              
+              std::uint8_t remaining_padding
+                {static_cast<std::uint8_t>(expected_padding - received_padding)};
+              std::uint8_t copy_size {static_cast<std::uint8_t>(
+                (remaining_data >= remaining_padding) ?
+                  remaining_padding : remaining_data)};
+              // Padding is discarded.
+              current_byte                                  += copy_size;
+              remaining_data                                -= copy_size;
+              received_padding                              += copy_size;
+              state_ptr->record_state.padding_bytes_received = received_padding;
+
+              // Check if the record is complete.
+              if(received_padding == expected_padding)
+              {
+                // Ensure that pending_iter refers to the appropriate pending
+                // request.
+                if((record_type == fcgi_si::FcgiType::kFCGI_END_REQUEST) ||
+                   (record_type == fcgi_si::FcgiType::kFCGI_STDERR)      ||
+                   (record_type == fcgi_si::FcgiType::kFCGI_STDOUT))
+                {
+                  PendingIterCheckAndUpdate();
+                }
+                pending_iter = ProcessCompleteRecord(connection_iter,
+                  pending_iter);
+                continue;
+              }
             }
-                       
-
           } // End iterating over data received from a call to SocketRead.
-        }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        // Update select_set_ tracking information.
-        --remaining_ready_;
-        if(remaining_ready_ == 0)
-        {
-          next_ready_ = 0;
-        }
-        else
-        {
-          std::map<int, ConnectionState>::iterator local_iter {connection_iter};
-          if(++local_iter == end_iter)
+          // Handle errors that may have occurred when SocketRead was called
+          // and conditionally break;
+          if(read_return < buffer_size)
           {
-            throw std::logic_error {"A discrepancy was detected between the "
-              "number of ready connections and the number of connections "
-              "in a call to TestFcgiClientInterface::RetrieveServerEvent."};
-          }
-          else
-          {
-            next_ready_ = local_iter->first;
+            // Note that saved_errno == EINTR is not possible per the semantics
+            // of SockedRead.
+            if((saved_errno == 0) || (saved_errno == EAGAIN) ||
+               (saved_errno == EWOULDBLOCK))
+            {
+              // saved_errno == 0 implies that the peer closed the connection.
+              // The other cases imply that no more data can be read.
+              // All of these cases require the select return tracking
+              // variables to be updated.
+              --remaining_ready_;
+              if(remaining_ready_ == 0)
+              {
+                next_ready_ = 0;
+              }
+              else
+              {
+                std::map<int, ConnectionState>::iterator local_iter
+                  {connection_iter};
+                if(++local_iter == end_iter)
+                {
+                  throw std::logic_error {"A discrepancy was detected between "
+                    "the number of ready connections and the number of "
+                    "connections in a call to "
+                    "TestFcgiClientInterface::RetrieveServerEvent."};
+                }
+                else
+                {
+                  next_ready_ = local_iter->first;
+                }
+              }
+              if(saved_errno == 0)
+              {
+                // Close the connection.
+
+              }
+            }
+            else
+            {
+              // Throw.
+
+            }
+            // Update connection_iter and break.
           }
         }
+        continue;
       }
     }
     ++connection_iter;
@@ -715,6 +704,159 @@ void TestFcgiClientInterface::FailedWrite(
     std::error_code ec {error_code, std::system_category()};
     throw std::system_error {ec, system_error_message};
   }
+}
+
+// Preconditions:
+// 1) connection_iter does not refer to connection_map_.end().
+// 2) If the type of the record is FCGI_END_REQUEST, FCGI_STDOUT, or
+//    FCGI_STDERR, and the record was not invalidated, then pending_iter refers
+//    to the appropriate entry in pending_request_map_.
+std::map<fcgi_si::RequestIdentifier, TestFcgiClientInterface::RequestData>::iterator
+TestFcgiClientInterface::ProcessCompleteRecord(
+  std::map<int, ConnectionState>::iterator connection_iter,
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter)
+{
+  ConnectionState* state_ptr {&(connection_iter->second)};
+  if(state_ptr->record_state.invalidated)
+  {
+    std::unique_ptr<ServerEvent> new_event {new InvalidRecord {
+      state_ptr->record_state.header[fcgi_si::kHeaderVersionIndex],
+      state_ptr->record_state.type,
+      {connection_iter->first, state_ptr->record_state.fcgi_id},
+      std::move(state_ptr->record_state.local_buffer),
+      state_ptr->record_state.padding_bytes_expected
+    }};
+    micro_event_queue_.push_back(std::move(new_event));
+  }
+  else
+  {
+    switch(state_ptr->record_state.type) {
+      case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
+        // Extract the application status.
+        std::uint8_t* data_ptr {state_ptr->record_state.local_buffer.data()};
+        std::int32_t local_app_status {*data_ptr};
+        for(int i {0}; i < 3; ++i)
+        {
+          local_app_status <<= 8U;
+          ++data_ptr;
+          local_app_status += *data_ptr;
+        }
+        // Extract the protocol status.
+        ++data_ptr;
+        std::uint8_t local_protocol_status {*data_ptr};
+
+        std::unique_ptr<ServerEvent> new_event {new FcgiResponse {
+          local_app_status,
+          std::move(pending_iter->second.fcgi_stderr),
+          std::move(pending_iter->second.fcgi_stdout),
+          local_protocol_status,
+          pending_iter->second.request,
+          pending_iter->first
+        }};
+        micro_event_queue_.push_back(std::move(new_event));
+        if(!(completed_request_set_.insert(pending_iter->first).second))
+        {
+          throw std::logic_error {"A request was found to be present in the "
+            "completed request tracking set when it should not have been "
+            "in a call to TestFcgiClientInterface::RetrieveServerEvent."};
+        }
+        pending_request_map_.erase(pending_iter);
+        // The previous call invalidated pending iter. It must be brought to a
+        // valid state.
+        pending_iter = pending_request_map_.end();
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_STDOUT : {
+        if(state_ptr->record_state.content_bytes_expected == 0U)
+        {
+          pending_iter->second.stdout_completed = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_STDERR : {
+        if(state_ptr->record_state.content_bytes_expected == 0U)
+        {
+          pending_iter->second.stderr_completed = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
+        // An attempt is made to extract a name-value pair map from the
+        // byte sequence which was sent by the server. If a failure occurs,
+        // which includes the presence of duplicate names, an empty map is
+        // returned and the corruption flag of the GetValuesResult instance
+        // is set.
+        std::vector<std::uint8_t>* buffer_ptr
+          {&(state_ptr->record_state.local_buffer)};
+        ParamsMap params_result {};
+        bool params_error {true};
+        std::vector<std::uint8_t>::size_type local_buffer_size
+          {buffer_ptr->size()};
+        if(local_buffer_size)
+        {
+          using NameValuePair = 
+            std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
+          std::vector<NameValuePair> name_value_list 
+            {fcgi_si::ExtractBinaryNameValuePairs(
+              buffer_ptr->data(), buffer_ptr->size())};
+          if(name_value_list.size())
+          {
+            auto NameValuePairNameCompare = []
+            (
+              const NameValuePair& lhs,
+              const NameValuePair& rhs
+            )->bool
+            {
+              return lhs.first < rhs.first;
+            };
+            std::sort(name_value_list.begin(), name_value_list.end(),
+              NameValuePairNameCompare);
+            std::vector<NameValuePair>::iterator duplicate_iter
+              {std::adjacent_find(name_value_list.begin(),
+                name_value_list.end())};
+            if(duplicate_iter == name_value_list.end())
+            {
+              params_error = false;
+              std::move_iterator<std::vector<NameValuePair>::iterator> 
+              begin_move {name_value_list.begin()};
+              std::move_iterator<std::vector<NameValuePair>::iterator>
+              end_move   {name_value_list.end()};
+              params_result = ParamsMap {begin_move, end_move};
+            }
+          }
+        }
+        std::unique_ptr<ServerEvent> new_event {new GetValuesResult
+        {
+          (local_buffer_size) ? params_error : false,
+          {connection_iter->first, 0U},
+          std::move(state_ptr->management_queue.front().params_map),
+          std::move(params_result)
+        }};
+        state_ptr->management_queue.pop_front();
+        micro_event_queue_.push_back(std::move(new_event));
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE : {
+        std::unique_ptr<ServerEvent> new_event {new UnknownType
+        {
+          {connection_iter->first, 0U},
+          state_ptr->record_state.local_buffer[0],
+          std::move(state_ptr->management_queue.front())
+        }};
+        state_ptr->management_queue.pop_front();
+        micro_event_queue_.push_back(std::move(new_event));
+        break;
+      }
+      default : {
+        throw std::logic_error {"An unaccepted type was present but regarded "
+          "as valid in a call to TestFcgiClientInterface::RetrieveServerEvent."};
+      }
+    }
+  }
+  // Re-initialize the RecordState instance.
+  state_ptr->record_state = RecordState {};
+
+  return pending_iter;
 }
 
 bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
@@ -1227,6 +1369,144 @@ TestFcgiClientInterface::SendRequest(int connection, const FcgiRequest& request)
     throw;
   }
   return fcgi_si::RequestIdentifier {connection, new_id};
+}
+
+// This member function is part of the implementation of ExamineSelectReturn
+// which is in turn part of the implementation of RetrieveServerEvent.
+//
+// Preconditions:
+// 1) connection_iter does not refer to the end of connection_map_.
+std::map<fcgi_si::RequestIdentifier, 
+  TestFcgiClientInterface::RequestData>::iterator
+TestFcgiClientInterface::UpdateOnHeaderCompletion(
+  std::map<int, ConnectionState>::iterator connection_iter,
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter)
+{
+  int descriptor {connection_iter->first};
+  ConnectionState* state_ptr {&(connection_iter->second)};
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_end
+    {pending_request_map_.end()};
+
+  // Extract the header information and update the RecordState instance.
+  std::uint8_t protocol_version {state_ptr->record_state.
+    header[fcgi_si::kHeaderTypeIndex]};
+
+  fcgi_si::FcgiType record_type {static_cast<fcgi_si::FcgiType>(
+    state_ptr->record_state.header[fcgi_si::kHeaderTypeIndex])};
+  state_ptr->record_state.type = record_type;
+
+  std::uint16_t fcgi_id {state_ptr->record_state.
+    header[fcgi_si::kHeaderRequestIDB1Index]};
+  fcgi_id <<= 8U;
+  fcgi_id += state_ptr->record_state.
+    header[fcgi_si::kHeaderRequestIDB0Index];
+  state_ptr->record_state.fcgi_id = fcgi_id;
+
+  std::uint16_t expected_content {state_ptr->record_state.
+    header[fcgi_si::kHeaderContentLengthB1Index]};
+  expected_content <<= 8U;
+  expected_content += state_ptr->record_state.
+    header[fcgi_si::kHeaderContentLengthB0Index];
+  state_ptr->record_state.content_bytes_expected =
+    expected_content;
+
+  std::uint8_t expected_padding {state_ptr->record_state.
+    header[fcgi_si::kHeaderPaddingLengthIndex]};
+  state_ptr->record_state.padding_bytes_expected =
+    expected_padding;
+  
+  // Validate the record.
+  bool error_detected {false};
+  if(protocol_version != 1U)
+  {
+    error_detected = true;
+  }
+  else
+  {
+    auto PendingIterCheckAndUpdate = 
+    [&pending_iter, &descriptor, &fcgi_id, &pending_end, this]()->void
+    {
+      fcgi_si::RequestIdentifier id {descriptor, fcgi_id};
+      if((pending_iter == pending_end) || (pending_iter->first != id))
+      {
+        // It is acceptable for find to return end as a spurious record may
+        // have been sent.
+        pending_iter = pending_request_map_.find(id);
+      }
+    };
+
+    switch(record_type) {
+      case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
+        PendingIterCheckAndUpdate();
+        // Among other questions, does a request exist for this end record?
+        // Note that a pending request is moved to the completed map upon its
+        // completion. It will then not be present in the pending map.
+        if((pending_iter == pending_end)                 ||
+            (!(pending_iter->second.stderr_completed) ||
+             !(pending_iter->second.stdout_completed))   ||
+            (expected_content != 8U))
+        {
+          error_detected = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_STDOUT : {
+        PendingIterCheckAndUpdate();
+        if((pending_iter == pending_end)                 ||
+           (pending_iter->second.stdout_completed))
+        {
+          error_detected = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_STDERR : {
+        PendingIterCheckAndUpdate();
+        if((pending_iter == pending_end)                 ||
+           (pending_iter->second.stderr_completed))
+        {
+          error_detected = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
+        if((fcgi_id != 0U)                               ||
+           !(state_ptr->management_queue.size())         ||
+           (fcgi_si::FcgiType::kFCGI_GET_VALUES != state_ptr->
+              management_queue.front().type))
+        {
+          error_detected = true;
+        }
+        break;
+      }
+      case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE : {
+        if((fcgi_id != 0U)                              ||
+           (expected_content != 8U)                     ||
+           !(state_ptr->management_queue.size())        ||
+           (fcgi_si::FcgiType::kFCGI_GET_VALUES == state_ptr->
+              management_queue.front().type))
+        {
+          error_detected = true;
+        }
+        break;
+      }
+      default : {
+        // This case implies that a record type was received
+        // which was not among the set of valid types for FastCGI
+        // clients.
+        error_detected = true;
+      }
+    }
+  }
+  if(error_detected)
+  {
+    state_ptr->record_state.invalidated = true;
+  }
+  // pending_iter cannot have been invalidated. It may have been updated.
+  // If the record is valid at this point and record_type is one of
+  // FCGI_END_REQUEST, FCGI_STDERR, or FCGI_STDOUT, then pending_iter must
+  // refer to the appropriate pending request. This is a precondition of
+  // ProcessCompleteRecord.
+  return pending_iter;
 }
 
 } // namespace fcgi_si_test

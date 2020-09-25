@@ -197,9 +197,6 @@ inline bool EncodeNVPairSingleRecordFailure(
 // 1) May throw exceptions derived from std::exception.
 // 2) Throws std::invalid_argument if a nullptr is given and
 //    content_length != 0.
-// 3) Throws std::invalid_argument if content_length < 0.
-// 4) In the event of a throw, the byte sequence given by 
-//    [content_ptr, content_ptr + content_length) is not modified.
 //
 // Effects:
 // 1) The encoded lengths of the name and value byte sequences are extracted
@@ -212,7 +209,7 @@ inline bool EncodeNVPairSingleRecordFailure(
 //       returned.
 std::vector<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>
 ExtractBinaryNameValuePairs(const std::uint8_t* content_ptr, 
-  std::int_fast32_t content_length);
+  std::size_t content_length);
 
 // Attempts to return the length in bytes of a name or value when that length 
 // was encoded using four bytes in the FastCGI name-value pair format.

@@ -253,21 +253,24 @@ class GetValuesResult : public ServerEvent
   }
 
   inline GetValuesResult()
-  : request_id_ {-1, 0U},
+  : corrupt_response_ {false},
+    request_id_ {-1, 0U},
     request_params_map_ {},
     response_params_map_ {}
   {}
 
-  inline GetValuesResult(fcgi_si::RequestIdentifier request_id, 
+  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id, 
     const ParamsMap& request, const ParamsMap& response)
-  : request_id_ {request_id},
+  : corrupt_response_ {corruption},
+    request_id_ {request_id},
     request_params_map_ {request},
     response_params_map_ {response}
   {}
 
-  inline GetValuesResult(fcgi_si::RequestIdentifier request_id, 
+  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id, 
     ParamsMap&& request, ParamsMap&& response)
-  : request_id_ {request_id},
+  : corrupt_response_ {corruption},
+    request_id_ {request_id},
     request_params_map_ {std::move(request)},
     response_params_map_ {std::move(response)}
   {}
@@ -281,6 +284,7 @@ class GetValuesResult : public ServerEvent
   ~GetValuesResult() override = default;
 
  private:
+  bool                       corrupt_response_;
   fcgi_si::RequestIdentifier request_id_;
   ParamsMap                  request_params_map_;
   ParamsMap                  response_params_map_;
@@ -459,6 +463,16 @@ class TestFcgiClientInterface
   //       to be active.
   // 3) EINTR was ignored during the invocation.
   int Connect(const char* address, std::uint16_t port);
+
+  inline int ConnectionCount() const noexcept
+  {
+    return number_connected_;
+  }
+
+  inline bool EventsReady() const noexcept
+  {
+    return !(micro_event_queue_.empty());
+  }
 
   std::unique_ptr<ServerEvent> RetrieveServerEvent();
 
@@ -713,16 +727,25 @@ class TestFcgiClientInterface
  private:
   struct RecordState
   {
-    bool                      invalidated {false};
-    std::uint16_t             fcgi_id {0U};
+    RecordState()                              = default;
+    RecordState(const RecordState&)            = default;
+    RecordState(RecordState&&)                 = default;
+
+    RecordState& operator=(const RecordState&) = default;
+    RecordState& operator=(RecordState&&)      = default;
+
+    ~RecordState()                             = default;
+
+    bool                      invalidated                        {false};
+    std::uint16_t             fcgi_id                            {0U};
     fcgi_si::FcgiType         type {static_cast<fcgi_si::FcgiType>(0U)};
     std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN] = {};
-    std::uint8_t              header_bytes_received {0U};
-    std::uint16_t             content_bytes_expected {0U};
-    std::uint16_t             content_bytes_received {0U};
-    std::uint8_t              padding_bytes_expected {0U};
-    std::uint8_t              padding_bytes_received {0U};
-    std::vector<std::uint8_t> local_buffer {};
+    std::uint8_t              header_bytes_received              {0U};
+    std::uint16_t             content_bytes_expected             {0U};
+    std::uint16_t             content_bytes_received             {0U};
+    std::uint8_t              padding_bytes_expected             {0U};
+    std::uint8_t              padding_bytes_received             {0U};
+    std::vector<std::uint8_t> local_buffer                       {};
   };
 
   struct ConnectionState
@@ -755,7 +778,7 @@ class TestFcgiClientInterface
   //    connection_map_ which is associated with connection otherwise.
   std::pair<const int, ConnectionState>* ConnectedCheck(int connection);
 
-  std::unique_ptr<ServerEvent> ExamineSelectReturn();
+  void ExamineSelectReturn();
 
   // Performs recovery after a write to a connection failed.
   //
@@ -798,6 +821,11 @@ class TestFcgiClientInterface
     const char* system_error_message
   );
 
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+  ProcessCompleteRecord(
+    std::map<int, ConnectionState>::iterator connection_iter,
+    std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter);
+
   bool SendBinaryManagementRequestHelper(
     std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     fcgi_si::FcgiType type, ManagementRequestData&& queue_item);
@@ -809,6 +837,11 @@ class TestFcgiClientInterface
   bool SendManagementRequestHelper(
     std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
     struct iovec iovec_array[], int iovec_count, std::size_t number_to_write);
+
+  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+  UpdateOnHeaderCompletion(
+    std::map<int, ConnectionState>::iterator connection_iter,
+    std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter);
 
   std::set<fcgi_si::RequestIdentifier>              completed_request_set_;
   std::map<int, ConnectionState>                    connection_map_;
