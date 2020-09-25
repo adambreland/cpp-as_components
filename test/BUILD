@@ -76,6 +76,7 @@ cc_test(
     deps       = [
         "//:fcgi_si",
         "//test:fcgi_si_testing_utilities",
+        "//test:test_fcgi_client_interface",
         "@socket_functions//:socket_functions",
         "@googletest//:gtest",
         "@googletest//:gtest_main"

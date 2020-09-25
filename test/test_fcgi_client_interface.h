@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -40,7 +41,7 @@ struct FcgiRequest
 
 struct ManagementRequestData
 {
-  fcgi_si::FcgiType         type {};
+  fcgi_si::FcgiType         type {0U};
   ParamsMap                 params_map {};
   std::vector<std::uint8_t> data {};
 };
@@ -115,7 +116,7 @@ class FcgiResponse : public ServerEvent
     return request_id_;
   }
 
-  inline FcgiResponse() = delete;
+  inline FcgiResponse() = default;
 
   inline FcgiResponse(std::int32_t app_status, 
     const std::vector<std::uint8_t>& stderr, 
@@ -190,7 +191,7 @@ class InvalidRecord : public ServerEvent
     return version_;
   }
 
-  inline InvalidRecord()
+  inline InvalidRecord() noexcept
   : version_        {0U},
     type_           {static_cast<fcgi_si::FcgiType>(0U)},
     request_id_     {-1, 0U},
@@ -252,7 +253,7 @@ class GetValuesResult : public ServerEvent
     return response_params_map_;
   }
 
-  inline GetValuesResult()
+  inline GetValuesResult() noexcept
   : corrupt_response_ {false},
     request_id_ {-1, 0U},
     request_params_map_ {},
@@ -268,7 +269,7 @@ class GetValuesResult : public ServerEvent
   {}
 
   inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id, 
-    ParamsMap&& request, ParamsMap&& response)
+    ParamsMap&& request, ParamsMap&& response) noexcept
   : corrupt_response_ {corruption},
     request_id_ {request_id},
     request_params_map_ {std::move(request)},
@@ -308,7 +309,7 @@ class UnknownType : public ServerEvent
     return unknown_type_;
   }
 
-  inline UnknownType()
+  inline UnknownType() noexcept
   : request_id_         {-1, 0U},
     unknown_type_       {0U},
     request_ {static_cast<fcgi_si::FcgiType>(0U), {}, {}}
@@ -322,7 +323,7 @@ class UnknownType : public ServerEvent
   {}
 
   inline UnknownType(fcgi_si::RequestIdentifier request_id,
-    std::uint8_t type, ManagementRequestData&& request)
+    std::uint8_t type, ManagementRequestData&& request) noexcept
   : request_id_         {request_id},
     unknown_type_       {type},
     request_ {std::move(request)}
@@ -341,61 +342,6 @@ class UnknownType : public ServerEvent
   std::uint8_t               unknown_type_;
   ManagementRequestData      request_;
 };
-
-class OtherManagementResponse : public ServerEvent
-{
- public:
-  inline const std::vector<std::uint8_t>& Content() const noexcept
-  {
-    return content_;
-  }
-
-  inline const ManagementRequestData& Request() const noexcept
-  {
-    return request_;
-  }
-
-  inline fcgi_si::RequestIdentifier RequestId() const noexcept
-  {
-    return request_id_;
-  }
-
-  inline OtherManagementResponse()
-  : request_id_ {-1, 0U},
-    content_    {},
-    request_ {}
-  {}
-
-  inline OtherManagementResponse(fcgi_si::RequestIdentifier request_id, 
-    const std::vector<std::uint8_t>& content, 
-    const ManagementRequestData& request)
-  : request_id_ {request_id},
-    content_    {content},
-    request_    {request}
-  {}
-
-  inline OtherManagementResponse(fcgi_si::RequestIdentifier request_id, 
-    std::vector<std::uint8_t>&& content,
-    ManagementRequestData&& request)
-  : request_id_ {request_id},
-    content_    {std::move(content)},
-    request_    {std::move(request)}
-  {}
-
-  OtherManagementResponse(const OtherManagementResponse&) = default;
-  OtherManagementResponse(OtherManagementResponse&&) = default;
-  
-  OtherManagementResponse& operator=(const OtherManagementResponse&) = default;
-  OtherManagementResponse& operator=(OtherManagementResponse&&) = default;
-
-  ~OtherManagementResponse() override = default;
-
- private:
-  fcgi_si::RequestIdentifier request_id_;
-  std::vector<std::uint8_t>  content_;
-  ManagementRequestData      request_;
-};
-
 
                     ////// The interface class. //////
 
@@ -724,10 +670,32 @@ class TestFcgiClientInterface
   fcgi_si::RequestIdentifier SendRequest(int connection,
     const FcgiRequest& request);
 
+  TestFcgiClientInterface();
+
+  TestFcgiClientInterface(const TestFcgiClientInterface&)            = delete;
+  TestFcgiClientInterface(TestFcgiClientInterface&&)                 = delete;
+
+  TestFcgiClientInterface& operator=(const TestFcgiClientInterface&) = delete;
+  TestFcgiClientInterface& operator=(TestFcgiClientInterface&&)      = delete;
+
+  ~TestFcgiClientInterface();
+
  private:
   struct RecordState
   {
-    RecordState()                              = default;
+    inline RecordState() noexcept
+    : invalidated            {false},
+      fcgi_id                {0U},
+      type                   {static_cast<fcgi_si::FcgiType>(0U)},
+      header                 {},
+      header_bytes_received  {0U},
+      content_bytes_expected {0U},
+      content_bytes_received {0U},
+      padding_bytes_expected {0U},
+      padding_bytes_received {0U},
+      local_buffer           {}
+    {}
+
     RecordState(const RecordState&)            = default;
     RecordState(RecordState&&)                 = default;
 
@@ -736,34 +704,82 @@ class TestFcgiClientInterface
 
     ~RecordState()                             = default;
 
-    bool                      invalidated                        {false};
-    std::uint16_t             fcgi_id                            {0U};
-    fcgi_si::FcgiType         type {static_cast<fcgi_si::FcgiType>(0U)};
-    std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN] = {};
-    std::uint8_t              header_bytes_received              {0U};
-    std::uint16_t             content_bytes_expected             {0U};
-    std::uint16_t             content_bytes_received             {0U};
-    std::uint8_t              padding_bytes_expected             {0U};
-    std::uint8_t              padding_bytes_received             {0U};
-    std::vector<std::uint8_t> local_buffer                       {};
+    bool                      invalidated;
+    std::uint16_t             fcgi_id;
+    fcgi_si::FcgiType         type;
+    std::uint8_t              header[fcgi_si::FCGI_HEADER_LEN];
+    std::uint8_t              header_bytes_received;
+    std::uint16_t             content_bytes_expected;
+    std::uint16_t             content_bytes_received;
+    std::uint8_t              padding_bytes_expected;
+    std::uint8_t              padding_bytes_received;
+    std::vector<std::uint8_t> local_buffer;
   };
+
+  static_assert(std::is_nothrow_default_constructible<TestFcgiClientInterface::RecordState>::value);
+  static_assert(std::is_nothrow_move_constructible<TestFcgiClientInterface::RecordState>::value);
+  static_assert(std::is_nothrow_move_assignable<TestFcgiClientInterface::RecordState>::value);
 
   struct ConnectionState
   {
+    // Move construction and move assignment may throw.
     bool                                  connected;
     a_component::IdManager<std::uint16_t> id_manager;
     RecordState                           record_state;
     std::list<ManagementRequestData>      management_queue;
   };
 
+  // a_component::IdManager<std::uint16_t>
+  static_assert(std::is_nothrow_default_constructible<a_component::IdManager<std::uint16_t>>::value);
+  static_assert(std::is_nothrow_move_constructible<a_component::IdManager<std::uint16_t>>::value);
+  static_assert(std::is_nothrow_move_assignable<a_component::IdManager<std::uint16_t>>::value);
+  // ConnectionState
+  static_assert(std::is_nothrow_default_constructible<TestFcgiClientInterface::ConnectionState>::value);
+  static_assert(std::is_nothrow_move_constructible<TestFcgiClientInterface::ConnectionState>::value);
+  static_assert(std::is_nothrow_move_assignable<TestFcgiClientInterface::ConnectionState>::value);
+
   struct RequestData
   {
+    inline RequestData() noexcept
+    : request          {},
+      fcgi_stdout      {},
+      stdout_completed {false},
+      fcgi_stderr      {},
+      stderr_completed {false}
+    {}
+
+    inline RequestData(
+      FcgiRequest new_request,
+      std::vector<std::uint8_t>&& stdout_content,
+      bool stdout_status,
+      std::vector<std::uint8_t>&& stderr_content,
+      bool stderr_status
+    ) noexcept
+    : request {new_request},
+      fcgi_stdout {std::move(stdout_content)},
+      stdout_completed {stdout_status},
+      fcgi_stderr {std::move(stderr_content)},
+      stderr_completed {stderr_status}
+    {}
+
+    RequestData(const RequestData&)            = default;
+    RequestData(RequestData&&)                 = default;
+
+    RequestData& operator=(const RequestData&) = default;
+    RequestData& operator=(RequestData&&)      = default;
+
+    ~RequestData()                             = default;
+
     FcgiRequest               request;
-    std::vector<std::uint8_t> fcgi_stdout {};
+    std::vector<std::uint8_t> fcgi_stdout;
     bool                      stdout_completed;
-    std::vector<std::uint8_t> fcgi_stderr {};
+    std::vector<std::uint8_t> fcgi_stderr;
     bool                      stderr_completed;
   };
+
+  static_assert(std::is_nothrow_default_constructible<TestFcgiClientInterface::RequestData>::value);
+  static_assert(std::is_nothrow_move_constructible<TestFcgiClientInterface::RequestData>::value);
+  static_assert(std::is_nothrow_move_assignable<TestFcgiClientInterface::RequestData>::value);
 
   // Preconditions: none.
   //
@@ -776,14 +792,26 @@ class TestFcgiClientInterface
   //    in connection_map_ or if connection is not connected.
   // 2) Returns a pointer to the ConnectionState instance of the entry of
   //    connection_map_ which is associated with connection otherwise.
-  std::pair<const int, ConnectionState>* ConnectedCheck(int connection);
+  std::map<int, ConnectionState>::iterator ConnectedCheck(int connection);
 
+  // A helper function which is intended to only be used within
+  // RetrieveServerEvent.
+  //
+  // Preconditions: 
+  // 1) remaining_ready_ > 0
+  //
+  // Exceptions:
+  // 1)
+  // 2)
+  //
+  // Effects:
+  //
   void ExamineSelectReturn();
 
   // Performs recovery after a write to a connection failed.
   //
   // Parameters:
-  // entry_ptr:            A pointer to the connection_map_ entry of the
+  // connection_iter:      An iterator to the connection_map_ entry of the
   //                       connection which was written to.
   // error_code:           The value of errno which was set by the I/O system
   //                       call which failed.
@@ -797,47 +825,149 @@ class TestFcgiClientInterface
   //                       thrown.
   //
   // Preconditions:
-  // 1) entry_ptr is not null and points to a valid entry of connection map.
+  // 1) connection_iter is not null and points to a valid entry of connection
+  //    map.
   // 2) pop_management_queue is true if and only if the failed write
   //    transaction added an entry to the end of queue which should be removed.
+  //
+  // Exceptions: See below.
   //
   // Effects:
   // 1) May return, throw a std::system_error instance, or terminate the
   //    program.
-  //    a) If the call returned or threw, then entry_ptr->first was
+  //    a) If the call returned or threw, then connection_iter->first was
   //       closed by a call to CloseConnection if a partial write occurred or
   //       error_code == EPIPE. If pop_management_queue == true, then the
   //       item which was most recently added to the management queue of
-  //       entry_ptr->first was removed.
+  //       connection_iter->first was removed.
   //    b) A throw occurs if error_code != EPIPE.
   //    c) Termination occurs if an invariant of the interface could not be
   //       maintained.
   //    d) The function returns otherwise.
   void FailedWrite(
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
-    int error_code,
-    bool nothing_written,
-    bool pop_management_queue,
-    const char* system_error_message
+    std::map<int, ConnectionState>::iterator connection_iter,
+    int                                      error_code,
+    bool                                     nothing_written,
+    bool                                     pop_management_queue,
+    const char*                              system_error_message
   );
 
+  // ProcessCompleteRecord is intended to only be used within the
+  // implementation of ExamineSelectReturn (which is in turn only intended to
+  // be used within the implementation of RetrieveServerEvent).
+  //
+  // Parameters:
+  // connection_iter: The iterator to the connection_map_ entry whose
+  //                  RecordState instance is complete.
+  // pending_iter:    An iterator to pending_request_map_. See the
+  //                  preconditions section for the preconditions on
+  //                  pending_iter.
+  //
+  // Preconditions:
+  // 1) connection_iter does not refer to connection_map_.end().
+  // 2)    If the type of the record is FCGI_END_REQUEST, FCGI_STDOUT, or
+  //    FCGI_STDERR, and the record was not invalidated, then pending_iter
+  //    refers to the appropriate entry in pending_request_map_.
+  //       Note that pending_iter_ may be equal to pending_request_map_.end()
+  //    if the above condition does not hold.
+  //
+  // Exceptions
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) Strong exception guarantee.
+  //
+  // Effects:
+  // 1) If the record was invalidated or the type of the record was one of
+  //    FCGI_END_REQUEST, FCGI_GET_VALUES_RESULT, or FCGI_UNKNOWN_TYPE, then an
+  //    instance of the appropriate type derived from ServerEvent was
+  //    constructed and added to the end of micro_event_queue_.
+  // 2) If the type of the record was one of FCGI_GET_VALUES_RESULT or
+  //    FCGI_UNKNOWN_TYPE (i.e. the record was a management record) and the
+  //    record was valid, then the management queue referred to by
+  //    connection_iter was popped.
+  // 3) 
+  // 4) If the type of the record was FCGI_END_REQUEST and the record was valid,
+  //    then the entry for the request was removed from pending_request_map_
+  //    and the RequestIdentifier of the request was added to
+  //    completed_request_set_.
+  // 5)    If the type of the record was either FCGI_STDOUT or FCGI_STDERR, the
+  //    record was valid, and the content length of the record was zero, then
+  //    the appropriate stream was completed in the RequestData instance
+  //    referred to by pending_iter_.
+  //       Note that stream data is appended to the appropriate stream buffer
+  //    of the pending_request_ entry for the request when it is received.
+  // 6) The RecordState instance of the ConnectionState instance referred to
+  //    by connection_iter_ was reinitialized.
+  // 7) A valid iterator to pending_request_map_ was returned.
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
   ProcessCompleteRecord(
     std::map<int, ConnectionState>::iterator connection_iter,
     std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter);
 
   bool SendBinaryManagementRequestHelper(
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+    std::map<int, ConnectionState>::iterator connection_iter,
     fcgi_si::FcgiType type, ManagementRequestData&& queue_item);
 
   bool SendGetValuesRequestHelper(
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+    std::map<int, ConnectionState>::iterator connection_iter,
     ManagementRequestData&& queue_item);
   
   bool SendManagementRequestHelper(
-    std::pair<const int, TestFcgiClientInterface::ConnectionState>* entry_ptr,
+    std::map<int, ConnectionState>::iterator connection_iter,
     struct iovec iovec_array[], int iovec_count, std::size_t number_to_write);
 
+  // UpdateOnHeaderCompletion is intended to only be used within the
+  // implementation of ExamineSelectReturn (which is in turn only intended to
+  // be used within the implementation of RetrieveServerEvent).
+  //
+  // Parameters:
+  // 1) connection_iter: The iterator of connection_map_ which refers to the
+  //                     entry whose header was just completed.
+  // 2) pending_iter:    An iterator of pending_request_map_. This iterator is
+  //                     used to potentially save a search in
+  //                     pending_request_map_.
+  //
+  // Preconditions:
+  // 1) connection_iter does not refer to the end of connection_map_, is
+  //    valid, and refers to the correct entry.
+  // 2) pending_iter is valid. It may be equal to pending_request_map_.end().
+  //
+  // Exceptions
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) Strong exception guarantee.
+  //
+  // Effects:
+  // 1) The record was inspected for validity relative to the requirements of
+  //    the FastCGI protocol and the state of the ConnectionState instance
+  //    referred to by connection_iter. A record was invalidated if:
+  //    a) The FastCGI protocol version of the record was not 1.
+  //    b) FCGI_END_REQUEST:
+  //       1) No corresponding request existed in pending_request_map_.
+  //       2) A corresponding request existed, but at least one of the
+  //          FCGI_STDERR and FCGI_STDOUT streams was not complete.
+  //       3) The content length of the record was not 8 bytes.
+  //    c) FCGI_STDERR:
+  //       1) No corresponding request existed in pending_request_map_.
+  //       2) A corresponding request existed, but the FCGI_STDERR stream was
+  //          complete.
+  //    d) FCGI_STDOUT: as FCGI_STDERR, mutatis mutandis.
+  //    e) FCGI_GET_VALUES_RESULT:
+  //       1) The FastCGI identifier of the record was not zero.
+  //       2) No management requests were active for the connection.
+  //       3) The first request in the management request queue was not of type
+  //          FCGI_GET_VALUES.
+  //    f) FCGI_UNKNOWN_TYPE:
+  //       1) The FastCGI identifier of the record was not zero.
+  //       2) No management requests were active for the connection.
+  //       3) The first request in the management request queue was of type
+  //          FCGI_GET_VALUES (as every FastCGI server must recognize
+  //          FCGI_GET_VALUES requests).
+  //       4) The content length of the record was not 8 bytes.
+  //    g) The record was not of one the above types.
+  // 3) The information contained in the header was used to update the
+  //    following fields of the RecordState instance referred to by
+  //    connection_iter: type, fcgi_id, content_bytes_expected, and
+  //    padding_bytes_expected.
+  // 4) A valid iterator of pending_request_map_ was returned.
   std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
   UpdateOnHeaderCompletion(
     std::map<int, ConnectionState>::iterator connection_iter,
@@ -848,9 +978,9 @@ class TestFcgiClientInterface
   std::map<fcgi_si::RequestIdentifier, RequestData> pending_request_map_;
   std::list<std::unique_ptr<ServerEvent>>           micro_event_queue_;
   int                                               number_connected_;
-  // I/O multiplexing state
+  // I/O multiplexing tracking state
   int                                               remaining_ready_;
-  int                                               next_ready_;
+  std::map<int, ConnectionState>::iterator          next_connection_;
   fd_set                                            select_set_;
 
   static constexpr const char* write_or_select_ {"write or select"};

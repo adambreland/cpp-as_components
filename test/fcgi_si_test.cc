@@ -33,6 +33,8 @@
 #include "test/fcgi_si_testing_utilities.h"
 #include "external/socket_functions/include/socket_functions.h"
 
+#include "test/test_fcgi_client_interface.h"
+
 // Key:
 // BAZEL DEPENDENCY   Used to mark the use of a feature which is provided
 //                    by the Bazel testing environment. 
@@ -4905,4 +4907,9 @@ TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
   // Modules which testing depends on:
   //
   // Other modules whose testing depends on this module:
+}
+
+TEST(FcgiServerInterface, TestFcgiClientInterface)
+{
+  
 }
