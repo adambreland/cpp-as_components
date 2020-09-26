@@ -10,8 +10,8 @@
 //    value i of I: 
 //    a) If at time t, i is in the dynamic set S(t) of a type instance, then,
 //       at time t+1, after the invocation of ReleaseId(i) on the type instance,
-//       the dynamic set of the instance satisfies S(t+1) = S(t)\{i} (where \ 
-//       represents set difference).
+//       the dynamic set of the instance satisfies S(t+1) = S(t)\{i} (where 
+//       \ represents set difference).
 //    b) If at time t, i is not in the dynamic set of a type instance, then the
 //       invocation ReleaseId(i) on the type instance caused an exception to
 //       be thrown. No change to the type instance occurred in this case.
@@ -165,12 +165,10 @@ class IdManager
 
   void ReleaseId(I);
 
-  inline IdManager()
+  inline IdManager() noexcept
   : size_         {0},
     id_intervals_ {}
-  {
-    static_assert(std::is_integral<I>::value, "An integral type must be used.");
-  }
+  {}
 
   IdManager(const IdManager&) = default;
   IdManager(IdManager&&) = default;
@@ -186,6 +184,11 @@ class IdManager
 
   I size_;
   std::map<I, I> id_intervals_;
+
+  static_assert(std::is_integral<I>::value, "An integral type must be used.");
+  static_assert(std::is_nothrow_default_constructible<std::map<I, I>>::value);
+  static_assert(std::is_nothrow_move_constructible<std::map<I, I>>::value);
+  static_assert(std::is_nothrow_move_assignable<std::map<I, I>>::value);
 };
 
 template<typename I>
@@ -334,7 +337,7 @@ I IdManager<I>::GetId()
       {
         // The new ID cannot be larger than the maximum as other IDs are larger
         // than it is.
-        I new_id {(i_min->second) + 1};
+        I new_id {static_cast<I>((i_min->second) + 1)};
         // Is merging necessary?
         if((new_id + 1) == (i_next->first))
         {
@@ -353,8 +356,8 @@ I IdManager<I>::GetId()
         // Extension is needed. Is it possible?
         if(i_min->second == std::numeric_limits<I>::max())
         {
-          throw std::length_error {"A request for a new ID was made when all "
-            "possible IDs had been assigned."};
+          throw std::length_error {"A request for a new ID was made through a "
+            "call to IdManager<I>::GetId. All possible IDs had been assigned."};
         }
         else
         {
