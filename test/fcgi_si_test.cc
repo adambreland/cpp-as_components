@@ -100,6 +100,7 @@ void GTestCheckAndReportDescriptorLeaks(
   }
 }
 
+// CreateInterface
 // Creates a listening socket for an interface, and constructs an interface
 // instance on the heap. Access is provided by a returned unique_ptr to the
 // interface. The provided domain is used when the listening socket is created.
@@ -149,7 +150,7 @@ struct InterfaceCreationArguments
 };
 
 std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
-CreateInterface(struct InterfaceCreationArguments args)
+CreateInterface(const struct InterfaceCreationArguments& args)
 {
   std::unique_ptr<fcgi_si::FcgiServerInterface> interface_uptr {};
   if((args.domain == AF_UNIX) && !args.unix_path)
@@ -343,7 +344,7 @@ CleanUp()
       if(unlink(inter_args_.unix_path) == -1)
         ADD_FAILURE() << "A call to unlink encountered an error when " 
           "destroying an instance of SingleProcessInterfaceAndClients."
-          << std::strerror(errno); 
+          << '\n' << std::strerror(errno);
     }
   }
   // Cleanup client state.
@@ -4911,5 +4912,112 @@ TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
 
 TEST(FcgiServerInterface, TestFcgiClientInterface)
 {
-  
+  const char* test_fcgi_client_interface {"TestFcgiClientInterface"};
+  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
+  {
+    struct InterfaceCreationArguments inter_args {};
+    inter_args.domain          = AF_INET;
+    inter_args.backlog         = 5;
+    inter_args.max_connections = 10;
+    inter_args.max_requests    = 100;
+    inter_args.app_status      = EXIT_FAILURE;
+    inter_args.unix_path       = nullptr;
+
+    std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+    ASSERT_NO_THROW(inter_return = CreateInterface(inter_args));
+    std::unique_ptr<fcgi_si::FcgiServerInterface>& inter_uptr
+      {std::get<0>(inter_return)};
+    ASSERT_NE(inter_uptr, std::unique_ptr<fcgi_si::FcgiServerInterface> {}) <<
+        "A " << test_fcgi_client_interface << " instance was not constructed.";
+
+    // Beneath this line, the socket descriptor allocated by CreateInterface
+    // must be released.
+    int listening_socket = std::get<1>(inter_return);
+    fcgi_si_test::TestFcgiClientInterface client_inter {};
+    int local_socket {};
+    try
+    {
+      local_socket =
+        client_inter.Connect("127.0.0.1", ntohs(std::get<2>(inter_return)));
+    }
+    catch(...)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    if(local_socket == -1)
+    {
+      close(listening_socket);
+      FAIL() << std::strerror(errno);
+    }
+    EXPECT_EQ(client_inter.ConnectionCount(), 1);
+    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> params_map
+    {
+      {fcgi_si::FCGI_MAX_CONNS, {}},
+      {fcgi_si::FCGI_MAX_REQS, {}},
+      {fcgi_si::FCGI_MPXS_CONNS, {}}
+    };
+    bool send_gvr {false};
+    try
+    {
+      send_gvr = client_inter.SendGetValuesRequest(local_socket, params_map);
+    }
+    catch(...)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    if(!send_gvr)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    // TODO Define SIGALRM handler and install.
+    GTestFatalIgnoreSignal(SIGALRM);
+    // TODO update to a loop with an escape due to an update from a handler of
+    // SIGALRM.
+    alarm(1U);
+    std::vector<fcgi_si::FcgiRequest> accept_result {};
+    ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
+    EXPECT_EQ(accept_result.size(), 0U);
+    ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
+    EXPECT_EQ(accept_result.size(), 0U);
+    std::unique_ptr<fcgi_si_test::ServerEvent> result_uptr {};
+    try
+    {
+      result_uptr = client_inter.RetrieveServerEvent();
+    }
+    catch(...)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    fcgi_si_test::GetValuesResult* gvr_ptr
+      {dynamic_cast<fcgi_si_test::GetValuesResult*>(result_uptr.get())};
+    if(!gvr_ptr)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    EXPECT_EQ(params_map, gvr_ptr->RequestMap());
+    params_map[fcgi_si::FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
+    params_map[fcgi_si::FCGI_MAX_REQS] = std::vector<std::uint8_t>
+      {'1', '0', '0'};
+    params_map[fcgi_si::FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+    EXPECT_EQ(params_map, gvr_ptr->ResponseMap());
+    try
+    {
+      EXPECT_TRUE(client_inter.CloseConnection(local_socket));
+    }
+    catch(...)
+    {
+      close(listening_socket);
+      FAIL();
+    }
+    EXPECT_EQ(client_inter.ConnectionCount(), 0U);
+    GTestFatalRestoreSignal(SIGALRM);
+    close(std::get<1>(inter_return));
+  }
+  GTestCheckAndReportDescriptorLeaks(&fdlc, test_fcgi_client_interface);
 }

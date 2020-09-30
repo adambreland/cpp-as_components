@@ -255,7 +255,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
   return true;
 }
 
-int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
+int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
 {
   if(address == nullptr)
   {
@@ -270,14 +270,18 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
   if(inet_pton(AF_INET, address, &addr_store) > 0)
   {
     domain = AF_INET;
-    static_cast<struct sockaddr_in*>(static_cast<void*>(&addr_store))->sin_port
-      = htons(port);
+    static_cast<struct sockaddr_in*>(
+      static_cast<void*>(&addr_store))->sin_family = AF_INET;
+    static_cast<struct sockaddr_in*>(
+      static_cast<void*>(&addr_store))->sin_port = port;
   }
   else if(inet_pton(AF_INET6, address, &addr_store) > 0)
   {
     domain = AF_INET6;
     static_cast<struct sockaddr_in6*>(
-      static_cast<void*>(&addr_store))->sin6_port = htons(port);
+      static_cast<void*>(&addr_store))->sin6_family = AF_INET6;
+    static_cast<struct sockaddr_in6*>(
+      static_cast<void*>(&addr_store))->sin6_port = port;
   }
   else
   {
@@ -290,6 +294,8 @@ int TestFcgiClientInterface::Connect(const char* address, std::uint16_t port)
       errno = EINVAL;
       return -1;
     }
+    static_cast<struct sockaddr_un*>(static_cast<void*>(&addr_store))->sun_family
+      = AF_UNIX;
     char* path_ptr {
       static_cast<struct sockaddr_un*>(
         static_cast<void*>(
@@ -930,7 +936,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
             std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
           std::vector<NameValuePair> name_value_list 
             {fcgi_si::ExtractBinaryNameValuePairs(
-              buffer_ptr->data(), buffer_ptr->size())};
+              buffer_ptr->data(), local_buffer_size)};
           if(name_value_list.size())
           {
             auto NameValuePairNameCompare = []
@@ -962,7 +968,8 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
         TryToAssignLastQueueItemPointer(&back_ptr);
 
-        *new_event = GetValuesResult
+        // Don't slice!
+        *(dynamic_cast<GetValuesResult*>(new_event.get())) = GetValuesResult
         {
           (local_buffer_size) ? params_error : false,
           {connection_iter->first, 0U},
@@ -1208,6 +1215,7 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
       throw std::system_error {ec, "select"};
     }
     remaining_ready_ = number_ready;
+    next_connection_ = connection_map_.begin();
     ExamineSelectReturn();
   }
 }

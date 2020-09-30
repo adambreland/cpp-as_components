@@ -125,7 +125,9 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
     }
     // Check if the record is valid. Ignore record if it is not.
     else if(invalidated_by_header_)
-    {/*no-op*/}
+    {
+      /*no-op*/
+    }
     else // The record must be a valid application record. Process it.
     {
       switch(type_)
@@ -428,7 +430,6 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
       // Process received bytes according to header and content/padding
       // completion. Record completion is checked after header addition.
 
-      // Is the header complete?
       if(!IsHeaderComplete())
       {
         std::int_fast32_t remaining_header {FCGI_HEADER_LEN - bytes_received_};

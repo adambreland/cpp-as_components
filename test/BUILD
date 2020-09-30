@@ -40,8 +40,9 @@ cc_library(
 cc_test(
     name       = "fcgi_si_testing_utilities_test",
     deps       = [
-        "//test:fcgi_si_testing_utilities",
         "//:fcgi_si_utilities",
+        "//test:fcgi_si_testing_utilities",
+        "//test:test_fcgi_client_interface",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],

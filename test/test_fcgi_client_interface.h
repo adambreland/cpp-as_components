@@ -52,7 +52,7 @@ class ServerEvent
 {
  public:
   virtual fcgi_si::RequestIdentifier RequestId() const = 0;
-  virtual ~ServerEvent();
+  virtual ~ServerEvent() = default;
 };
 
 class ConnectionClosure : public ServerEvent
@@ -390,6 +390,7 @@ class TestFcgiClientInterface
   //          length limit including the terminating null byte of 92 bytes is
   //          enforced.
   // port:    The port to be used with an IPv4 or IPv6 address.
+  //          The port value must be in NETWORK byte order.
   //
   // Preconditions: none
   //
@@ -408,7 +409,7 @@ class TestFcgiClientInterface
   //       were not released by a call to ReleaseId, those requests continue
   //       to be active.
   // 3) EINTR was ignored during the invocation.
-  int Connect(const char* address, std::uint16_t port);
+  int Connect(const char* address, in_port_t network_port);
 
   inline int ConnectionCount() const noexcept
   {
@@ -419,8 +420,6 @@ class TestFcgiClientInterface
   {
     return !(micro_event_queue_.empty());
   }
-
-  std::unique_ptr<ServerEvent> RetrieveServerEvent();
 
   // Attempts to release the FastCGI request identifier of id when id refers
   // to a request which is completed and unreleased.
@@ -465,6 +464,8 @@ class TestFcgiClientInterface
   // 2) If true was returned, then all completed but unreleased requests which
   //    were associated with connection were released.
   bool ReleaseId(int connection);
+
+  std::unique_ptr<ServerEvent> RetrieveServerEvent();
 
   // Attempts to send a FastCGI request abort record for id.Fcgi_id() on
   // id.descriptor() when id refers to a pending FastCGI request.
