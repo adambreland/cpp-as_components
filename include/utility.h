@@ -348,6 +348,13 @@ void PopulateHeader(std::uint8_t* byte_ptr, fcgi_si::FcgiType type,
 //    character encoding of the argument is returned.
 std::vector<uint8_t> ToUnsignedCharacterVector(int c);
 
+namespace partition_byte_sequence_internal {
+std::size_t InitializeMaxForIovec();
+std::size_t NeededIovec(std::size_t m);
+ssize_t     NeededSsize_t(std::size_t m);
+std::size_t NeededLocalData(std::size_t m);
+} // namespace partition_byte_sequence_internal
+
 } // namespace fcgi_si
 
 #include "include/utility_templates.h"

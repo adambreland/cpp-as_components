@@ -130,4 +130,54 @@ std::vector<uint8_t> ToUnsignedCharacterVector(int c)
   return c_vector;
 }
 
+namespace partition_byte_sequence_internal {
+
+std::size_t InitializeMaxForIovec()
+{
+  long lm {fcgi_si::iovec_MAX};
+  std::size_t i_max {(lm > 0) ?
+    static_cast<std::size_t>(lm) :
+    1024U
+  };
+  i_max = std::min<std::size_t>(i_max, std::numeric_limits<int>::max());
+  std::size_t i_inter {(i_max - 1)/2};
+  if(i_inter >
+      (std::numeric_limits<std::size_t>::max()/max_aligned_content_length))
+  {
+    return std::numeric_limits<std::size_t>::max();
+  }
+  else
+  {
+    return i_inter*max_aligned_content_length;
+  }
+}
+
+std::size_t NeededIovec(std::size_t m) 
+{
+  return
+    (2U*CeilingOfQuotient(m,
+      static_cast<std::size_t>(max_aligned_content_length))) +
+    static_cast<std::size_t>((m % 8U) > 0U);
+}
+
+ssize_t NeededSsize_t(std::size_t m)
+{
+  return
+    static_cast<ssize_t>(
+      m +
+      (8U*CeilingOfQuotient(m,
+        static_cast<std::size_t>(max_aligned_content_length))) +
+      ((8U - (m % 8U)) % 8U)
+    );
+}
+
+std::size_t NeededLocalData(std::size_t m)
+{
+  return
+    8U*(1U + CeilingOfQuotient(m, static_cast<std::size_t>(
+      max_aligned_content_length)));
+}
+
+} // namespace partition_byte_sequence_internal
+
 } // namspace fcgi_si

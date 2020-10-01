@@ -347,6 +347,42 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
   );
 }
 
+namespace partition_byte_sequence_internal {
+   // The content length of a record should be a multiple of 8 whenever possible.
+  // kMaxRecordContentByteLength = 2^16 - 1
+  // (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
+  constexpr uint16_t max_aligned_content_length
+    {kMaxRecordContentByteLength - 7};
+  // The maximum number of bytes that can be written in one call to writev.
+  constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
+
+  inline constexpr std::size_t CeilingOfQuotient(std::size_t numerator,
+    std::size_t denominator) 
+  {
+    return ((numerator/denominator) +
+            (static_cast<std::size_t>((numerator % denominator) > 0U)));
+  }
+
+  inline constexpr std::size_t InitializeMaxForSsize_t()
+  {
+    constexpr std::size_t macl {static_cast<std::size_t>(
+                                  max_aligned_content_length)};
+    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(
+                                         ssize_t_MAX)/8U)};
+    constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
+    return (inter_1 - (8U*inter_2));
+  }
+
+  constexpr std::size_t max_for_ssize_t     {InitializeMaxForSsize_t()};
+  const     std::size_t max_for_iovec       {InitializeMaxForIovec()};
+  const     std::size_t min_max             {std::min<std::size_t>(
+    partition_byte_sequence_internal::max_for_ssize_t,
+    max_for_iovec
+  )};
+  const     ssize_t     working_ssize_t_max {NeededSsize_t(min_max)};
+  const     std::size_t working_iovec_max   {NeededIovec(min_max)};
+} // partition_byte_sequence_internal
+
 template<typename ByteIter>
 std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t, 
   ByteIter>
@@ -359,97 +395,9 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     "A call to PartitionByteSequence<ByteIter> used an iterator type which did "
     "not iterate over data in units of bytes.");
 
+  // Disallow unusually small ssize_t.
   static_assert(std::numeric_limits<ssize_t>::max() >=
                 std::numeric_limits<std::uint16_t>::max());
-
-              // Initialize constexpr and const variables.
-
-  // The content length of a record should be a multiple of 8 whenever possible.
-  // kMaxRecordContentByteLength = 2^16 - 1
-  // (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
-  constexpr uint16_t max_aligned_content_length
-    {kMaxRecordContentByteLength - 7};
-
-  // The maximum number of bytes that can be written in one call to writev.
-  constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
-
-  auto CeilingOfQuotient =
-  [](std::size_t numerator, std::size_t denominator) constexpr -> std::size_t
-  {
-    return ((numerator/denominator) +
-            (static_cast<std::size_t>((numerator % denominator) > 0U)));
-  };
-
-  auto InitializeMaxForSsize_t =
-  [&max_aligned_content_length, &ssize_t_MAX, &CeilingOfQuotient]
-  () constexpr -> std::size_t
-  {
-    constexpr std::size_t macl {static_cast<std::size_t>(
-                                  max_aligned_content_length)};
-    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(
-                                         ssize_t_MAX)/8U)};
-    constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
-    return (inter_1 - (8U*inter_2));
-  };
-
-  auto InitializeMaxForIovec = [&max_aligned_content_length]() -> std::size_t
-  {
-    long lm {fcgi_si::iovec_MAX};
-    std::size_t i_max {(lm > 0) ?
-      static_cast<std::size_t>(lm) :
-      1024U
-    };
-    i_max = std::min<std::size_t>(i_max, std::numeric_limits<int>::max());
-    std::size_t i_inter {(i_max - 1)/2};
-    if(i_inter >
-       (std::numeric_limits<std::size_t>::max()/max_aligned_content_length))
-    {
-      return std::numeric_limits<std::size_t>::max();
-    }
-    else
-    {
-      return i_inter*max_aligned_content_length;
-    }
-  };
-
-  auto NeededIovec =
-  [&max_aligned_content_length, &CeilingOfQuotient]
-  (std::size_t m) constexpr -> std::size_t
-  {
-    return
-      (2U*CeilingOfQuotient(m,
-        static_cast<std::size_t>(max_aligned_content_length))) +
-      static_cast<std::size_t>((m % 8U) > 0U);
-  };
-
-  auto NeededSsize_t =
-  [&max_aligned_content_length, &CeilingOfQuotient]
-  (std::size_t m) constexpr -> ssize_t
-  {
-    return
-      static_cast<ssize_t>(
-        m +
-        (8U*CeilingOfQuotient(m,
-          static_cast<std::size_t>(max_aligned_content_length))) +
-        ((8U - (m % 8U)) % 8U)
-      );
-  };
-
-  auto NeededLocalData =
-  [&max_aligned_content_length, &CeilingOfQuotient]
-  (std::size_t m) constexpr -> std::size_t
-  {
-    return
-      8U*(1U + CeilingOfQuotient(m, static_cast<std::size_t>(
-        max_aligned_content_length)));
-  };
-
-  constexpr std::size_t max_for_ssize_t {InitializeMaxForSsize_t()};
-  static const std::size_t max_for_iovec {InitializeMaxForIovec()};
-  static const std::size_t min_max {std::min<std::size_t>(max_for_ssize_t,
-    max_for_iovec)};
-  static const ssize_t working_ssize_t_max {NeededSsize_t(min_max)};
-  static const std::size_t working_iovec_max {NeededIovec(min_max)};
 
                       // Begin processing input.
 
@@ -457,7 +405,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
   // Check that ptrdiff_t can to hold the byte length.
   static_assert(
     std::numeric_limits<decltype(std::distance(begin_iter, end_iter))>::max() <= 
-    std::numeric_limits<std::ptrdiff_t>::max());
+    std::numeric_limits<std::ptrdiff_t>::max()
+  );
   std::ptrdiff_t s_byte_length {std::distance(begin_iter, end_iter)};
   if(s_byte_length < 0)
   {
@@ -466,16 +415,21 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
       "a call to fcgi_si::PartitionByteSequence."};
   }
   std::size_t byte_length   {static_cast<std::size_t>(s_byte_length)};
-  ssize_t working_ssize_t   {working_ssize_t_max};
-  std::size_t working_iovec {working_iovec_max};
-  std::size_t bytes_remaining {min_max};
-  if(byte_length < min_max)
+  ssize_t working_ssize_t
+    {partition_byte_sequence_internal::working_ssize_t_max};
+  std::size_t working_iovec
+    {partition_byte_sequence_internal::working_iovec_max};
+  std::size_t bytes_remaining {partition_byte_sequence_internal::min_max};
+  if(byte_length < bytes_remaining)
   {
     bytes_remaining = byte_length;
-    working_ssize_t = NeededSsize_t(byte_length);
-    working_iovec   = NeededIovec(byte_length);
+    working_ssize_t =
+      partition_byte_sequence_internal::NeededSsize_t(byte_length);
+    working_iovec   =
+      partition_byte_sequence_internal::NeededIovec(byte_length);
   }
-  std::size_t local_length {NeededLocalData(bytes_remaining)};
+  std::size_t local_length
+    {partition_byte_sequence_internal::NeededLocalData(bytes_remaining)};
 
   // The first FCGI_HEADER_LEN (8) bytes are zero for padding.
   std::vector<uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
@@ -505,7 +459,8 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
         static_cast<std::uint16_t>(
           std::min<ssize_t>(
             static_cast<ssize_t>(bytes_remaining),
-            static_cast<ssize_t>(max_aligned_content_length)
+            static_cast<ssize_t>(
+              partition_byte_sequence_internal::max_aligned_content_length)
           )
         )
       };

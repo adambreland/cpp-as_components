@@ -1492,98 +1492,60 @@ TEST(Utility, PartitionByteSequence)
   )->void
   {
     // Clear the file.
-    if(ftruncate(temp_descriptor, 0) < 0)
-    {
-      ADD_FAILURE() << "A call to ftruncate failed." << '\n' << message;
-      return;
-    }
+    ASSERT_NE(ftruncate(temp_descriptor, 0), -1);
     off_t lseek_return {lseek(temp_descriptor, 0, SEEK_SET)};
-    if(lseek_return < 0)
-    {
-      ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
-      return;
-    }
+    ASSERT_NE(lseek_return, -1);
 
     // Call PartitionByteSequence and write the encoded record sequence.
-    std::vector<std::uint8_t>::iterator begin_iter {content_seq.begin()};
-    std::vector<std::uint8_t>::difference_type returned_length {0};
+    // The loop continues until all of content_seq is encoded and written.
+    std::vector<std::uint8_t>::iterator loop_iter {content_seq.begin()};
     do
     {
       std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
         std::size_t, std::vector<std::uint8_t>::iterator> pr
-        {fcgi_si::PartitionByteSequence(begin_iter, content_seq.end(), 
+        {fcgi_si::PartitionByteSequence(loop_iter, content_seq.end(), 
         type, Fcgi_id)};
 
       ssize_t writev_return {writev(temp_descriptor, std::get<1>(pr).data(),
         std::get<1>(pr).size())};
-      if((writev_return < 0) || (static_cast<std::size_t>(writev_return) < 
-        std::get<2>(pr)))
-      {
-        ADD_FAILURE() << "A call to writev failed." << '\n' << message;
-        return;
-      }      
-      begin_iter = std::get<3>(pr);
-    } while(begin_iter != content_seq.cend());
+      ASSERT_FALSE((writev_return < 0) ||
+                   (static_cast<std::size_t>(writev_return) < std::get<2>(pr)));
+        
+      loop_iter = std::get<3>(pr);
+    } while(loop_iter != content_seq.cend());
 
     // Extract the content and validate.
-    lseek_return = lseek(temp_descriptor, 0, SEEK_SET);
-    if(lseek_return < 0)
-    {
-      ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
-      return;
-    }
+    ASSERT_NE(lseek_return = lseek(temp_descriptor, 0, SEEK_SET), -1);
     std::tuple<bool, bool, bool, bool, std::size_t, std::vector<uint8_t>> ecr
       {fcgi_si_test::ExtractContent(temp_descriptor, type, Fcgi_id)};
-    if(!std::get<0>(ecr))
-    {
-      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered "
-        "an error." << '\n' << message;
-      return;
-    }
-    if(!std::get<1>(ecr))
-    {      
-      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent determined that "
-        "a header error was present or an incomplete record was present." << 
-        '\n' << message;
-      return;
-    }
-    if(( std::get<2>(ecr) && !expect_terminal_empty_record) || 
-       (!std::get<2>(ecr) &&  expect_terminal_empty_record))
-    {
-      ADD_FAILURE() << "A terminal empty record mismatch was present." << 
-        '\n' << message;
-      return;
-    }
+    ASSERT_TRUE(std::get<0>(ecr)) <<
+      "A call to fcgi_si_test::ExtractContent encountered an error." << '\n' 
+        << message;
+    ASSERT_TRUE(std::get<1>(ecr)) <<
+      "A call to fcgi_si_test::ExtractContent determined that "
+      "a header error was present or an incomplete record was present."
+        <<  '\n' << message;
+    ASSERT_FALSE(( std::get<2>(ecr) && !expect_terminal_empty_record)   || 
+                 (!std::get<2>(ecr) &&  expect_terminal_empty_record)) <<
+      "A terminal empty record mismatch was present." << '\n' << message;
+
     // std::get<3>(ecr) tests record alignment on 8-byte boundaries.
     // Such alignment is not specified by PartitionByteSequence.
 
-    // std::get<4>(ecr) examines the number of records. This is not currently
-    // specified by PartitionByteSequence.
+    // std::get<4>(ecr) examines the number of records. As even empty content
+    // sequences should cause a header to be written, this value should always
+    // be larger than zero.
+    ASSERT_GT(std::get<4>(ecr), 0U);
 
-    // This check ensures that PartitionByteSequence encodes some content
-    // when content is given. The next check does not verify this property.
-    if(content_seq.size() && (!std::get<5>(ecr).size()))
-    {
-      ADD_FAILURE() << "PartitionByteSequence caused nothing to be written " 
-        "when content was present." << '\n' << message;
-      return;
-    }
-    // // Check for equality of the extracted byte sequence and the prefix of the
-    // // content sequence indicated by the information returned by
-    // // PartitionByteSequence.
-    // if((returned_length > content_seq.size())       ||
-    //    (returned_length != std::get<4>(ecr).size()) ||
-    //    (std::mismatch(content_seq.begin(), std::get<3>(pr), 
-    //                   std::get<4>(ecr).begin())
-    //     != std::make_pair(std::get<3>(pr), 
-    //                       std::get<4>(ecr).begin() + returned_length)))
-    // {
-    //   ADD_FAILURE() << "The extracted byte sequence did not match the prefix." 
-    //     << '\n' << message;
-    //   return;
-    // }
-
-    return;
+    // Check for equality of the extracted byte sequence and content_seq.
+    std::pair<std::vector<std::uint8_t>::iterator,
+      std::vector<std::uint8_t>::iterator> expected_mismatch
+      {content_seq.end(), std::get<5>(ecr).end()};
+    ASSERT_TRUE((content_seq.size() == std::get<5>(ecr).size()) &&
+      (std::mismatch(content_seq.begin(), content_seq.end(),
+       std::get<5>(ecr).begin()) == expected_mismatch)) << 
+       "The extracted byte sequence did not match the encoded argument." 
+        << '\n' << message;
   };
 
   // Case 1: begin_iter == end_iter, 
