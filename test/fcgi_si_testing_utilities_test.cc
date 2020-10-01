@@ -84,13 +84,13 @@ TEST(Utility, ExtractContent)
   // Create a temporary file for use during this test.
   // BAZEL DEPENDENCY
   int temp_fd {};
-  fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+  fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_fd);
 
   // Case 1: Small file descriptor value, a single header with zero content
   // length and no padding.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
     
     std::uint8_t local_header[fcgi_si::FCGI_HEADER_LEN];
@@ -138,7 +138,7 @@ TEST(Utility, ExtractContent)
   // length, no padding, and no terminal empty record.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
     
     // Populate an FCGI_BEGIN_REQUEST record.
@@ -190,7 +190,7 @@ TEST(Utility, ExtractContent)
   // Case 3: As in 2, but with an unaligned record.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
     
     // Populate an FCGI_BEGIN_REQUEST record.
@@ -244,7 +244,7 @@ TEST(Utility, ExtractContent)
   // Case 4: As in 2, but with padding. (Regular discrete record.)
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
     
     std::uint8_t record[2*fcgi_si::FCGI_HEADER_LEN];
@@ -298,7 +298,7 @@ TEST(Utility, ExtractContent)
   // stream.)
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[3*fcgi_si::FCGI_HEADER_LEN];
@@ -354,7 +354,7 @@ TEST(Utility, ExtractContent)
   // terminated.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
     
     std::uint8_t record[6*fcgi_si::FCGI_HEADER_LEN];
@@ -421,7 +421,7 @@ TEST(Utility, ExtractContent)
   // Case 7: As in 5, but terminated. (A typical, multi-record stream sequence.)
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
@@ -508,7 +508,7 @@ TEST(Utility, ExtractContent)
   // Case 9: As in 6, but with a header type error in the middle.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
@@ -578,7 +578,7 @@ TEST(Utility, ExtractContent)
   // middle.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
@@ -648,7 +648,7 @@ TEST(Utility, ExtractContent)
   // no more data. (An incomplete record.) A small file descriptor value.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[fcgi_si::FCGI_HEADER_LEN];
@@ -696,7 +696,7 @@ TEST(Utility, ExtractContent)
   // with a non-zero content length and padding but no more data.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN];
@@ -767,7 +767,7 @@ TEST(Utility, ExtractContent)
   // that is not complete.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[6*fcgi_si::FCGI_HEADER_LEN + 3];
@@ -841,7 +841,7 @@ TEST(Utility, ExtractContent)
   // additional data is present.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 1];
@@ -913,7 +913,7 @@ TEST(Utility, ExtractContent)
   // data is present.
   do
   {
-    if(!fcgi_si_test::PrepareTemporaryFile(temp_fd))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
       break;
 
     std::uint8_t record[7*fcgi_si::FCGI_HEADER_LEN + 5];

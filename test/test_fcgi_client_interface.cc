@@ -845,11 +845,10 @@ TestFcgiClientInterface::ProcessCompleteRecord(
   ConnectionState* state_ptr {&(connection_iter->second)};
   if(state_ptr->record_state.invalidated)
   {
-    std::unique_ptr<ServerEvent> new_event {new InvalidRecord {}};
+    std::unique_ptr<InvalidRecord> new_event {new InvalidRecord {}};
     micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
     std::unique_ptr<ServerEvent>* back_ptr {nullptr};
     TryToAssignLastQueueItemPointer(&back_ptr);
-
     *new_event = InvalidRecord
     {
       state_ptr->record_state.header[fcgi_si::kHeaderVersionIndex],
@@ -858,7 +857,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
       std::move(state_ptr->record_state.local_buffer),
       state_ptr->record_state.padding_bytes_expected
     };
-    *back_ptr = std::move(new_event);
+    *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
   }
   else
   {
@@ -876,8 +875,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         // Extract the protocol status.
         ++data_ptr;
         std::uint8_t local_protocol_status {*data_ptr};
-
-        std::unique_ptr<ServerEvent> new_event {new FcgiResponse {}};
+        std::unique_ptr<FcgiResponse> new_event {new FcgiResponse {}};
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
         TryToAssignLastQueueItemPointer(&back_ptr);
@@ -887,7 +885,6 @@ TestFcgiClientInterface::ProcessCompleteRecord(
             "completed request tracking set when it should not have been "
             "in a call to TestFcgiClientInterface::RetrieveServerEvent."};
         }
-        
         *new_event = FcgiResponse
         {
           local_app_status,
@@ -897,7 +894,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
           pending_iter->second.request,
           pending_iter->first
         };
-        *back_ptr = std::move(new_event);
+        *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
         pending_request_map_.erase(pending_iter);
         // The previous call invalidated pending iter. It must be brought to a
         // valid state.
@@ -963,37 +960,34 @@ TestFcgiClientInterface::ProcessCompleteRecord(
             }
           }
         }
-        std::unique_ptr<ServerEvent> new_event {new GetValuesResult {}};
+        std::unique_ptr<GetValuesResult> new_event {new GetValuesResult {}};
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
         TryToAssignLastQueueItemPointer(&back_ptr);
-
-        // Don't slice!
-        *(dynamic_cast<GetValuesResult*>(new_event.get())) = GetValuesResult
+        *new_event = GetValuesResult
         {
           (local_buffer_size) ? params_error : false,
           {connection_iter->first, 0U},
           std::move(state_ptr->management_queue.front().params_map),
           std::move(params_result)
         };
-        *back_ptr = std::move(new_event);
+        *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
         // Assumes that pop_front is effectively noexcept.
         state_ptr->management_queue.pop_front();
         break;
       }
       case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE : {
-        std::unique_ptr<ServerEvent> new_event {new UnknownType {}};
+        std::unique_ptr<UnknownType> new_event {new UnknownType {}};
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
         TryToAssignLastQueueItemPointer(&back_ptr);
-
         *new_event = UnknownType
         {
           {connection_iter->first, 0U},
           state_ptr->record_state.local_buffer[0],
           std::move(state_ptr->management_queue.front())
         };
-        *back_ptr = std::move(new_event);
+        *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
         // Assumes that pop_front is effectively noexcept.
         state_ptr->management_queue.pop_front();
         break;

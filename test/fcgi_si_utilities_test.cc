@@ -55,97 +55,97 @@ TEST(Utility, EncodeFourByteLength)
 
   // Case 1: Random value: 2,128,547
   fcgi_si::EncodeFourByteLength(2128547, header_array);
-  EXPECT_EQ(128, header_array[0]);
-  EXPECT_EQ(32, header_array[1]);
-  EXPECT_EQ(122, header_array[2]);
-  EXPECT_EQ(163, header_array[3]);
+  EXPECT_EQ(128U, header_array[0]);
+  EXPECT_EQ(32U, header_array[1]);
+  EXPECT_EQ(122U, header_array[2]);
+  EXPECT_EQ(163U, header_array[3]);
 
   // Case 2: Random value with back_insert_iterator.
   std::vector<uint8_t> byte_seq {};
   fcgi_si::EncodeFourByteLength(2128547, std::back_inserter(byte_seq));
-  EXPECT_EQ(128, byte_seq[0]);
-  EXPECT_EQ(32, byte_seq[1]);
-  EXPECT_EQ(122, byte_seq[2]);
-  EXPECT_EQ(163, byte_seq[3]);
+  EXPECT_EQ(128U, byte_seq[0]);
+  EXPECT_EQ(32U, byte_seq[1]);
+  EXPECT_EQ(122U, byte_seq[2]);
+  EXPECT_EQ(163U, byte_seq[3]);
 
   // Case 3: Minimum value, 128.
   fcgi_si::EncodeFourByteLength(128, header_array);
-  EXPECT_EQ(128, header_array[0]);
-  EXPECT_EQ(0, header_array[1]);
-  EXPECT_EQ(0, header_array[2]);
-  EXPECT_EQ(128, header_array[3]);
+  EXPECT_EQ(128U, header_array[0]);
+  EXPECT_EQ(0U, header_array[1]);
+  EXPECT_EQ(0U, header_array[2]);
+  EXPECT_EQ(128U, header_array[3]);
 
   if(sizeof(unsigned char) == sizeof(uint8_t))
   {
     fcgi_si::EncodeFourByteLength(128, char_header_array);
-    EXPECT_EQ(128, char_header_array[0]);
-    EXPECT_EQ(0, char_header_array[1]);
-    EXPECT_EQ(0, char_header_array[2]);
-    EXPECT_EQ(128, char_header_array[3]);
+    EXPECT_EQ(128U, char_header_array[0]);
+    EXPECT_EQ(0U, char_header_array[1]);
+    EXPECT_EQ(0U, char_header_array[2]);
+    EXPECT_EQ(128U, char_header_array[3]);
   }
 
   // Case 4: Requires two bytes.
   fcgi_si::EncodeFourByteLength(256, header_array);
-  EXPECT_EQ(128, header_array[0]);
-  EXPECT_EQ(0, header_array[1]);
-  EXPECT_EQ(1, header_array[2]);
-  EXPECT_EQ(0, header_array[3]);
+  EXPECT_EQ(128U, header_array[0]);
+  EXPECT_EQ(0U, header_array[1]);
+  EXPECT_EQ(1U, header_array[2]);
+  EXPECT_EQ(0U, header_array[3]);
 
   if(sizeof(unsigned char) == sizeof(uint8_t))
   {
     fcgi_si::EncodeFourByteLength(256, char_header_array);
-    EXPECT_EQ(128, char_header_array[0]);
-    EXPECT_EQ(0, char_header_array[1]);
-    EXPECT_EQ(1, char_header_array[2]);
-    EXPECT_EQ(0, char_header_array[3]);
+    EXPECT_EQ(128U, char_header_array[0]);
+    EXPECT_EQ(0U, char_header_array[1]);
+    EXPECT_EQ(1U, char_header_array[2]);
+    EXPECT_EQ(0U, char_header_array[3]);
   }
 
   // Case 5: Requires three bytes.
   fcgi_si::EncodeFourByteLength(1UL << 16, header_array);
-  EXPECT_EQ(128, header_array[0]);
-  EXPECT_EQ(1, header_array[1]);
-  EXPECT_EQ(0, header_array[2]);
-  EXPECT_EQ(0, header_array[3]);
+  EXPECT_EQ(128U, header_array[0]);
+  EXPECT_EQ(1U, header_array[1]);
+  EXPECT_EQ(0U, header_array[2]);
+  EXPECT_EQ(0U, header_array[3]);
 
   if(sizeof(unsigned char) == sizeof(uint8_t))
   {
     fcgi_si::EncodeFourByteLength(1UL << 16, char_header_array);
-    EXPECT_EQ(128, char_header_array[0]);
-    EXPECT_EQ(1, char_header_array[1]);
-    EXPECT_EQ(0, char_header_array[2]);
-    EXPECT_EQ(0, char_header_array[3]);
+    EXPECT_EQ(128U, char_header_array[0]);
+    EXPECT_EQ(1U, char_header_array[1]);
+    EXPECT_EQ(0U, char_header_array[2]);
+    EXPECT_EQ(0U, char_header_array[3]);
   }
 
   // Case 6: Maximum value less one.
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1 - 1, header_array);
-  EXPECT_EQ(255, header_array[0]);
-  EXPECT_EQ(255, header_array[1]);
-  EXPECT_EQ(255, header_array[2]);
-  EXPECT_EQ(254, header_array[3]);
+  EXPECT_EQ(255U, header_array[0]);
+  EXPECT_EQ(255U, header_array[1]);
+  EXPECT_EQ(255U, header_array[2]);
+  EXPECT_EQ(254U, header_array[3]);
 
   if(sizeof(unsigned char) == sizeof(uint8_t))
   {
     fcgi_si::EncodeFourByteLength((1UL << 31) - 1 - 1, char_header_array);
-    EXPECT_EQ(255, char_header_array[0]);
-    EXPECT_EQ(255, char_header_array[1]);
-    EXPECT_EQ(255, char_header_array[2]);
-    EXPECT_EQ(254, char_header_array[3]);
+    EXPECT_EQ(255U, char_header_array[0]);
+    EXPECT_EQ(255U, char_header_array[1]);
+    EXPECT_EQ(255U, char_header_array[2]);
+    EXPECT_EQ(254U, char_header_array[3]);
   }
 
   // Case 7: Maximum value
   fcgi_si::EncodeFourByteLength((1UL << 31) - 1, header_array);
-  EXPECT_EQ(255, header_array[0]);
-  EXPECT_EQ(255, header_array[1]);
-  EXPECT_EQ(255, header_array[2]);
-  EXPECT_EQ(255, header_array[3]);
+  EXPECT_EQ(255U, header_array[0]);
+  EXPECT_EQ(255U, header_array[1]);
+  EXPECT_EQ(255U, header_array[2]);
+  EXPECT_EQ(255U, header_array[3]);
 
   if(sizeof(unsigned char) == sizeof(uint8_t))
   {
     fcgi_si::EncodeFourByteLength((1UL << 31) - 1, char_header_array);
-    EXPECT_EQ(255, char_header_array[0]);
-    EXPECT_EQ(255, char_header_array[1]);
-    EXPECT_EQ(255, char_header_array[2]);
-    EXPECT_EQ(255, char_header_array[3]);
+    EXPECT_EQ(255U, char_header_array[0]);
+    EXPECT_EQ(255U, char_header_array[1]);
+    EXPECT_EQ(255U, char_header_array[2]);
+    EXPECT_EQ(255U, char_header_array[3]);
   }
 
   // Case 8: 1
@@ -186,17 +186,17 @@ TEST(Utility, ExtractFourByteLength)
   // Case 1: Random value.
   fcgi_si::EncodeFourByteLength(2128547, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
-  EXPECT_EQ(2128547, length);
+  EXPECT_EQ(2128547UL, length);
 
   // Case 2: Minimum length.
   fcgi_si::EncodeFourByteLength(128, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
-  EXPECT_EQ(128, length);
+  EXPECT_EQ(128U, length);
 
   // Case 3: Requires two bytes.
   fcgi_si::EncodeFourByteLength(256, seq);
   length = fcgi_si::ExtractFourByteLength(seq);
-  EXPECT_EQ(256, length);
+  EXPECT_EQ(256U, length);
 
   // Case 4: Requires three bytes.
   fcgi_si::EncodeFourByteLength(1UL << 16, seq);
@@ -743,7 +743,7 @@ TEST(Utility, EncodeNameValuePairs)
   };
 
   int temp_fd {};
-  fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+  fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_fd);
 
   // A lambda function which takes parameters which define a test case and
   // goes through the testing procedure described in the testing explanation.
@@ -800,7 +800,7 @@ TEST(Utility, EncodeNameValuePairs)
     }
 
     // Prepare the temporary file.
-    bool prepared {fcgi_si_test::PrepareTemporaryFile(temp_fd)};
+    bool prepared {fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd)};
     if(!prepared)
       FAIL() << "A temporary file could not be prepared.";
 
@@ -808,7 +808,8 @@ TEST(Utility, EncodeNameValuePairs)
     while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
       std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
       continue;
-    if(write_return != total_to_write)
+    if((write_return < 0) ||
+       (static_cast<std::size_t>(write_return) != total_to_write))
     {
       ADD_FAILURE() << "A call to writev did not write all bytes requested."
       << '\n' << message;
@@ -866,11 +867,11 @@ TEST(Utility, EncodeNameValuePairs)
     auto result {fcgi_si::EncodeNameValuePairs(empty.begin(), empty.end(),
       fcgi_si::FcgiType::kFCGI_PARAMS, 1, 0)};
     EXPECT_TRUE(std::get<0>(result));
-    EXPECT_EQ(std::get<1>(result), 0);
+    EXPECT_EQ(std::get<1>(result), 0U);
     EXPECT_TRUE(IovecVectorEquality(std::get<2>(result), std::vector<iovec> {}));
     EXPECT_EQ(std::get<3>(result), 0);
     EXPECT_EQ(std::get<4>(result), std::vector<uint8_t> {});
-    EXPECT_EQ(std::get<5>(result), 0);
+    EXPECT_EQ(std::get<5>(result), 0U);
     EXPECT_EQ(std::get<6>(result), empty.end());
   }
 
@@ -1237,7 +1238,7 @@ TEST(Utility, EncodeNameValuePairs)
       std::vector<NameValuePair> many_pairs(iovec_max + 10, copied_pair);
       std::size_t offset {0};
       
-      bool prepared {fcgi_si_test::PrepareTemporaryFile(temp_fd)};
+      bool prepared {fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd)};
       if(!prepared)
         FAIL() << "A temporary file could not be prepared.";
 
@@ -1257,10 +1258,12 @@ TEST(Utility, EncodeNameValuePairs)
           break;
         }
         total_records += std::get<3>(encoded_result);
-        while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
-          std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+        while(((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
+          std::get<2>(encoded_result).size())) == -1) && (errno == EINTR))
           continue;
-        if(write_return != std::get<1>(encoded_result))
+        if((write_return < 0) ||
+           (static_cast<std::size_t>(write_return) !=
+            std::get<1>(encoded_result)))
         {
           ADD_FAILURE() << "A call to writev did not write all bytes requested.";
           terminal_error = true;
@@ -1394,10 +1397,12 @@ TEST(Utility, ToUnsignedCharacterVector)
 
   // Case 1
   if(test_extremes)
+  {
     EXPECT_THROW(
       (fcgi_si::ToUnsignedCharacterVector(std::numeric_limits<int>::min())),
       std::invalid_argument
-    );  
+    );
+  }
   // Case 2
   EXPECT_THROW(fcgi_si::ToUnsignedCharacterVector(-200), std::invalid_argument);
   // Case 3
@@ -1413,10 +1418,12 @@ TEST(Utility, ToUnsignedCharacterVector)
     (std::vector<uint8_t> {'1','0','0'}));
   // Case 7
   if(test_extremes)
+  {
     EXPECT_EQ(
       fcgi_si::ToUnsignedCharacterVector(std::numeric_limits<int>::max()),
       (std::vector<uint8_t> {'2','1','4','7','4','8','3','6','4','7'})
     );
+  }
 }
 
 TEST(Utility, PartitionByteSequence)
@@ -1474,7 +1481,7 @@ TEST(Utility, PartitionByteSequence)
 
   // BAZEL DEPENDENCY
   int temp_descriptor {};
-  fcgi_si_test::CreateBazelTemporaryFile(&temp_descriptor);
+  fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_descriptor);
   
   auto PartitionByteSequenceTester = [temp_descriptor](
     const std::string& message,

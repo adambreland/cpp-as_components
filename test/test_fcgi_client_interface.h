@@ -2,6 +2,7 @@
 #define FCGI_SERVER_INTERFACE_TEST_TEST_FCGI_CLIENT_INTERFACE_H_
 
 #include <sys/select.h>
+#include <netinet/in.h>
 #include <sys/uio.h>
 
 #include <cstdlib>

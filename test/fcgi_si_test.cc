@@ -33,508 +33,9 @@
 #include "test/fcgi_si_testing_utilities.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "test/test_fcgi_client_interface.h"
-
 // Key:
 // BAZEL DEPENDENCY   Used to mark the use of a feature which is provided
 //                    by the Bazel testing environment. 
-
-// Utility functions and classes for interface tests.
-
-namespace {
-
-std::string CaseSuffix(int test_case)
-{
-  std::string case_suffix {" case "};
-  case_suffix += std::to_string(test_case);
-  case_suffix += ".";
-  return case_suffix;
-}
-
-void GTestFatalSetSignalDisposition(int sig, void (*handler)(int))
-{
-  sigset_t sigset {};
-  if(sigemptyset(&sigset) == -1)
-  {
-    FAIL() << "A call to sigempty set from a call to "
-      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
-  }
-  struct sigaction sa {};
-  sa.sa_handler = handler;
-  sa.sa_mask    = sigset;
-  sa.sa_flags   = 0;
-  if(sigaction(sig, &sa, nullptr) == -1)
-  {
-    FAIL() << "A call to sigaction from a call to "
-      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
-  }
-  return;
-}
-
-void GTestFatalIgnoreSignal(int sig)
-{
-  return GTestFatalSetSignalDisposition(sig, SIG_IGN);
-}
-
-void GTestFatalRestoreSignal(int sig)
-{
-  return GTestFatalSetSignalDisposition(sig, SIG_DFL);
-}
-
-void GTestCheckAndReportDescriptorLeaks(
-  fcgi_si_test::FileDescriptorLeakChecker* fdlc_ptr, 
-  const std::string& test_name)
-{
-  std::pair<fcgi_si_test::FileDescriptorLeakChecker::const_iterator, 
-    fcgi_si_test::FileDescriptorLeakChecker::const_iterator> iter_pair 
-    {fdlc_ptr->Check()};
-  if(iter_pair.first != iter_pair.second)
-  {
-    std::string message {"File descriptors were leaked in "};
-    (message += test_name) += ": ";
-    for(/*no-op*/; iter_pair.first != iter_pair.second; ++(iter_pair.first))
-    {
-      (message += std::to_string(*(iter_pair.first))) += " ";
-    } 
-    ADD_FAILURE() << message;
-  }
-}
-
-// CreateInterface
-// Creates a listening socket for an interface, and constructs an interface
-// instance on the heap. Access is provided by a returned unique_ptr to the
-// interface. The provided domain is used when the listening socket is created.
-//
-// Preconditions:
-// 1) If domain == AF_UNIX, the length of the string pointed to by unix_path
-//    including the terminating null byte must be less than or equal to the
-//    path length limit of UNIX sockets.
-//
-// Exceptions:
-// 1) Throws any exceptions thrown by the constructor of
-//    fcgi_si::FcgiServerInterface. 
-//    a) The interface socket file descriptor was closed.
-//    b) The pointer to the interface is null.
-// 2) Throws std::system_error if a file for a UNIX socket was created and it
-//    could not be removed when creation was unsuccessful.
-//
-// Resource allocation and caller responsibilities:
-// 1) On return a listening socket was created. This socket should be closed
-//    when the interface instance is no longer needed to prevent a file
-//    descriptor leak.
-// 2) If domain == AF_UNIX, on return a socket file given by the path string
-//    pointed to by unix_path is present. This file should be removed from the
-//    file system when the interface is no longer needed.
-//
-// Effects:
-// 1) If creation was successful:
-//    a) std::get<0> accesses a unique_ptr which points to the interface.
-//    b) std::get<1> accesses the descriptor value of the listening socket of
-//       the interface. 
-//    c) std::get<2> accesses the port of the listening socket of the interface.
-//       The value is in network byte order. When a UNIX domain socket was
-//       created, zero is present.
-//    d) For the internet domains, the listening socket is bound to the default
-//       address and an ephemeral port.
-// 2) If creation was not successful, the unique_ptr accessed by 
-//    std::get<0> holds nullptr. If a socket was created, its descriptor
-//    was closed. If a socket file was created, it was removed.
-struct InterfaceCreationArguments
-{
-  int domain;
-  int backlog;
-  int max_connections;
-  int max_requests;
-  int app_status;
-  const char* unix_path;
-};
-
-std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
-CreateInterface(const struct InterfaceCreationArguments& args)
-{
-  std::unique_ptr<fcgi_si::FcgiServerInterface> interface_uptr {};
-  if((args.domain == AF_UNIX) && !args.unix_path)
-    return std::make_tuple(std::move(interface_uptr), -1, 0U);
-  int socket_fd {socket(args.domain, SOCK_STREAM, 0)};
-  bool unix_socket_bound {false};
-
-  auto CleanupForFailure = [&interface_uptr, &unix_socket_bound, socket_fd, 
-    &args]
-    (std::string message, int errno_value)->
-      std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
-  {
-    if(errno_value)
-      ADD_FAILURE() << message << '\n' << std::strerror(errno_value);
-    else
-      ADD_FAILURE() << message;
-
-    if(socket_fd != -1)
-      close(socket_fd);
-    if(unix_socket_bound)
-    {
-      if(unlink(args.unix_path) == -1)
-      {
-        ADD_FAILURE() << "The UNIX socket created by a call to CreateInterface "
-          "could not be removed during cleanup.";
-        std::error_code ec {errno, std::system_category()};
-        throw std::system_error {ec, "unlink"};
-      }
-    }
-    return std::make_tuple(std::move(interface_uptr), socket_fd, 0U);
-  };
-
-  if(socket_fd < 0)
-    return CleanupForFailure("A call to socket failed.", errno);
-  if(args.domain == AF_UNIX)
-  {
-    struct sockaddr_un AF_UNIX_addr {};
-    AF_UNIX_addr.sun_family = AF_UNIX;
-    std::strcpy(AF_UNIX_addr.sun_path, args.unix_path);
-    if(bind(socket_fd, 
-      static_cast<struct sockaddr*>(static_cast<void*>(&AF_UNIX_addr)),
-      sizeof(AF_UNIX_addr)) == -1)
-      return CleanupForFailure("A call to bind for a UNIX socket failed.",
-        errno);
-    unix_socket_bound = true;
-  }  
-
-  if(listen(socket_fd, args.backlog) < 0)
-    return CleanupForFailure("A call to listen failed.", errno);
-
-  // Generic state to be used to extract the address of the listening
-  // socket when an internet domain is used.
-  struct sockaddr* address_ptr {nullptr};
-  socklen_t*       length_ptr  {nullptr};
-  
-  // State for internet domain sockets.
-  // AF_INET
-  struct sockaddr_in AF_INET_addr {};
-  socklen_t AF_INET_socklen {sizeof(AF_INET_addr)};
-
-  // AF_INET6
-  struct sockaddr_in6 AF_INET6_addr {};
-  socklen_t AF_INET6_socklen {sizeof(AF_INET6_addr)};
-
-  if(args.domain != AF_UNIX)
-  {
-    if((args.domain == AF_INET) || (args.domain == AF_INET6))
-    {
-      if(args.domain == AF_INET)
-      {
-        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
-          &AF_INET_addr));
-        length_ptr = &AF_INET_socklen;
-      }
-      else if(args.domain == AF_INET6)
-      {
-        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
-          &AF_INET6_addr));
-        length_ptr = &AF_INET6_socklen;
-      }
-      if(getsockname(socket_fd, address_ptr, length_ptr) < 0)
-        return CleanupForFailure("A call to getsockname failed.", errno);
-    }
-    else
-      return CleanupForFailure("An invalid domain was given.", 0);
-  }
-
-  try
-  {
-    interface_uptr = std::unique_ptr<fcgi_si::FcgiServerInterface> 
-      {new fcgi_si::FcgiServerInterface {socket_fd, args.max_connections, 
-        args.max_requests, args.app_status}};
-  }
-  catch(...)
-  {
-    CleanupForFailure("interface construction", 0);
-    throw;
-  }
-  
-  return std::make_tuple(
-    std::move(interface_uptr), 
-    socket_fd, 
-    (args.domain == AF_UNIX) ? 
-      0U : 
-      ((args.domain == AF_INET) ? 
-        AF_INET_addr.sin_port :
-        AF_INET6_addr.sin6_port)
-  );
-}
-
-// This class creates an interface with the parameters provided in inter_args.
-// client_number sockets are created and connected to the interface. These
-// sockets are made non-blocking to facilitate testing FcgiServerInterface
-// and related classes using a single process.
-//
-// The client socket descriptors, the interface, and interface information
-// are made available through accessors.
-//
-// All socket descriptors which are associated with an instance are closed
-// by the destructor. If inter_args.domain == AF_UNIX, the socket file is
-// removed by the destructor.
-class SingleProcessInterfaceAndClients
-{
- public:
-  inline fcgi_si::FcgiServerInterface& interface()
-  {
-    return *std::get<0>(inter_tuple_);
-  }
-
-  inline int interface_descriptor()
-  {
-    return std::get<1>(inter_tuple_);
-  }
-
-  inline struct sockaddr* interface_address_ptr()
-  {
-    return interface_addr_ptr_;
-  }
-
-  inline socklen_t interface_address_length()
-  {
-    return socket_addr_length_;
-  }
-
-  inline const std::vector<int>& client_descriptors()
-  {
-    return client_descriptors_;
-  }
-
-  // No copy.
-  SingleProcessInterfaceAndClients() = default;
-  SingleProcessInterfaceAndClients(SingleProcessInterfaceAndClients&&) 
-    = default;
-  SingleProcessInterfaceAndClients(const SingleProcessInterfaceAndClients&)
-    = delete;
-  
-  SingleProcessInterfaceAndClients(
-    struct InterfaceCreationArguments inter_args,  int client_number);
-
-  SingleProcessInterfaceAndClients&
-  operator=(SingleProcessInterfaceAndClients&&) = default;
-
-  SingleProcessInterfaceAndClients&
-  operator=(const SingleProcessInterfaceAndClients&) = delete;
-
-  inline ~SingleProcessInterfaceAndClients()
-  {
-    CleanUp();
-  }
-
- private:
-  void CleanUp();
-
-  struct InterfaceCreationArguments inter_args_;
-  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
-  inter_tuple_;
-  struct sockaddr* interface_addr_ptr_;
-  socklen_t socket_addr_length_;
-  std::vector<int> client_descriptors_; 
-};
-
-void SingleProcessInterfaceAndClients::
-CleanUp()
-{
-  // Cleanup interface state.
-  if(std::get<0>(inter_tuple_))
-  {
-    close(std::get<1>(inter_tuple_));
-    if(inter_args_.domain == AF_UNIX)
-    {
-      if(unlink(inter_args_.unix_path) == -1)
-        ADD_FAILURE() << "A call to unlink encountered an error when " 
-          "destroying an instance of SingleProcessInterfaceAndClients."
-          << '\n' << std::strerror(errno);
-    }
-  }
-  // Cleanup client state.
-  for(int descriptor : client_descriptors_)
-  {
-    if(descriptor >= 0)
-      if(close(descriptor) == -1)
-        ADD_FAILURE() << "A call to close on a client descriptor failed "
-          "when destroying an instance of "
-          "SingleProcessInterfaceAndClients." << '\n' 
-          << std::strerror(errno);
-  }
-}
-
-SingleProcessInterfaceAndClients::
-SingleProcessInterfaceAndClients(
-  struct InterfaceCreationArguments inter_args,  int client_number)
-{
-  inter_args_ = inter_args;
-
-  // Verify interface listening socket parameters.
-  if(!((inter_args_.domain == AF_UNIX)    || 
-       (inter_args_.domain == AF_INET)    ||
-       (inter_args_.domain == AF_INET6)))
-  {
-    ADD_FAILURE() << "Invalid domain argument in a call to "
-      "SingleProcessInterfaceAndClients.";
-    throw std::logic_error {""};
-  }
-  // 92 comes from the lowest known size of sun_path in struct sockaddr_un
-  // across distributions. One is added to the length as a terminating
-  // null byte must be copied as well.
-  if((inter_args_.domain == AF_UNIX) && 
-     ((std::strlen(inter_args.unix_path) + 1) > 92))
-  {
-    ADD_FAILURE() << "The interface path was too long.";
-    throw std::logic_error {""};
-  }
-
-  try
-  {
-    inter_tuple_ = CreateInterface(inter_args_);
-  }
-  catch(const std::exception& e)
-  {
-    ADD_FAILURE() << "A call to CreateInterface threw an exception."
-      << '\n' << e.what();
-    throw e;
-  }
-  if(!std::get<0>(inter_tuple_))
-  {
-    ADD_FAILURE() << "An interface was not constructed by a call to "
-      "CreateInterface when constructing an instance of "
-      "SingleProcessInterfaceAndClients.";
-    throw std::logic_error {""};
-  }
-
-  // Prepare the interface address so a client can connect.
-  struct sockaddr_un AF_UNIX_interface_address {};
-  if(inter_args_.domain == AF_UNIX)
-  {
-    AF_UNIX_interface_address.sun_family = AF_UNIX;
-    std::strcpy(AF_UNIX_interface_address.sun_path, inter_args.unix_path);
-    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
-      &AF_UNIX_interface_address));
-    socket_addr_length_ = sizeof(AF_UNIX_interface_address);
-  }
-
-  struct sockaddr_in AF_INET_interface_address {};
-  if(inter_args_.domain == AF_INET)
-  {
-    AF_INET_interface_address.sin_family      = AF_INET;
-    AF_INET_interface_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    AF_INET_interface_address.sin_port        = std::get<2>(inter_tuple_);
-    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
-      &AF_INET_interface_address));
-    socket_addr_length_ = sizeof(AF_INET_interface_address);
-  }
-
-  struct sockaddr_in6 AF_INET6_interface_address {};
-  if(inter_args_.domain == AF_INET6)
-  {
-    AF_INET6_interface_address.sin6_family = AF_INET6;
-    AF_INET6_interface_address.sin6_addr   = in6addr_loopback;
-    AF_INET6_interface_address.sin6_port   = std::get<2>(inter_tuple_);
-    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
-      &AF_INET6_interface_address));
-    socket_addr_length_ = sizeof(AF_INET6_interface_address);
-  }
-
-  try
-  {
-    client_descriptors_ = std::vector<int>(client_number, -1);
-    for(int i {0}; i < client_number; ++i)
-    {
-      // Create a client socket and make it non-blocking.
-      client_descriptors_[i] = socket(inter_args_.domain, SOCK_STREAM, 0);
-      if(client_descriptors_[i] == -1)
-      {
-        ADD_FAILURE() << "A call to socket failed when constructing an instance "
-          "of SingleProcessInterfaceAndClients." << '\n'
-          << std::strerror(errno);
-        throw std::exception {};
-      }
-      int f_getfl_return {fcntl(client_descriptors_[i], F_GETFL)};
-      if(f_getfl_return == -1)
-      {
-        ADD_FAILURE() << "A call to fcntl with F_GETFL failed when "
-          "constructing an instance of SingleProcessInterfaceAndClients." 
-          << '\n' << std::strerror(errno);
-        throw std::exception {};
-      }
-      f_getfl_return |= O_NONBLOCK;
-      if(fcntl(client_descriptors_[i], F_SETFL, f_getfl_return) == -1)
-      {
-        ADD_FAILURE() << "A call to fcntl with F_SETFL failed when "
-          "constructing an instance of SingleProcessInterfaceAndClients." 
-          << '\n' << std::strerror(errno);
-        throw std::exception {};
-      }
-
-      // Connect the socket to the interface.
-      int connect_return {connect(client_descriptors_[i], 
-        interface_addr_ptr_, socket_addr_length_)};
-      if(connect_return == -1)
-      {
-        if(((inter_args_.domain == AF_UNIX) && (errno != EAGAIN)) || 
-            ((inter_args_.domain != AF_UNIX) && (errno != EINPROGRESS)))
-        {
-          ADD_FAILURE() << "A call to connect failed with an unexpected "
-            "error when constructing an instance of "
-            "SingleProcessInterfaceAndClients." << '\n'
-            << std::strerror(errno);
-          throw std::exception {};
-        }
-      }
-
-      // Allow the interface to process the connection.
-      alarm(1U);
-      std::get<0>(inter_tuple_)->AcceptRequests();
-      alarm(0U);
-
-      // Ensure connection readiness.
-      if(connect_return == -1)
-      {
-        fd_set descriptor_set {};
-        FD_ZERO(&descriptor_set);
-        FD_SET(client_descriptors_[i], &descriptor_set);
-        // Ensure that select does not block for long --- blocking indicates
-        // an error.
-        alarm(1U);
-        int select_return {select(client_descriptors_[i] + 1, 
-          nullptr, &descriptor_set, nullptr, nullptr)};
-        alarm(0U);
-        if(select_return == -1)
-        {
-          ADD_FAILURE() << "A call to select failed when constructing an "
-            "instance of SingleProcessInterfaceAndClients." << '\n'
-            << std::strerror(errno);
-          throw std::exception();
-        }
-        int getsockopt_buffer {};
-        socklen_t getsockopt_buffer_length {sizeof(getsockopt_buffer)};
-        int getsockopt_return {getsockopt(client_descriptors_[i],
-          SOL_SOCKET, SO_ERROR, &getsockopt_buffer, &getsockopt_buffer_length)};
-        if((getsockopt_return == -1) || (getsockopt_buffer != 0))
-        {
-          ADD_FAILURE() << "A call to getsocket either failed or returned "
-            " a failed connection status after a call to select when "
-            "constructing an instance of "
-            "SingleProcessInterfaceAndClients." 
-            << '\n' << std::strerror(errno);
-          throw std::exception();
-        }
-      }
-    }
-  }
-  catch(const std::exception& e)
-  {
-    // Cleanup state before the exception leaves the constructor.
-    ADD_FAILURE() << "An exception was thrown when constructing an instance "
-      "of SingleProcessInterfaceAndClients." << '\n' << e.what();
-    CleanUp();
-    throw e;
-  }
-}
-
-} // namespace
-
-                          ////// Tests //////
 
 TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
@@ -630,7 +131,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   {
     int temp_fd {};
     // BAZEL DEPENDENCY
-    fcgi_si_test::CreateBazelTemporaryFile(&temp_fd);
+    fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_fd);
     EXPECT_THROW(fcgi_si::FcgiServerInterface(temp_fd, 1, 1), std::exception);
     close(temp_fd);
   }
@@ -702,7 +203,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     [&ClearFcgiWebServerAddrs](const char* address_list_ptr, int domain, 
       int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
 
     if(setenv("FCGI_WEB_SERVER_ADDRS", address_list_ptr, 1) < 0)
       ADD_FAILURE() << "setenv failed in" << case_suffix << '\n' 
@@ -754,7 +255,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   auto MaxConnectionsMaxRequestsCase = [](int max_connections,
     int max_requests, int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
 
     int socket_fd {socket(AF_INET, SOCK_STREAM, 0)};
     if(socket_fd < 0)
@@ -856,7 +357,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     int max_connections, int max_requests, std::int32_t app_status_on_abort, 
     int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
 
     int socket_fd {socket(domain, SOCK_STREAM, 0)};
     if(socket_fd < 0)
@@ -912,7 +413,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 
   auto UnixValidSocketCase = [&InterfaceGettersAndSetters](int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
 
     // The Bazel temporary directory has a path which is too long for
     // Unix domain sockets. This due to the struct sockaddr_un limit
@@ -988,7 +489,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   }
 
   // Check for file descriptor leaks:
-  GTestCheckAndReportDescriptorLeaks(&fdlc, 
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, 
     "ConstructionExceptionsAndDirectlyObservableEffects");
 }
 
@@ -1045,7 +546,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   // Ensure that SIGALRM has its default disposition.
-  GTestFatalRestoreSignal(SIGALRM);
+  fcgi_si_test::GTestFatalRestoreSignal(SIGALRM);
 
   // Lambda functions for test case implementations.
   struct ScatterGatherSocketWriteArgs
@@ -1059,9 +560,9 @@ TEST(FcgiServerInterface, FcgiGetValues)
     const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
       expected_result, int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
 
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -1069,10 +570,11 @@ TEST(FcgiServerInterface, FcgiGetValues)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
     
-    SingleProcessInterfaceAndClients spiac {};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac {};
     try
     {
-      spiac = SingleProcessInterfaceAndClients {inter_args, 1};
+      spiac = fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
+        {inter_args, 1};
     }
     catch(const std::exception& e)
     {
@@ -1328,7 +830,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
     TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 8);
   }
 
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "FcgiGetValues");
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+    "FcgiGetValues");
 }
 
 TEST(FcgiServerInterface, UnknownManagementRequests)
@@ -1366,13 +869,15 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
   auto UnknownManagementRecordTester = [](
-    struct InterfaceCreationArguments args, std::uint8_t* buffer_ptr,
-    std::size_t count, fcgi_si::FcgiType type, int test_case)->void
+    struct fcgi_si_test::InterfaceCreationArguments args,
+      std::uint8_t* buffer_ptr, std::size_t count, fcgi_si::FcgiType type,
+      int test_case)->void
   {
-    std::string case_suffix {CaseSuffix(test_case)};
+    std::string case_suffix {fcgi_si_test::CaseSuffix(test_case)};
     try
     {
-      SingleProcessInterfaceAndClients spiac {args, 1};
+      fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+        {args, 1};
       if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
         buffer_ptr, count) < count)
       {
@@ -1450,7 +955,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
 
   // Case 1: The management request type is FCGI_STDIN. No content is present.
   {
-    struct InterfaceCreationArguments args {};
+    struct fcgi_si_test::InterfaceCreationArguments args {};
     args.domain          = AF_INET;
     args.backlog         = 5;
     args.max_connections = 10;
@@ -1467,7 +972,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
 
   // Case 2: The management request type has value 25. No content is present.
   {
-    struct InterfaceCreationArguments args {};
+    struct fcgi_si_test::InterfaceCreationArguments args {};
     args.domain          = AF_INET;
     args.backlog         = 5;
     args.max_connections = 10;
@@ -1486,7 +991,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   // each byte has value 1 when interpreted as std::uint8_t is present. The
   // content is aligned on an 8-byte boundary.
   {
-    struct InterfaceCreationArguments args {};
+    struct fcgi_si_test::InterfaceCreationArguments args {};
     args.domain          = AF_INET6;
     args.backlog         = 5;
     args.max_connections = 1000;
@@ -1505,7 +1010,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   // Case 4: As in 3, but the content is not aligned on an 8-byte boundary and
   // padding is used.
   {
-    struct InterfaceCreationArguments args {};
+    struct fcgi_si_test::InterfaceCreationArguments args {};
     args.domain          = AF_INET6;
     args.backlog         = 5;
     args.max_connections = 1;
@@ -1524,7 +1029,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   // Case 5: As in 3, but content is not aligned on an 8-byte boundary and no
   // padding is used.
   {
-    struct InterfaceCreationArguments args {};
+    struct fcgi_si_test::InterfaceCreationArguments args {};
     args.domain          = AF_INET6;
     args.backlog         = 5;
     args.max_connections = 1;
@@ -1540,7 +1045,8 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     static_cast<fcgi_si::FcgiType>(100) , 5);
   }
 
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "UnknownManagementRequests");
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+    "UnknownManagementRequests");
 }
 
 namespace {
@@ -1549,7 +1055,7 @@ namespace {
 // 1) overload_after > 0.
 struct ConnectionAcceptanceAndRejectionTestArguments
 {
-  struct InterfaceCreationArguments inter_args;
+  struct fcgi_si_test::InterfaceCreationArguments inter_args;
   std::size_t initial_connections;
   std::size_t overload_after;
   std::vector<std::uint8_t> expected_status;
@@ -1607,7 +1113,7 @@ ConnectionAcceptanceAndRejectionTest(
   struct ConnectionAcceptanceAndRejectionTestArguments args)
 {
   args_ = std::move(args);
-  case_suffix_ = CaseSuffix(args_.test_case);
+  case_suffix_ = fcgi_si_test::CaseSuffix(args_.test_case);
 
   if(!((args_.inter_args.domain == AF_UNIX)    || 
        (args_.inter_args.domain == AF_INET)    ||
@@ -1895,7 +1401,7 @@ RunTest()
     "CreateInterface in"};
   try
   {
-    inter_tuple_ = CreateInterface(args_.inter_args);
+    inter_tuple_ = fcgi_si_test::GTestNonFatalCreateInterface(args_.inter_args);
   }
   catch(std::system_error& error)
   {
@@ -2088,11 +1594,11 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   // of TestCaseRunner to ensure that restoration takes place.
 
   // Ensure that SIGALRM has its default disposition.
-  GTestFatalRestoreSignal(SIGALRM);  
+  fcgi_si_test::GTestFatalRestoreSignal(SIGALRM);  
 
   // Ignore SIGPIPE. The disposition will be inherited by the child produced
   // in the test.
-  GTestFatalIgnoreSignal(SIGPIPE);
+  fcgi_si_test::GTestFatalIgnoreSignal(SIGPIPE);
 
   // Ensure that FCGI_WEB_SERVER_ADDRS has a fixed state (bound and empty).
   if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
@@ -2258,10 +1764,11 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
         "to setenv in case 7." << '\n' << std::strerror(errno);
   }
   
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "ConnectionAcceptanceAndRejection");
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+    "ConnectionAcceptanceAndRejection");
 
   // Restore the default SIGPIPE disposition.
-  GTestFatalRestoreSignal(SIGPIPE);
+  fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, FcgiRequestGeneration)
@@ -2457,7 +1964,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   // requests and move the output FcgiRequest instances to a vector of such.
   auto AcceptAndAddRequests = []
   (
-    SingleProcessInterfaceAndClients* spiac_ptr,
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients* spiac_ptr,
     std::vector<fcgi_si::FcgiRequest>* request_list_ptr
   )->void
   {
@@ -2472,7 +1979,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   };
 
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
-  GTestFatalIgnoreSignal(SIGPIPE);
+  fcgi_si_test::GTestFatalIgnoreSignal(SIGPIPE);
 
                     // Single connection test cases.
 
@@ -2497,7 +2004,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const std::string&             case_message
   )->void
   {
-    InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -2505,7 +2012,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
     std::size_t pairs_size {pairs.size()};
     if(pairs_size != request_acceptance.size())
     {
@@ -2781,14 +2289,15 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    needed to receive the request.
   do 
   { 
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
     inter_args.max_requests    = 10;
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;   
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -2920,14 +2429,15 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   // b) Role: Responder. Partial records.
   do 
   { 
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
     inter_args.max_requests    = 10;
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;   
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -3117,7 +2627,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 
   auto SingleClientRecordWriterAndTester = [&RequestInspector]
   (
-    SingleProcessInterfaceAndClients* spiac_ptr,
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients* spiac_ptr,
     const struct RequestData& request_data,
     const std::vector<std::pair<const std::uint8_t*, std::size_t>>& write_pairs,
     const std::string& test_case_name
@@ -3154,12 +2664,13 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   };
 
   auto RecordTypeOrderTester = [&RequestInspector]
-  (const struct InterfaceCreationArguments& inter_args,
+  (const struct fcgi_si_test::InterfaceCreationArguments& inter_args,
    const struct RequestData& request_data, 
    const std::vector<fcgi_si::FcgiType>& type_sequence, 
    const std::string& test_case_name)->void
   {
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
 
     // Populate the FCGI_BEGIN_REQUEST record.
     std::uint8_t begin_record[2 * fcgi_si::FCGI_HEADER_LEN] = {};
@@ -3320,7 +2831,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    records are sent first.
   // b) As a, but the completing, empty FCGI_STDIN record is sent first.
   {
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET6;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -3360,7 +2871,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    for the streams.
   // f) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
   {
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_UNIX;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -3398,7 +2909,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // Case d
     do
     {
-      SingleProcessInterfaceAndClients spiac {inter_args, 1};
+      fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+        {inter_args, 1};
 
       constexpr std::size_t begin_length {2 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
@@ -3456,7 +2968,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // Case e
     do
     {
-      SingleProcessInterfaceAndClients spiac {inter_args, 1};
+      fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+        {inter_args, 1};
 
       constexpr std::size_t begin_length {2 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
@@ -3509,7 +3022,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA. keep_conn is true.
   // h) As g, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
   {
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1000;
@@ -3552,7 +3065,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    and FCGI_STDIN are interleaved before the streams are completed.
   do
   {
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -3560,7 +3073,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -3641,7 +3155,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   //    requests are present, keep_conn is true.
   do
   {
-    struct InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_UNIX;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
@@ -3650,7 +3164,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = "/tmp/fcgi_si_single_connection_test_case"
       "_set_5_multiple_request_record_interleaving";
     
-    SingleProcessInterfaceAndClients spiac {inter_args, 1};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 1};
 
     struct RequestData responder_request {};
     responder_request.Fcgi_id        = 1U;
@@ -4104,7 +3619,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const char* case_name {"Multiple Clients Test Case 1"};
     constexpr int client_number {5};
 
-    InterfaceCreationArguments inter_args {};
+    fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 10;
     inter_args.max_connections = 10;
@@ -4112,7 +3627,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, client_number};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, client_number};
 
     struct RequestData request_array[client_number] = {};
     std::uint8_t params_name {'1'};
@@ -4172,7 +3688,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const char* case_name {"Multiple Clients Test Case 2"};
     constexpr int client_number {5};
 
-    InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 10;
     inter_args.max_connections = 10;
@@ -4180,7 +3696,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, client_number};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, client_number};
 
     struct RequestData request_array[client_number] = {};
     std::uint8_t params_name {'1'};
@@ -4265,7 +3782,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     constexpr int client_number {10};
     constexpr int request_number {client_number + 4};
 
-    InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 100;
     inter_args.max_connections = 100;
@@ -4273,7 +3790,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, client_number};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, client_number};
 
     // Five requests for the first client and one request for other clients.
     struct RequestData request_array[request_number] = {};
@@ -4347,7 +3865,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   {
     std::string case_name {"Multiple Clients Test Case 4"};
 
-    InterfaceCreationArguments inter_args {};
+    struct fcgi_si_test::InterfaceCreationArguments inter_args {};
     inter_args.domain          = AF_INET;
     inter_args.backlog         = 10;
     inter_args.max_connections = 10;
@@ -4355,7 +3873,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;
 
-    SingleProcessInterfaceAndClients spiac {inter_args, 2};
+    fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
+      {inter_args, 2};
 
     struct RequestData responder_request_1 {};
     responder_request_1.role = fcgi_si::FCGI_RESPONDER;
@@ -4703,8 +4222,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
    } while(false);
 
-  GTestFatalRestoreSignal(SIGPIPE);
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "FcgiRequestGeneration");
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, "FcgiRequestGeneration");
+  fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
@@ -4770,13 +4289,13 @@ TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
   //
   // Other modules whose testing depends on this module:
 
-  GTestFatalIgnoreSignal(SIGPIPE);
+  fcgi_si_test::GTestFatalIgnoreSignal(SIGPIPE);
 
   fcgi_si_test::FileDescriptorLeakChecker fdlc {};
 
-  GTestCheckAndReportDescriptorLeaks(&fdlc, "RequestAcceptanceAndRejection");
 
-  GTestFatalRestoreSignal(SIGPIPE);
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, "RequestAcceptanceAndRejection");
+  fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)
@@ -4908,116 +4427,4 @@ TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
   // Modules which testing depends on:
   //
   // Other modules whose testing depends on this module:
-}
-
-TEST(FcgiServerInterface, TestFcgiClientInterface)
-{
-  const char* test_fcgi_client_interface {"TestFcgiClientInterface"};
-  fcgi_si_test::FileDescriptorLeakChecker fdlc {};
-  {
-    struct InterfaceCreationArguments inter_args {};
-    inter_args.domain          = AF_INET;
-    inter_args.backlog         = 5;
-    inter_args.max_connections = 10;
-    inter_args.max_requests    = 100;
-    inter_args.app_status      = EXIT_FAILURE;
-    inter_args.unix_path       = nullptr;
-
-    std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
-    inter_return {};
-    ASSERT_NO_THROW(inter_return = CreateInterface(inter_args));
-    std::unique_ptr<fcgi_si::FcgiServerInterface>& inter_uptr
-      {std::get<0>(inter_return)};
-    ASSERT_NE(inter_uptr, std::unique_ptr<fcgi_si::FcgiServerInterface> {}) <<
-        "A " << test_fcgi_client_interface << " instance was not constructed.";
-
-    // Beneath this line, the socket descriptor allocated by CreateInterface
-    // must be released.
-    int listening_socket = std::get<1>(inter_return);
-    fcgi_si_test::TestFcgiClientInterface client_inter {};
-    int local_socket {};
-    try
-    {
-      local_socket =
-        client_inter.Connect("127.0.0.1", ntohs(std::get<2>(inter_return)));
-    }
-    catch(...)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    if(local_socket == -1)
-    {
-      close(listening_socket);
-      FAIL() << std::strerror(errno);
-    }
-    EXPECT_EQ(client_inter.ConnectionCount(), 1);
-    std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> params_map
-    {
-      {fcgi_si::FCGI_MAX_CONNS, {}},
-      {fcgi_si::FCGI_MAX_REQS, {}},
-      {fcgi_si::FCGI_MPXS_CONNS, {}}
-    };
-    bool send_gvr {false};
-    try
-    {
-      send_gvr = client_inter.SendGetValuesRequest(local_socket, params_map);
-    }
-    catch(...)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    if(!send_gvr)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    // TODO Define SIGALRM handler and install.
-    GTestFatalIgnoreSignal(SIGALRM);
-    // TODO update to a loop with an escape due to an update from a handler of
-    // SIGALRM.
-    alarm(1U);
-    std::vector<fcgi_si::FcgiRequest> accept_result {};
-    ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
-    EXPECT_EQ(accept_result.size(), 0U);
-    ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
-    EXPECT_EQ(accept_result.size(), 0U);
-    std::unique_ptr<fcgi_si_test::ServerEvent> result_uptr {};
-    try
-    {
-      result_uptr = client_inter.RetrieveServerEvent();
-    }
-    catch(...)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    fcgi_si_test::GetValuesResult* gvr_ptr
-      {dynamic_cast<fcgi_si_test::GetValuesResult*>(result_uptr.get())};
-    if(!gvr_ptr)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    EXPECT_EQ(params_map, gvr_ptr->RequestMap());
-    params_map[fcgi_si::FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
-    params_map[fcgi_si::FCGI_MAX_REQS] = std::vector<std::uint8_t>
-      {'1', '0', '0'};
-    params_map[fcgi_si::FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
-    EXPECT_EQ(params_map, gvr_ptr->ResponseMap());
-    try
-    {
-      EXPECT_TRUE(client_inter.CloseConnection(local_socket));
-    }
-    catch(...)
-    {
-      close(listening_socket);
-      FAIL();
-    }
-    EXPECT_EQ(client_inter.ConnectionCount(), 0U);
-    GTestFatalRestoreSignal(SIGALRM);
-    close(std::get<1>(inter_return));
-  }
-  GTestCheckAndReportDescriptorLeaks(&fdlc, test_fcgi_client_interface);
 }

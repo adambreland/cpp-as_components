@@ -1,16 +1,19 @@
 #ifndef FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
 #define FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
 
+#include <arpa/inet.h>
 #include <dirent.h>
+#include <signal.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <set>
+#include <string>
 #include <tuple>
 #include <vector>
 
-#include "include/protocol_constants.h"
+#include "fcgi_si.h"
 
 // Key:
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the
@@ -18,23 +21,15 @@
 // GOOGLE TEST DEPENDENCY This marks use of a feature which is provided by
 //                        Google Test.
 
+// Note: All modules starting with GTest depend on Google Test. Modules which
+//       depend on Google Test but whose names do not start with GTest are
+//       marked with the Google Test dependency flag defined above.
+
 namespace fcgi_si_test {
 
-// Create a temporary file in the temporary directory offered by Bazel.
-// The descriptor value is written to the int pointed to by descriptor_ptr.
-//
-// Failures are reported as Google Test fatal failures.
-//
-// BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
-// GOOGLE TEST DEPENDENCY
-void CreateBazelTemporaryFile(int* descriptor_ptr);
-
-// Truncate a file to zero length and seek to the beginning.
-//
-// Failures are reported as Google Test non-fatal failures.
-//
-// GOOGLE TEST DEPENDENCY
-bool PrepareTemporaryFile(int descriptor);
+// Returns the string " case X." where X is the character representation of
+// test_case. This string may be used in test messages.
+std::string CaseSuffix(int test_case);
 
 //    A utility function used for testing. ExtractContent reads a file which
 // contains a sequence of FastCGI records. These records are assumed to be
@@ -98,6 +93,21 @@ bool PrepareTemporaryFile(int descriptor);
 std::tuple<bool, bool, bool, bool, std::size_t, std::vector<std::uint8_t>>
 ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id);
 
+class FcgiRequestIdManager
+{
+ public:
+  std::uint16_t GetId();
+  void ReleaseId(std::uint16_t id);
+
+ private:
+  void CorruptionCheck();
+
+  std::set<std::uint16_t> available_;
+  std::set<std::uint16_t> in_use_;
+  bool corrupt_ {false};
+};
+
+
 class FileDescriptorLeakChecker
 {
  public:
@@ -117,7 +127,6 @@ class FileDescriptorLeakChecker
   std::pair<FileDescriptorLeakChecker::const_iterator, 
   FileDescriptorLeakChecker::const_iterator> Check(It removed_begin, 
     It removed_end, It added_begin, It added_end);
-
 
   inline FileDescriptorLeakChecker()
   {
@@ -146,57 +155,165 @@ class FileDescriptorLeakChecker
   std::vector<int> leak_list_ {};
 };
 
-template<typename It>
-std::pair<FileDescriptorLeakChecker::const_iterator, 
-  FileDescriptorLeakChecker::const_iterator>
-FileDescriptorLeakChecker:: 
-Check(It removed_begin, It removed_end, It added_begin, It added_end)
-{  
-  // Process the removed and added iterator lists.
-  std::vector<int> removed {};
-  std::vector<int> added   {};
-  auto CopySortRemoveDuplicates = [](std::vector<int>* vec_cont, It begin_it,
-    It end_it)->void
-  {
-    while(begin_it != end_it)
-    {
-      vec_cont->push_back(*begin_it);
-      ++begin_it;
-    }
-    std::sort(vec_cont->begin(), vec_cont->end());
-    std::vector<int>::iterator new_end 
-      {std::unique(vec_cont->begin(), vec_cont->end())};
-    vec_cont->erase(new_end, vec_cont->end());
-  };
+// Create a temporary file in the temporary directory offered by Bazel.
+// The descriptor value is written to the int pointed to by descriptor_ptr.
+//
+// Failures are reported as Google Test fatal failures.
+//
+// BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
+void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr);
 
-  CopySortRemoveDuplicates(&removed, removed_begin, removed_end);
-  CopySortRemoveDuplicates(&added, added_begin, added_end);
-  std::vector<int> difference_list {};
-  std::set_difference(recorded_list_.begin(), recorded_list_.end(),
-    removed.begin(), removed.end(), 
-    std::back_insert_iterator<std::vector<int>>(difference_list));
-  std::vector<int> expected_list {};
-  std::set_union(difference_list.begin(), difference_list.end(),
-    added.begin(), added.end(), 
-    std::back_insert_iterator<std::vector<int>>(expected_list));
+extern "C" using CSignalHandlerType = void (*)(int);
 
-  return CheckHelper(expected_list);
+void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler);
+
+inline void GTestFatalIgnoreSignal(int sig)
+{
+  return GTestFatalSetSignalDisposition(sig, SIG_IGN);
 }
 
-class FcgiRequestIdManager
+inline void GTestFatalRestoreSignal(int sig)
+{
+  return GTestFatalSetSignalDisposition(sig, SIG_DFL);
+}
+
+// Forward declaration for GTestCheckAndReportDescriptorLeaks.
+class FileDescriptorLeakChecker;
+
+void GTestNonFatalCheckAndReportDescriptorLeaks(
+  fcgi_si_test::FileDescriptorLeakChecker* fdlc_ptr, 
+  const std::string& test_name);
+
+// GTestNonFatalCreateInterface
+// Creates a listening socket for an interface, and constructs an interface
+// instance on the heap. Access is provided by a returned unique_ptr to the
+// interface. The provided domain is used when the listening socket is created.
+//
+// Preconditions:
+// 1) If domain == AF_UNIX, the length of the string pointed to by unix_path
+//    including the terminating null byte must be less than or equal to the
+//    path length limit of UNIX sockets.
+//
+// Exceptions:
+// 1) Throws any exceptions thrown by the constructor of
+//    fcgi_si::FcgiServerInterface. 
+//    a) The interface socket file descriptor was closed.
+//    b) The pointer to the interface is null.
+// 2) Throws std::system_error if a file for a UNIX socket was created and it
+//    could not be removed when creation was unsuccessful.
+//
+// Resource allocation and caller responsibilities:
+// 1) On return a listening socket was created. This socket should be closed
+//    when the interface instance is no longer needed to prevent a file
+//    descriptor leak.
+// 2) If domain == AF_UNIX, on return a socket file given by the path string
+//    pointed to by unix_path is present. This file should be removed from the
+//    file system when the interface is no longer needed.
+//
+// Effects:
+// 1) If creation was successful:
+//    a) std::get<0> accesses a unique_ptr which points to the interface.
+//    b) std::get<1> accesses the descriptor value of the listening socket of
+//       the interface. 
+//    c) std::get<2> accesses the port of the listening socket of the interface.
+//       The value is in network byte order. When a UNIX domain socket was
+//       created, zero is present.
+//    d) For the internet domains, the listening socket is bound to the default
+//       address and an ephemeral port.
+// 2) If creation was not successful, the unique_ptr accessed by 
+//    std::get<0> holds nullptr. If a socket was created, its descriptor
+//    was closed. If a socket file was created, it was removed.
+//
+struct InterfaceCreationArguments
+{
+  int domain;
+  int backlog;
+  int max_connections;
+  int max_requests;
+  int app_status;
+  const char* unix_path;
+};
+
+std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args);
+
+// Truncate a file to zero length and seek to the beginning.
+//
+// Failures are reported as Google Test non-fatal failures.
+bool GTestNonFatalPrepareTemporaryFile(int descriptor);
+
+// This class creates an interface with the parameters provided in inter_args.
+// client_number sockets are created and connected to the interface. These
+// sockets are made non-blocking to facilitate testing FcgiServerInterface
+// and related classes using a single process.
+//
+// The client socket descriptors, the interface, and interface information
+// are made available through accessors.
+//
+// All socket descriptors which are associated with an instance are closed
+// by the destructor. If inter_args.domain == AF_UNIX, the socket file is
+// removed by the destructor.
+class GTestNonFatalSingleProcessInterfaceAndClients
 {
  public:
-  std::uint16_t GetId();
-  void ReleaseId(std::uint16_t id);
+  inline fcgi_si::FcgiServerInterface& interface()
+  {
+    return *std::get<0>(inter_tuple_);
+  }
+
+  inline int interface_descriptor()
+  {
+    return std::get<1>(inter_tuple_);
+  }
+
+  inline struct sockaddr* interface_address_ptr()
+  {
+    return interface_addr_ptr_;
+  }
+
+  inline socklen_t interface_address_length()
+  {
+    return socket_addr_length_;
+  }
+
+  inline const std::vector<int>& client_descriptors()
+  {
+    return client_descriptors_;
+  }
+
+  // No copy.
+  GTestNonFatalSingleProcessInterfaceAndClients() = default;
+  GTestNonFatalSingleProcessInterfaceAndClients(
+    struct InterfaceCreationArguments inter_args,  int client_number);
+  GTestNonFatalSingleProcessInterfaceAndClients(
+    GTestNonFatalSingleProcessInterfaceAndClients&&) = default;
+  GTestNonFatalSingleProcessInterfaceAndClients(
+    const GTestNonFatalSingleProcessInterfaceAndClients&) = delete;
+  
+  GTestNonFatalSingleProcessInterfaceAndClients&
+  operator=(GTestNonFatalSingleProcessInterfaceAndClients&&) = default;
+
+  GTestNonFatalSingleProcessInterfaceAndClients&
+  operator=(const GTestNonFatalSingleProcessInterfaceAndClients&) = delete;
+
+  inline ~GTestNonFatalSingleProcessInterfaceAndClients()
+  {
+    CleanUp();
+  }
 
  private:
-  void CorruptionCheck();
+  void CleanUp();
 
-  std::set<std::uint16_t> available_;
-  std::set<std::uint16_t> in_use_;
-  bool corrupt_ {false};
+  struct InterfaceCreationArguments inter_args_;
+  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+  inter_tuple_;
+  struct sockaddr* interface_addr_ptr_;
+  socklen_t socket_addr_length_;
+  std::vector<int> client_descriptors_; 
 };
 
 } // namespace fcgi_si_test
+
+#include "test/fcgi_si_testing_utilities_templates.h"
 
 #endif  // FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_

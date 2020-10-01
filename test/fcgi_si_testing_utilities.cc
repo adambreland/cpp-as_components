@@ -1,8 +1,11 @@
 #include "test/fcgi_si_testing_utilities.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdlib.h>
+#include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -17,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
@@ -27,10 +31,17 @@
 // BAZEL DEPENDENCY  This marks a feature which is provided by the Bazel
 //                   testing run-time environment. 
 
-// Utility functions testing fcgi_si.
 namespace fcgi_si_test {
 
-void CreateBazelTemporaryFile(int* descriptor_ptr)
+std::string CaseSuffix(int test_case)
+{
+  std::string case_suffix {" case "};
+  case_suffix.append(std::to_string(test_case));
+  case_suffix.append(".");
+  return case_suffix;
+}
+
+void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
 {
   static const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
   if(!tmpdir_ptr)
@@ -55,7 +66,158 @@ void CreateBazelTemporaryFile(int* descriptor_ptr)
   *descriptor_ptr = temp_descriptor;
 }
 
-bool PrepareTemporaryFile(int descriptor)
+void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler)
+{
+  sigset_t sigset {};
+  if(sigemptyset(&sigset) == -1)
+  {
+    FAIL() << "A call to sigempty set from a call to "
+      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
+  }
+  struct sigaction sa {};
+  sa.sa_handler = handler;
+  sa.sa_mask    = sigset;
+  sa.sa_flags   = 0;
+  if(sigaction(sig, &sa, nullptr) == -1)
+  {
+    FAIL() << "A call to sigaction from a call to "
+      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
+  }
+  return;
+}
+
+void GTestNonFatalCheckAndReportDescriptorLeaks(
+  FileDescriptorLeakChecker* fdlc_ptr, 
+  const std::string& test_name)
+{
+  std::pair<FileDescriptorLeakChecker::const_iterator, 
+    FileDescriptorLeakChecker::const_iterator> iter_pair 
+    {fdlc_ptr->Check()};
+  if(iter_pair.first != iter_pair.second)
+  {
+    std::string message {"File descriptors were leaked in "};
+    message.append(test_name).append(": ");
+    for(/*no-op*/; iter_pair.first != iter_pair.second; ++(iter_pair.first))
+    {
+      message.append(std::to_string(*(iter_pair.first))).append(" ");
+    } 
+    ADD_FAILURE() << message;
+  }
+}
+
+std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args)
+{
+  std::unique_ptr<fcgi_si::FcgiServerInterface> interface_uptr {};
+  if((args.domain == AF_UNIX) && !args.unix_path)
+    return std::make_tuple(std::move(interface_uptr), -1, 0U);
+  int socket_fd {socket(args.domain, SOCK_STREAM, 0)};
+  bool unix_socket_bound {false};
+
+  auto CleanupForFailure = [&interface_uptr, &unix_socket_bound, socket_fd, 
+    &args]
+    (std::string message, int errno_value)->
+      std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+  {
+    if(errno_value)
+      ADD_FAILURE() << message << '\n' << std::strerror(errno_value);
+    else
+      ADD_FAILURE() << message;
+
+    if(socket_fd != -1)
+      close(socket_fd);
+    if(unix_socket_bound)
+    {
+      if(unlink(args.unix_path) == -1)
+      {
+        ADD_FAILURE() << "The UNIX socket created by a call to CreateInterface "
+          "could not be removed during cleanup.";
+        std::error_code ec {errno, std::system_category()};
+        throw std::system_error {ec, "unlink"};
+      }
+    }
+    return std::make_tuple(std::move(interface_uptr), socket_fd, 0U);
+  };
+
+  if(socket_fd < 0)
+    return CleanupForFailure("A call to socket failed.", errno);
+  if(args.domain == AF_UNIX)
+  {
+    struct sockaddr_un AF_UNIX_addr {};
+    AF_UNIX_addr.sun_family = AF_UNIX;
+    std::strcpy(AF_UNIX_addr.sun_path, args.unix_path);
+    if(bind(socket_fd, 
+      static_cast<struct sockaddr*>(static_cast<void*>(&AF_UNIX_addr)),
+      sizeof(AF_UNIX_addr)) == -1)
+      return CleanupForFailure("A call to bind for a UNIX socket failed.",
+        errno);
+    unix_socket_bound = true;
+  }  
+
+  if(listen(socket_fd, args.backlog) < 0)
+    return CleanupForFailure("A call to listen failed.", errno);
+
+  // Generic state to be used to extract the address of the listening
+  // socket when an internet domain is used.
+  struct sockaddr* address_ptr {nullptr};
+  socklen_t*       length_ptr  {nullptr};
+  
+  // State for internet domain sockets.
+  // AF_INET
+  struct sockaddr_in AF_INET_addr {};
+  socklen_t AF_INET_socklen {sizeof(AF_INET_addr)};
+
+  // AF_INET6
+  struct sockaddr_in6 AF_INET6_addr {};
+  socklen_t AF_INET6_socklen {sizeof(AF_INET6_addr)};
+
+  if(args.domain != AF_UNIX)
+  {
+    if((args.domain == AF_INET) || (args.domain == AF_INET6))
+    {
+      if(args.domain == AF_INET)
+      {
+        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
+          &AF_INET_addr));
+        length_ptr = &AF_INET_socklen;
+      }
+      else if(args.domain == AF_INET6)
+      {
+        address_ptr = static_cast<struct sockaddr*>(static_cast<void*>(
+          &AF_INET6_addr));
+        length_ptr = &AF_INET6_socklen;
+      }
+      if(getsockname(socket_fd, address_ptr, length_ptr) < 0)
+        return CleanupForFailure("A call to getsockname failed.", errno);
+    }
+    else
+      return CleanupForFailure("An invalid domain was given.", 0);
+  }
+
+  try
+  {
+    interface_uptr = std::unique_ptr<fcgi_si::FcgiServerInterface> 
+      {new fcgi_si::FcgiServerInterface {socket_fd, args.max_connections, 
+        args.max_requests, args.app_status}};
+  }
+  catch(...)
+  {
+    CleanupForFailure("interface construction", 0);
+    throw;
+  }
+  
+  return std::make_tuple(
+    std::move(interface_uptr), 
+    socket_fd, 
+    (args.domain == AF_UNIX) ? 
+      0U : 
+      ((args.domain == AF_INET) ? 
+        AF_INET_addr.sin_port :
+        AF_INET6_addr.sin6_port)
+  );
+}
+
+bool GTestNonFatalPrepareTemporaryFile(int descriptor)
 {
   // Truncate the temporary file and seek to the beginning.
   if(ftruncate(descriptor, 0) < 0)
@@ -162,7 +324,8 @@ ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
           state++;
           if(local_offset == number_bytes_read)
             break;
-          // Fall through to start processing content.
+          else
+            [[fallthrough]];
         }
         case 1 : {
           if(content_bytes_read < content_length)
@@ -183,7 +346,8 @@ ExtractContent(int fd, fcgi_si::FcgiType type, std::uint16_t id)
           state++;
           if(local_offset == number_bytes_read)
             break;
-          // Fall through to start processing padding.
+          else
+            [[fallthrough]];
         }
         case 2 : {
           if(padding_bytes_read < padding_length)
@@ -420,6 +584,206 @@ void FcgiRequestIdManager::ReleaseId(std::uint16_t id)
     available_.insert(id);
   }
   in_use_.erase(id_iter);
+}
+
+GTestNonFatalSingleProcessInterfaceAndClients::
+GTestNonFatalSingleProcessInterfaceAndClients(
+  struct InterfaceCreationArguments inter_args,  int client_number)
+{
+  inter_args_ = inter_args;
+
+  // Verify interface listening socket parameters.
+  if(!((inter_args_.domain == AF_UNIX)    || 
+       (inter_args_.domain == AF_INET)    ||
+       (inter_args_.domain == AF_INET6)))
+  {
+    ADD_FAILURE() << "Invalid domain argument in a call to "
+      "SingleProcessInterfaceAndClients.";
+    throw std::logic_error {""};
+  }
+  // 92 comes from the lowest known size of sun_path in struct sockaddr_un
+  // across distributions. One is added to the length as a terminating
+  // null byte must be copied as well.
+  if((inter_args_.domain == AF_UNIX) && 
+     ((std::strlen(inter_args.unix_path) + 1) > 92))
+  {
+    ADD_FAILURE() << "The interface path was too long.";
+    throw std::logic_error {""};
+  }
+
+  try
+  {
+    inter_tuple_ = GTestNonFatalCreateInterface(inter_args_);
+  }
+  catch(const std::exception& e)
+  {
+    ADD_FAILURE() << "A call to CreateInterface threw an exception."
+      << '\n' << e.what();
+    throw e;
+  }
+  if(!std::get<0>(inter_tuple_))
+  {
+    ADD_FAILURE() << "An interface was not constructed by a call to "
+      "CreateInterface when constructing an instance of "
+      "SingleProcessInterfaceAndClients.";
+    throw std::logic_error {""};
+  }
+
+  // Prepare the interface address so a client can connect.
+  struct sockaddr_un AF_UNIX_interface_address {};
+  if(inter_args_.domain == AF_UNIX)
+  {
+    AF_UNIX_interface_address.sun_family = AF_UNIX;
+    std::strcpy(AF_UNIX_interface_address.sun_path, inter_args.unix_path);
+    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
+      &AF_UNIX_interface_address));
+    socket_addr_length_ = sizeof(AF_UNIX_interface_address);
+  }
+
+  struct sockaddr_in AF_INET_interface_address {};
+  if(inter_args_.domain == AF_INET)
+  {
+    AF_INET_interface_address.sin_family      = AF_INET;
+    AF_INET_interface_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    AF_INET_interface_address.sin_port        = std::get<2>(inter_tuple_);
+    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
+      &AF_INET_interface_address));
+    socket_addr_length_ = sizeof(AF_INET_interface_address);
+  }
+
+  struct sockaddr_in6 AF_INET6_interface_address {};
+  if(inter_args_.domain == AF_INET6)
+  {
+    AF_INET6_interface_address.sin6_family = AF_INET6;
+    AF_INET6_interface_address.sin6_addr   = in6addr_loopback;
+    AF_INET6_interface_address.sin6_port   = std::get<2>(inter_tuple_);
+    interface_addr_ptr_ = static_cast<struct sockaddr*>(static_cast<void*>(
+      &AF_INET6_interface_address));
+    socket_addr_length_ = sizeof(AF_INET6_interface_address);
+  }
+
+  try
+  {
+    client_descriptors_ = std::vector<int>(client_number, -1);
+    for(int i {0}; i < client_number; ++i)
+    {
+      // Create a client socket and make it non-blocking.
+      client_descriptors_[i] = socket(inter_args_.domain, SOCK_STREAM, 0);
+      if(client_descriptors_[i] == -1)
+      {
+        ADD_FAILURE() << "A call to socket failed when constructing an instance "
+          "of SingleProcessInterfaceAndClients." << '\n'
+          << std::strerror(errno);
+        throw std::exception {};
+      }
+      int f_getfl_return {fcntl(client_descriptors_[i], F_GETFL)};
+      if(f_getfl_return == -1)
+      {
+        ADD_FAILURE() << "A call to fcntl with F_GETFL failed when "
+          "constructing an instance of SingleProcessInterfaceAndClients." 
+          << '\n' << std::strerror(errno);
+        throw std::exception {};
+      }
+      f_getfl_return |= O_NONBLOCK;
+      if(fcntl(client_descriptors_[i], F_SETFL, f_getfl_return) == -1)
+      {
+        ADD_FAILURE() << "A call to fcntl with F_SETFL failed when "
+          "constructing an instance of SingleProcessInterfaceAndClients." 
+          << '\n' << std::strerror(errno);
+        throw std::exception {};
+      }
+
+      // Connect the socket to the interface.
+      int connect_return {connect(client_descriptors_[i], 
+        interface_addr_ptr_, socket_addr_length_)};
+      if(connect_return == -1)
+      {
+        if(((inter_args_.domain == AF_UNIX) && (errno != EAGAIN)) || 
+            ((inter_args_.domain != AF_UNIX) && (errno != EINPROGRESS)))
+        {
+          ADD_FAILURE() << "A call to connect failed with an unexpected "
+            "error when constructing an instance of "
+            "SingleProcessInterfaceAndClients." << '\n'
+            << std::strerror(errno);
+          throw std::exception {};
+        }
+      }
+
+      // Allow the interface to process the connection.
+      alarm(1U);
+      std::get<0>(inter_tuple_)->AcceptRequests();
+      alarm(0U);
+
+      // Ensure connection readiness.
+      if(connect_return == -1)
+      {
+        fd_set descriptor_set {};
+        FD_ZERO(&descriptor_set);
+        FD_SET(client_descriptors_[i], &descriptor_set);
+        // Ensure that select does not block for long --- blocking indicates
+        // an error.
+        alarm(1U);
+        int select_return {select(client_descriptors_[i] + 1, 
+          nullptr, &descriptor_set, nullptr, nullptr)};
+        alarm(0U);
+        if(select_return == -1)
+        {
+          ADD_FAILURE() << "A call to select failed when constructing an "
+            "instance of SingleProcessInterfaceAndClients." << '\n'
+            << std::strerror(errno);
+          throw std::exception();
+        }
+        int getsockopt_buffer {};
+        socklen_t getsockopt_buffer_length {sizeof(getsockopt_buffer)};
+        int getsockopt_return {getsockopt(client_descriptors_[i],
+          SOL_SOCKET, SO_ERROR, &getsockopt_buffer, &getsockopt_buffer_length)};
+        if((getsockopt_return == -1) || (getsockopt_buffer != 0))
+        {
+          ADD_FAILURE() << "A call to getsocket either failed or returned "
+            " a failed connection status after a call to select when "
+            "constructing an instance of "
+            "SingleProcessInterfaceAndClients." 
+            << '\n' << std::strerror(errno);
+          throw std::exception();
+        }
+      }
+    }
+  }
+  catch(const std::exception& e)
+  {
+    // Cleanup state before the exception leaves the constructor.
+    ADD_FAILURE() << "An exception was thrown when constructing an instance "
+      "of SingleProcessInterfaceAndClients." << '\n' << e.what();
+    CleanUp();
+    throw e;
+  }
+}
+
+void GTestNonFatalSingleProcessInterfaceAndClients::
+CleanUp()
+{
+  // Cleanup interface state.
+  if(std::get<0>(inter_tuple_))
+  {
+    close(std::get<1>(inter_tuple_));
+    if(inter_args_.domain == AF_UNIX)
+    {
+      if(unlink(inter_args_.unix_path) == -1)
+        ADD_FAILURE() << "A call to unlink encountered an error when " 
+          "destroying an instance of SingleProcessInterfaceAndClients."
+          << '\n' << std::strerror(errno);
+    }
+  }
+  // Cleanup client state.
+  for(int descriptor : client_descriptors_)
+  {
+    if(descriptor >= 0)
+      if(close(descriptor) == -1)
+        ADD_FAILURE() << "A call to close on a client descriptor failed "
+          "when destroying an instance of "
+          "SingleProcessInterfaceAndClients." << '\n' 
+          << std::strerror(errno);
+  }
 }
 
 } // namespace fcgi_si_test
