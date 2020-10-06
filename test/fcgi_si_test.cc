@@ -33,10 +33,6 @@
 #include "test/fcgi_si_testing_utilities.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-// Key:
-// BAZEL DEPENDENCY   Used to mark the use of a feature which is provided
-//                    by the Bazel testing environment. 
-
 TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
   // Testing explanation
@@ -109,7 +105,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   //     IPv4 address 127.0.0.1.
   //
   // Modules which testing depends on:
-  // 1) SingleProcessInterfaceAndClients (defined locally)
+  // 1) fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
   //
   // Other modules whose testing depends on this module: none.
 
@@ -130,7 +126,6 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // Create a temporary regular file.
   {
     int temp_fd {};
-    // BAZEL DEPENDENCY
     fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_fd);
     EXPECT_THROW(fcgi_si::FcgiServerInterface(temp_fd, 1, 1), std::exception);
     close(temp_fd);
@@ -516,6 +511,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
   // 4) Subsets of the known names.
   // 5) An empty request.
   // 6) Presence of an empty name.
+  // 7) An erroneous request body.
   //
   // Test cases: All cases use an interface which accepts a single request
   // and a single connection at a time.
@@ -532,6 +528,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
   // 7) Unknown name present. A known name, then a four-byte unknown name, then
   //    a known name.
   // 8) All unknown names.
+  // 9) A request with a known name and a terminal name-value pair encoding
+  //    error where more bytes are specified than are actually present.
   // 
   // Modules which testing depends on:
   // 1) fcgi_si::EncodeNameValuePairs
@@ -539,7 +537,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
   // 3) fcgi_si::PopulateHeader
   // 4) socket_functions::ScatterGatherSocketWrite
   // 5) socket_functions::SocketRead
-  // 6) SingleProcessInterfaceAndClients (defined locally)
+  // 6) fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
   //
   // Other modules whose testing depends on this module: none.
 
@@ -579,8 +577,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
     catch(const std::exception& e)
     {
       ADD_FAILURE() << "An exception was thrown when the normal "
-        "SingleProcessInterfaceAndClients constructor was called in"
-        << case_suffix << '\n' << e.what();
+        "fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients "
+        " constructor was called in" << case_suffix << '\n' << e.what();
       return;
     }
 
@@ -830,6 +828,41 @@ TEST(FcgiServerInterface, FcgiGetValues)
     TestCaseRunner(std::move(nv_pairs), std::move(pair_map), 8);
   }
 
+  // 9) A request with a known name and a terminal name-value pair encoding
+  //    error where more bytes are specified than are actually present.
+  {
+    // Create an erroneous record.
+    const char* error_name {"error"};
+    std::size_t error_name_length {std::strlen(error_name)};
+    std::size_t content_length {1U + 1U + fcgi_si::FCGI_MAX_CONNS.size() + 1U +
+      1U + error_name_length};
+    std::size_t mod_length {content_length % 8};
+    std::size_t padding_length {(mod_length) ? (8 - mod_length) : 0};
+    std::uint8_t record[fcgi_si::FCGI_HEADER_LEN + content_length +
+      padding_length] = {};
+    fcgi_si::PopulateHeader(record, fcgi_si::FcgiType::kFCGI_GET_VALUES,
+      0U, content_length, padding_length);
+    std::size_t offset {static_cast<std::size_t>(fcgi_si::FCGI_HEADER_LEN)};
+    record[offset] = fcgi_si::FCGI_MAX_CONNS.size();
+    offset++;
+    record[offset] = 0U;
+    offset++;
+    std::memcpy(record + offset, fcgi_si::FCGI_MAX_CONNS.data(),
+      fcgi_si::FCGI_MAX_CONNS.size());
+    offset += fcgi_si::FCGI_MAX_CONNS.size();
+    record[offset] = error_name_length;
+    offset++;
+    record[offset] = 10U; // This is the erroneous value length.
+    offset++;
+    std::memcpy(record + offset, error_name, error_name_length);
+    offset += error_name_length;
+    offset += padding_length;
+    struct iovec single_iovec {record, offset};
+
+    struct ScatterGatherSocketWriteArgs args {&single_iovec, 1, offset};
+    FcgiGetValuesTest(args, {}, 9);
+  }
+
   fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "FcgiGetValues");
 }
@@ -862,7 +895,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   // 1) socket_functions::SocketRead
   // 2) socket_functions::SocketWrite
   // 3) fcgi_si::PopulateHeader
-  // 4) SingleProcessInterfaceAndClients (defined locally)
+  // 4) fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
   // 
   // Other modules whose testing depends on this module: none.
 
@@ -1960,7 +1993,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(output.get_keep_conn(), input.fcgi_keep_conn)    << message;
   };
 
-  // A lambda used with class SingleProcessInterfaceAndClients to accept
+  // A lambda used with class
+  // fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients to accept
   // requests and move the output FcgiRequest instances to a vector of such.
   auto AcceptAndAddRequests = []
   (

@@ -267,6 +267,8 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   // Initialize the server address appropriately for the determined domain.
   int domain {};
   struct sockaddr_storage addr_store {};
+  // Using sockaddr_storage for AF_UNIX appears to not work.
+  struct sockaddr_un      unix_addr  {};
   if(inet_pton(AF_INET, address, &addr_store) > 0)
   {
     domain = AF_INET;
@@ -294,12 +296,12 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
       errno = EINVAL;
       return -1;
     }
-    static_cast<struct sockaddr_un*>(static_cast<void*>(&addr_store))->sun_family
+    static_cast<struct sockaddr_un*>(static_cast<void*>(&unix_addr))->sun_family
       = AF_UNIX;
     char* path_ptr {
       static_cast<struct sockaddr_un*>(
         static_cast<void*>(
-          &addr_store))
+          &unix_addr))
       ->sun_path
     };
     std::strcpy(path_ptr, address); // Include null byte.
@@ -324,9 +326,20 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
          "used in a call to select in a call to "
          "TestFcgiClientInterface::RetrieveServerEvent."};
     }
-    if(connect(socket_connection, 
-      static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
-      sizeof(struct sockaddr_storage)) == -1)
+    int connect_return {-1};
+    if(domain != AF_UNIX)
+    {
+      connect_return = connect(socket_connection, 
+        static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
+        sizeof(struct sockaddr_storage));
+    }
+    else
+    {
+      connect_return = connect(socket_connection,
+        static_cast<const struct sockaddr*>(static_cast<void*>(&unix_addr)),
+        sizeof(struct sockaddr_un));
+    }
+    if(connect_return == -1)
     {
       // An error occurred. See if connection can be retried.
       close(socket_connection);
@@ -815,6 +828,19 @@ void TestFcgiClientInterface::FailedWrite(
     std::error_code ec {error_code, std::system_category()};
     throw std::system_error {ec, system_error_message};
   }
+}
+
+std::size_t TestFcgiClientInterface::ManagementRequestCount(int connection) const
+{
+  std::map<int, ConnectionState>::const_iterator connection_iter
+    {connection_map_.find(connection)};
+  if(connection_iter == connection_map_.cend())
+  {
+    throw std::invalid_argument {"In a call to "
+      "fcgi_si_test::TestFcgiClientInterface::ManagementRequestCount, "
+      "connection was not managed by the interface instance."};
+  }
+  return connection_iter->second.management_queue.size();
 }
 
 std::map<fcgi_si::RequestIdentifier, 
@@ -1387,8 +1413,8 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   std::size_t number_remaining {std::get<2>(write_return)};
   if(number_remaining != 0U)
   {
-    FailedWrite(connection_iter, errno, number_remaining == number_to_write, true,
-      write_or_select_);
+    FailedWrite(connection_iter, errno, number_remaining == number_to_write,
+      true, write_or_select_);
     return false;
   }
   return true;

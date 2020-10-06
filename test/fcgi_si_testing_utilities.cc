@@ -43,6 +43,8 @@ std::string CaseSuffix(int test_case)
 
 void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
 {
+  if(!descriptor_ptr)
+    FAIL() << "descriptor_ptr was null.";
   static const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
   if(!tmpdir_ptr)
     FAIL() << "The directory for temporary files supplied by Bazel is missing.";
@@ -58,6 +60,7 @@ void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
       '\n' << strerror(errno);
   if(unlink(char_array_uptr.get()) < 0)
   {
+    // Retrieve the errno error string before calling close.
     std::string errno_message {strerror(errno)};
     close(temp_descriptor);
     FAIL() << "The temporary file could not be unlinked." << '\n' <<
@@ -631,6 +634,8 @@ GTestNonFatalSingleProcessInterfaceAndClients(
 
   // Prepare the interface address so a client can connect.
   struct sockaddr_un AF_UNIX_interface_address {};
+  struct sockaddr_in AF_INET_interface_address {};
+  struct sockaddr_in6 AF_INET6_interface_address {};
   if(inter_args_.domain == AF_UNIX)
   {
     AF_UNIX_interface_address.sun_family = AF_UNIX;
@@ -639,9 +644,7 @@ GTestNonFatalSingleProcessInterfaceAndClients(
       &AF_UNIX_interface_address));
     socket_addr_length_ = sizeof(AF_UNIX_interface_address);
   }
-
-  struct sockaddr_in AF_INET_interface_address {};
-  if(inter_args_.domain == AF_INET)
+  else if(inter_args_.domain == AF_INET)
   {
     AF_INET_interface_address.sin_family      = AF_INET;
     AF_INET_interface_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -650,9 +653,7 @@ GTestNonFatalSingleProcessInterfaceAndClients(
       &AF_INET_interface_address));
     socket_addr_length_ = sizeof(AF_INET_interface_address);
   }
-
-  struct sockaddr_in6 AF_INET6_interface_address {};
-  if(inter_args_.domain == AF_INET6)
+  else if(inter_args_.domain == AF_INET6)
   {
     AF_INET6_interface_address.sin6_family = AF_INET6;
     AF_INET6_interface_address.sin6_addr   = in6addr_loopback;

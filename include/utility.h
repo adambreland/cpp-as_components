@@ -66,7 +66,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 // offset:    A value used to indicate how many bytes have previously been
 //            encoded of the first name-value pair pointed to by pair_iter.
 //            The first offset bytes of the byte sequence generated from this
-//            name value pair will be omitted from the total byte sequence
+//            name-value pair will be omitted from the total byte sequence
 //            of the pair.
 //
 // Preconditions:
@@ -79,7 +79,7 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //       expression [c.data(), c.data()+c.size()) gives a valid range of the
 //       stored objects when c.size() is non-zero.
 //    c) For each container, let T be the type of the elements of the container.
-//       Then sizeof(T) = sizeof(uint8_t).
+//       Then sizeof(T) = sizeof(std::uint8_t).
 // 3) Invalidation of references, pointers, or iterators to elements of the
 //    name and value sequences invalidate the returned vector of iovec
 //    instances.
@@ -125,10 +125,10 @@ void EncodeFourByteLength(std::int_fast32_t length, ByteIter byte_iter);
 //       an iterator equal to end.
 //       a) If the returned boolean value is false, the iterator points
 //          to the name-value pair which caused processing to halt. 
-//       b) If the returned boolean value is true and std::get<4>(t) == 0, the 
+//       b) If the returned boolean value is true and std::get<5>(t) == 0, the 
 //          iterator points to either end, if all name-value pairs could be
 //          encoded, or to the name-value pair which should be encoded next. If
-//          the returned boolean value is true and std::get<4>(t) != 0, the
+//          the returned boolean value is true and std::get<5>(t) != 0, the
 //          iterator points to the name-value pair which could not be
 //          completely encoded.
 // 3) If the range [pair_iter, end) is empty, then the returned tuple is

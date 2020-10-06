@@ -184,8 +184,10 @@ class FcgiServerInterface {
   //    FcgiRequest object was created for the request. It was added to the
   //    returned list.
   // 6) Management requests which were completed during reading were serviced.
-  //    The only recognized management request is FCGI_GET_VALUES. 
-  //    All other management requests receive an FCGI_UNKNOWN_TYPE response.
+  //    The only recognized management request is FCGI_GET_VALUES. If an
+  //    error is present in the content of an FCGI_GET_VALUES request, an
+  //    FCGI_GET_VALUES_RESULT response with an empty body was sent.
+  //    All other management requests received an FCGI_UNKNOWN_TYPE response.
   // 7) New connections which were waiting to be accepted were accepted. 
   //    a) For internet domains, connections were validated against the list of
   //       authorized IP addresses if the list contains addresses. Unauthorized

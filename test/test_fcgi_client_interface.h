@@ -417,9 +417,11 @@ class TestFcgiClientInterface
     return number_connected_;
   }
 
-  inline bool EventsReady() const noexcept
+  std::size_t ManagementRequestCount(int connection) const;
+
+  inline std::size_t ReadyEventCount() const noexcept
   {
-    return !(micro_event_queue_.empty());
+    return micro_event_queue_.size();
   }
 
   // Attempts to release the FastCGI request identifier of id when id refers
@@ -585,8 +587,10 @@ class TestFcgiClientInterface
     fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data);
 
   // Attempts to send an FCGI_GET_VALUES management request on connection.
-  // Names are taken from params_map. Values of the encoded name-value pairs
-  // are empty.
+  // Names are taken from params_map. Regardless of the values of the
+  // name-value pairs of params_map, the name-value pair values are encoded as
+  // if they were empty. A copy of params_map with empty values is made and
+  // managed by *this.
   //
   // Parameters:
   // connection: The descriptor of a socket connection.
@@ -627,8 +631,10 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
 
   // Attempts to send an FCGI_GET_VALUES management request on connection.
-  // Names are taken from params_map. Values of the encoded name-value pairs
-  // are empty.
+  // Names are taken from params_map. Regardless of the values of the
+  // name-value pairs of params_map, the name-value pair values are encoded as
+  // if they were empty. The values of params_map are cleared. params_map is
+  // then moved to storage managed by *this.
   //
   // Parameters:
   // connection: The descriptor of a socket connection.

@@ -155,10 +155,12 @@ class FileDescriptorLeakChecker
   std::vector<int> leak_list_ {};
 };
 
-// Create a temporary file in the temporary directory offered by Bazel.
-// The descriptor value is written to the int pointed to by descriptor_ptr.
-//
-// Failures are reported as Google Test fatal failures.
+//    Creates a temporary file in the temporary directory offered by Bazel
+// and returns a descriptor for the file. The file was unlinked after being
+// created. Failures are reported as Google Test fatal failures. In this case,
+// the function does not return.
+//    Note that a pointer is used as functions which may produce fatal Google
+// Test failures must return void.
 //
 // BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
 void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr);

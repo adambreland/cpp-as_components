@@ -725,95 +725,53 @@ TEST(Utility, EncodeNameValuePairs)
 
   using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
-  // A lambda function for equality testing of vectors of struct iovec
-  // instances. (operator= is not defined in the instantiation
-  // std::vector<iovec>.)
-  auto IovecVectorEquality = [](const std::vector<iovec>& lhs,
-    const std::vector<iovec>& rhs)->bool
-  {
-    if(lhs.size() != rhs.size())
-      return false;
-    auto lhs_iter {lhs.begin()};
-    auto rhs_iter {rhs.begin()};
-    for(/*no-op*/; lhs_iter != lhs.end(); (++lhs_iter, ++rhs_iter))
-      if((lhs_iter->iov_base != rhs_iter->iov_base)
-        || (lhs_iter->iov_len != rhs_iter->iov_len))
-        return false;
-    return true;
-  };
-
   int temp_fd {};
   fcgi_si_test::GTestFatalCreateBazelTemporaryFile(&temp_fd);
 
-  // A lambda function which takes parameters which define a test case and
-  // goes through the testing procedure described in the testing explanation.
-  auto EncodeNameValuePairTester = [temp_fd](
+  auto EncodeNameValuePairTester = [temp_fd]
+  (
     std::string message,
-    const std::vector<NameValuePair>& pair_sequence,
+    const std::vector<NameValuePair>& pair_seq,
     fcgi_si::FcgiType type,
-    uint16_t Fcgi_id,
-    std::size_t offset_argument,
-    bool expect_processing_error,
-    int returned_offset_test_value,
-    std::vector<NameValuePair>::const_iterator expected_pair_it
+    uint16_t fcgi_id,
+    bool expect_error,
+    std::vector<NameValuePair>::const_iterator error_iter
   )->void
   {
-    auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_sequence.begin(),
-      pair_sequence.end(), type, Fcgi_id, offset_argument);
-    if(expect_processing_error && std::get<0>(encoded_result))
+    if(!fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd))
     {
-      ADD_FAILURE() << "EncodeNameValuePairs did not detect an expected error "
-        "as reported by std::get<0>."
-        << '\n' << message;
+      ADD_FAILURE() << "A temporary file could not be prepared." << '\n'
+        << message;
       return;
     }
-    else if(!expect_processing_error && !std::get<0>(encoded_result))
+    std::vector<NameValuePair>::const_iterator end_iter {pair_seq.cend()};
+    std::vector<NameValuePair>::const_iterator begin_iter {pair_seq.cbegin()};
+    std::size_t offset {0U};
+    std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+      std::vector<std::uint8_t>, std::size_t,
+      std::vector<NameValuePair>::const_iterator> encode_return {};
+    do
     {
-      ADD_FAILURE() << "EncodeNameValuePairs encountered an unexpected error "
-        "as reported by std::get<0>."
-        << '\n' << message;
-      return;
-    }
-    size_t total_to_write {std::get<1>(encoded_result)};
-    // std::get<2>(encoded_result) is used in a call to writev.
-    // std::get<4>(encoded_result) is implciitly used in a call to writev.
-    if(returned_offset_test_value == 0 && std::get<5>(encoded_result) != 0)
-    {
-      ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
-        "reported by std::get<4> when a zero offset was expected."
-        << '\n' << message;
-      // Don't return as we can still test name-value pairs.
-    }
-    else if(returned_offset_test_value > 0 && std::get<5>(encoded_result) == 0)
-    {
-      ADD_FAILURE() << "EncodeNameValuePairs returned a zero offset as "
-        "reported by std::get<4> when a non-zero offset was expected."
-        << '\n' << message;
-      // Don't return as we can still test name-value pairs.
-    }
-    if(std::get<6>(encoded_result) != expected_pair_it)
-    {
-      ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
-        "std::get<5> which did not point to the expected name-value pair."
-        << '\n' << message;
-      // Don't return as we can still test name-value pairs.
-    }
-
-    // Prepare the temporary file.
-    bool prepared {fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd)};
-    if(!prepared)
-      FAIL() << "A temporary file could not be prepared.";
-
-    ssize_t write_return {0};
-    while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
-      std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
+      encode_return = {fcgi_si::EncodeNameValuePairs(begin_iter, end_iter,
+        type, fcgi_id, offset)};
+      ssize_t write_return {0};
+      while((write_return = writev(temp_fd, std::get<2>(encode_return).data(),
+        std::get<2>(encode_return).size())) == -1 && errno == EINTR)
       continue;
-    if((write_return < 0) ||
-       (static_cast<std::size_t>(write_return) != total_to_write))
+      if((write_return == -1) ||
+         (static_cast<std::size_t>(write_return) != std::get<1>(encode_return)))
+      {
+        ADD_FAILURE() << "A call to writev did not write all bytes requested."
+          << '\n' << message;
+        return;
+      }
+      begin_iter = std::get<6>(encode_return);
+      offset = std::get<5>(encode_return);
+    } while(std::get<0>(encode_return) && (begin_iter != end_iter));
+    if(expect_error)
     {
-      ADD_FAILURE() << "A call to writev did not write all bytes requested."
-      << '\n' << message;
-      return;
+      EXPECT_FALSE(std::get<0>(encode_return)) << message;
+      EXPECT_EQ(error_iter, std::get<6>(encode_return)) << message;
     }
     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
     if(lseek_return == -1)
@@ -821,8 +779,9 @@ TEST(Utility, EncodeNameValuePairs)
       ADD_FAILURE() << "A call to lseek failed." << '\n' << message;
       return;
     }
-    auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-      fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id)};
+    std::tuple<bool, bool, bool, bool, std::size_t, std::vector<std::uint8_t>>
+    extract_content_result {fcgi_si_test::ExtractContent(temp_fd, type,
+      fcgi_id)};
     if(!std::get<0>(extract_content_result))
     {
       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered an "
@@ -836,43 +795,43 @@ TEST(Utility, EncodeNameValuePairs)
         << '\n' << message;
       return;
     }
-    if(std::get<2>(extract_content_result))
-    {
-      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
-        "std::get<2> that the record sequence was terminated."
+    EXPECT_FALSE(std::get<2>(extract_content_result)) <<
+      "A call to fcgi_si_test::ExtractContent reported from "
+      "std::get<2> that the record sequence was terminated."
         << '\n' << message;
-      // Don't return as we can still test name-value pairs.
-    }
-    if(!std::get<3>(extract_content_result))
-    {
-      ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
-        "std::get<3> that an unaligned record was present."
+    EXPECT_TRUE(std::get<3>(extract_content_result)) <<
+      "A call to fcgi_si_test::ExtractContent reported from "
+      "std::get<3> that an unaligned record was present."
         << '\n' << message;
-      // Don't return as we can still test name-value pairs.
-    }
-    EXPECT_EQ(static_cast<std::size_t>(std::get<3>(encoded_result)),
-      std::get<4>(extract_content_result));
-    std::vector<NameValuePair> pair_result_sequence {
-      fcgi_si::ExtractBinaryNameValuePairs(
+    std::vector<NameValuePair> extracted_pairs
+      {fcgi_si::ExtractBinaryNameValuePairs(
         std::get<5>(extract_content_result).data(),
-        std::get<5>(extract_content_result).size()
-      )
-    };
-    EXPECT_EQ(pair_sequence, pair_result_sequence);
+        std::get<5>(extract_content_result).size())};
+    if(!expect_error)
+    {
+      EXPECT_EQ(pair_seq, extracted_pairs) << message;
+    }
+    else
+    {
+      std::vector<NameValuePair> pair_seq_prefix {pair_seq.begin(),
+        error_iter};
+      EXPECT_EQ(pair_seq_prefix, extracted_pairs) << message;
+    }
   };
 
   // Case 1: No name-value pairs, i.e. pair_iter == end.
   {
-    std::vector<NameValuePair> empty {};
-    auto result {fcgi_si::EncodeNameValuePairs(empty.begin(), empty.end(),
-      fcgi_si::FcgiType::kFCGI_PARAMS, 1, 0)};
-    EXPECT_TRUE(std::get<0>(result));
-    EXPECT_EQ(std::get<1>(result), 0U);
-    EXPECT_TRUE(IovecVectorEquality(std::get<2>(result), std::vector<iovec> {}));
-    EXPECT_EQ(std::get<3>(result), 0);
-    EXPECT_EQ(std::get<4>(result), std::vector<uint8_t> {});
-    EXPECT_EQ(std::get<5>(result), 0U);
-    EXPECT_EQ(std::get<6>(result), empty.end());
+    std::string message {"Case 2, about line: "};
+    message += std::to_string(__LINE__);
+    std::vector<NameValuePair> pair_sequence {};
+    EncodeNameValuePairTester(
+      message,
+      pair_sequence,
+      fcgi_si::FcgiType::kFCGI_PARAMS,
+      1U,
+      false,
+      pair_sequence.cend()
+    );
   }
 
   // Case 2: A name-value pair that requires a single FastCGI record.
@@ -886,10 +845,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -905,10 +862,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -923,10 +878,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1000,
-      0,
+      1000U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -940,10 +893,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -957,10 +908,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -975,10 +924,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -994,10 +941,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -1012,10 +957,8 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
       pair_sequence.cend()
     );
   }
@@ -1032,11 +975,9 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
-      pair_sequence.end()
+      pair_sequence.cend()
     );
   }
 
@@ -1051,11 +992,9 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
-      pair_sequence.end()
+      pair_sequence.cend()
     );
   }
 
@@ -1072,11 +1011,9 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
-      pair_sequence.end()
+      pair_sequence.cend()
     );
   }
 
@@ -1091,11 +1028,9 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
-      pair_sequence.end()
+      pair_sequence.cend()
     );
   }
 
@@ -1110,261 +1045,84 @@ TEST(Utility, EncodeNameValuePairs)
       message,
       pair_sequence,
       fcgi_si::FcgiType::kFCGI_PARAMS,
-      1,
-      0,
+      1U,
       false,
-      0,
-      pair_sequence.end()
+      pair_sequence.cend()
     );
   }
 
-  // Currently fails with a Bazel test setup error. Preliminary code below.
+  // // Cases 15 and 16 cause the test process to be sporadically killed by the
+  // // Linux Out of Memory Killer.
   // // Case 15: Multiple name-value pairs where one of the middle pairs has a
   // // name whose length exceeds the maximum size. (Invalid input.)
   // {
+  //   std::string message {"Case 15, about line: "};
+  //   message += std::to_string(__LINE__);
   //   std::vector<uint8_t> illegal_name((1UL << 31) + 10, 'd');
   //   std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'b'}, {1}},
   //     {{'c'}, {2}}, {std::move(illegal_name), {3}}, {{'e'}, {4}},
   //     {{'f'}, {5}}, {{'g'}, {6}}};
-  //
-  //   // Parameters for the below code (in the style of the lambda).
-  //   fcgi_si::FcgiType type {fcgi_si::FcgiType::kFCGI_PARAMS};
-  //   uint16_t Fcgi_id {1};
-  //   std::size_t offset_argument {0};
-  //   bool expect_processing_error {true};
-  //   int returned_offset_test_value {0};
-  //   std::vector<NameValuePair>::const_iterator expected_pair_it
-  //     {pair_sequence.cbegin() + 3};
-  //   while(true)
-  //   {
-  //     auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_sequence.begin(),
-  //       pair_sequence.end(), type, Fcgi_id, offset_argument);
-  //     if(expect_processing_error && std::get<0>(encoded_result))
-  //     {
-  //       ADD_FAILURE() << "EncodeNameValuePairs did not detect an expected error "
-  //         "as reported by std::get<0>.";
-  //       break;
-  //     }
-  //     size_t total_to_write {std::get<1>(encoded_result)};
-  //     // std::get<2>(encoded_result) is used in a call to writev.
-  //     // std::get<3>(encoded_result) is implciitly used in a call to writev.
-  //     if(returned_offset_test_value == 0 && std::get<4>(encoded_result) != 0)
-  //     {
-  //       ADD_FAILURE() << "EncodeNameValuePairs returned a non-zero offset as "
-  //         "reported by std::get<4> when a zero offset was expected.";
-  //       // Don't return as we can still test name-value pairs.
-  //     }
-  //     if(std::get<5>(encoded_result) != expected_pair_it)
-  //     {
-  //       ADD_FAILURE() << "EncodeNameValuePairs returned an iterator as reported by "
-  //         "std::get<5> which did not point to the expected name-value pair.";
-  //       // Don't return as we can still test name-value pairs.
-  //     }
-  //     int temp_fd {open(".", O_RDWR | O_TMPFILE)};
-  //     if(temp_fd == -1)
-  //     {
-  //       ADD_FAILURE() << "A call to open failed to make a temporary file.";
-  //       break;
-  //     }
-  //     ssize_t write_return {0};
-  //     while((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
-  //       std::get<2>(encoded_result).size())) == -1 && errno == EINTR)
-  //       continue;
-  //     if(write_return != total_to_write)
-  //     {
-  //       ADD_FAILURE() << "A call to writev did not write all bytes requested.";
-  //       break;
-  //     }
-  //     off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
-  //     if(lseek_return == -1)
-  //     {
-  //       close(temp_fd);
-  //       ADD_FAILURE() << "A call to lseek failed.";
-  //       break;
-  //     }
-  //     auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-  //       fcgi_si::FcgiType::kFCGI_PARAMS, Fcgi_id)};
-  //     if(!std::get<0>(extract_content_result))
-  //     {
-  //       close(temp_fd);
-  //       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered an "
-  //         "unrecoverable read error.";
-  //       break;
-  //     }
-  //     if(!std::get<1>(extract_content_result))
-  //     {
-  //       close(temp_fd);
-  //       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
-  //         "std::get<1> that a header error or a partial section was encountered.";
-  //       break;
-  //     }
-  //     if(std::get<2>(extract_content_result))
-  //     {
-  //       close(temp_fd);
-  //       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
-  //         "std::get<2> that the record sequence was terminated.";
-  //       // Don't return as we can still test name-value pairs.
-  //     }
-  //     if(!std::get<3>(extract_content_result))
-  //     {
-  //       close(temp_fd);
-  //       ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent reported from "
-  //         "std::get<3> that an unaligned record was present.";
-  //       // Don't return as we can still test name-value pairs.
-  //     }
-  //     std::vector<NameValuePair> pair_result_sequence {
-  //       fcgi_si::ProcessBinaryNameValuePairs(std::get<4>(
-  //       extract_content_result).size(), std::get<4>(
-  //       extract_content_result).data())};
-  //     std::vector<NameValuePair> expected_result_pairs(pair_sequence.cbegin(),
-  //       expected_pair_it);
-  //     EXPECT_EQ(expected_result_pairs, pair_result_sequence);
-  //     break;
-  //   }
+  //   EncodeNameValuePairTester(
+  //     message,
+  //     pair_sequence,
+  //     fcgi_si::FcgiType::kFCGI_PARAMS,
+  //     1U,
+  //     true,
+  //     pair_sequence.cbegin() + 3
+  //   );
   // }
 
-  // Case 16: As in 15, but for value instead of name. (Invalid input.)
-  // (Deferred until Bazel error for case 15 is resolved.)
+  // // Case 16: As in 15, but for value instead of name. (Invalid input.)
+  // {
+  //   std::string message {"Case 16, about line: "};
+  //   message += std::to_string(__LINE__);
+  //   std::vector<uint8_t> illegal_value((1UL << 31) + 10, 3U);
+  //   std::vector<NameValuePair> pair_sequence {{{'a'}, {0}}, {{'b'}, {1}},
+  //     {{'c'}, {2}}, {{'d'}, std::move(illegal_value)}, {{'e'}, {4}},
+  //     {{'f'}, {5}}, {{'g'}, {6}}};
+  //   EncodeNameValuePairTester(
+  //     message,
+  //     pair_sequence,
+  //     fcgi_si::FcgiType::kFCGI_PARAMS,
+  //     1U,
+  //     true,
+  //     pair_sequence.cbegin() + 3
+  //   );
+  // }
 
   // Case 17: More than the current iovec limit of name-value pairs.
   {
-    do
+    std::string message {"Case 17, about line: "};
+    message += std::to_string(__LINE__);
+    long local_iovec_max {fcgi_si::iovec_MAX};
+    if(local_iovec_max == -1)
     {
-      long iovec_max {sysconf(_SC_IOV_MAX)};
-      if(iovec_max == -1)
-        iovec_max = 1024;
-      iovec_max = std::min<long>(iovec_max, std::numeric_limits<int>::max());
-      NameValuePair copied_pair {{'a'}, {1}};
-      std::vector<NameValuePair> many_pairs(iovec_max + 10, copied_pair);
-      std::size_t offset {0};
-      
-      bool prepared {fcgi_si_test::GTestNonFatalPrepareTemporaryFile(temp_fd)};
-      if(!prepared)
-        FAIL() << "A temporary file could not be prepared.";
-
-      std::size_t total_records {0U};
-      bool terminal_error {false};
-      ssize_t write_return {0};
-      for(auto pair_iter {many_pairs.begin()}; pair_iter != many_pairs.end();
-        /*no-op*/)
-      {
-        auto encoded_result = fcgi_si::EncodeNameValuePairs(pair_iter,
-          many_pairs.end(), fcgi_si::FcgiType::kFCGI_PARAMS, 1, offset);
-        if(!std::get<0>(encoded_result))
-        {
-          ADD_FAILURE() << "A call to fcgi_si::EncodeNameValuePairs halted "
-            "due to an error as reported by std::get<0>.";
-          terminal_error = true;
-          break;
-        }
-        total_records += std::get<3>(encoded_result);
-        while(((write_return = writev(temp_fd, std::get<2>(encoded_result).data(),
-          std::get<2>(encoded_result).size())) == -1) && (errno == EINTR))
-          continue;
-        if((write_return < 0) ||
-           (static_cast<std::size_t>(write_return) !=
-            std::get<1>(encoded_result)))
-        {
-          ADD_FAILURE() << "A call to writev did not write all bytes requested.";
-          terminal_error = true;
-          break;
-        }
-        offset = std::get<5>(encoded_result);
-        pair_iter = std::get<6>(encoded_result);
-      }
-      if(terminal_error)
-      {
-        break;
-      }
-
-      // Code for inspecting the sequence of records written to temp_fd.
-      // // Copy temporary file contents for inspection.
-      // const char* new_file_path
-      //   {"/home/adam/Desktop/EncodeNameValuePairs_output.bin"};
-      // int new_fd {open(new_file_path, O_RDWR | O_CREAT | O_TRUNC,
-      //   S_IRWXU)};
-      // if(new_fd == -1)
-      // {
-      //   ADD_FAILURE() << "A call to open encountered an error. "
-      //     << std::strerror(errno);
-      //   close(temp_fd);
-      //   break;
-      // }
-      // ssize_t file_copy_return {0};
-      // off_t copy_start {0};
-      //
-      // ssize_t number_to_write {lseek(temp_fd, 0, SEEK_END)};
-      // if(number_to_write == -1)
-      // {
-      //   ADD_FAILURE() << "A call to lseek encountered an error.";
-      //   close(temp_fd);
-      //   break;
-      // }
-      // while(number_to_write > 0)
-      // {
-      //   while((file_copy_return = sendfile(new_fd, temp_fd, &copy_start,
-      //     number_to_write)) == -1 && errno == EINTR)
-      //     continue;
-      //   if(file_copy_return == -1)
-      //   {
-      //     ADD_FAILURE() << "A call to sendfile encountered an unrecoverable "
-      //       "error. " << std::strerror(errno);
-      //     close(temp_fd);
-      //     close(new_fd);
-      //     break;
-      //   }
-      //   number_to_write -= file_copy_return;
-      // }
-      // if(number_to_write > 0)
-      // {
-      //   ADD_FAILURE() << "Calls to sendfile could not write all data.";
-      //   break;
-      // }
-      // close(new_fd);
-
-      // Prepare to extract content.
-      off_t lseek_return {lseek(temp_fd, 0, SEEK_SET)};
-      if(lseek_return == -1)
-      {
-        ADD_FAILURE() << "A call to lseek encountered an error.";
-        break;
-      }
-      auto extract_content_result {fcgi_si_test::ExtractContent(temp_fd,
-        fcgi_si::FcgiType::kFCGI_PARAMS, 1)};
-      if(!std::get<0>(extract_content_result))
-      {
-        ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered an "
-          "unrecoverable read error as reported by std::get<0>.";
-        break;
-      }
-      if(!std::get<1>(extract_content_result))
-      {
-        ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent encountered a "
-          "header error or an incomplete section as reported by std::get<1>.";
-        break;
-      }
-      if(std::get<2>(extract_content_result))
-      {
-        ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent unexpectedly "
-          "reported by std::get<2> that the record sequence was terminated.";
-      }
-      if(!std::get<3>(extract_content_result))
-      {
-        ADD_FAILURE() << "A call to fcgi_si_test::ExtractContent detected an "
-          "unaligned record as reported by std::get<3>.";
-        break;
-      }
-      EXPECT_EQ(total_records, std::get<4>(extract_content_result)) <<
-        "Unequal record counts.";
-      std::vector<NameValuePair> pair_result_sequence {
-        fcgi_si::ExtractBinaryNameValuePairs(
-          std::get<5>(extract_content_result).data(),
-          std::get<5>(extract_content_result).size())
-      };
-      EXPECT_EQ(many_pairs, pair_result_sequence);
-    } while(false);
+      // 1024 is the current Linux iovec limit.
+      local_iovec_max = 1024;
+    }
+    local_iovec_max = std::min<long>(local_iovec_max,
+      std::numeric_limits<int>::max());
+    long pair_count {local_iovec_max};
+    if(local_iovec_max <= (std::numeric_limits<long>::max() - 10))
+    {
+      pair_count += 10;
+      NameValuePair to_copy {{'a'}, {1U}};
+      std::vector<NameValuePair> pair_sequence(pair_count, to_copy);
+      EncodeNameValuePairTester(
+        message,
+        pair_sequence,
+        fcgi_si::FcgiType::kFCGI_PARAMS,
+        1U,
+        false,
+        pair_sequence.cend()
+      );
+    }
+    else
+    {
+      ADD_FAILURE() << "A sufficiently long sequence of pairs could not be "
+        "produced.";
+    }
   }
-  close(temp_fd);
 }
 
 TEST(Utility, ToUnsignedCharacterVector)
