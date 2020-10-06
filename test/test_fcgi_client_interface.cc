@@ -267,11 +267,11 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   // Initialize the server address appropriately for the determined domain.
   int domain {};
   struct sockaddr_storage addr_store {};
-  // Using sockaddr_storage for AF_UNIX appears to not work.
-  struct sockaddr_un      unix_addr  {};
+  socklen_t addr_size {};
   if(inet_pton(AF_INET, address, &addr_store) > 0)
   {
     domain = AF_INET;
+    addr_size = sizeof(struct sockaddr_in);
     static_cast<struct sockaddr_in*>(
       static_cast<void*>(&addr_store))->sin_family = AF_INET;
     static_cast<struct sockaddr_in*>(
@@ -280,6 +280,7 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   else if(inet_pton(AF_INET6, address, &addr_store) > 0)
   {
     domain = AF_INET6;
+    addr_size = sizeof(struct sockaddr_in6);
     static_cast<struct sockaddr_in6*>(
       static_cast<void*>(&addr_store))->sin6_family = AF_INET6;
     static_cast<struct sockaddr_in6*>(
@@ -288,6 +289,9 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   else
   {
     domain = AF_UNIX;
+    // Calls to connect failed during testing with AF_UNIX and
+    // addrlen != sizeof(struct sockaddr_un).
+    addr_size = sizeof(struct sockaddr_un);
     std::size_t address_length {std::strlen(address)};
     // The value 91 comes from the current portable limit for UNIX address
     // lengths (where one byte is saved for the null terminator).
@@ -296,14 +300,10 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
       errno = EINVAL;
       return -1;
     }
-    static_cast<struct sockaddr_un*>(static_cast<void*>(&unix_addr))->sun_family
-      = AF_UNIX;
-    char* path_ptr {
-      static_cast<struct sockaddr_un*>(
-        static_cast<void*>(
-          &unix_addr))
-      ->sun_path
-    };
+    static_cast<struct sockaddr_un*>(static_cast<void*>(&addr_store))->
+      sun_family = AF_UNIX;
+    char* path_ptr {static_cast<struct sockaddr_un*>(static_cast<void*>(
+      &addr_store))->sun_path};
     std::strcpy(path_ptr, address); // Include null byte.
   }
 
@@ -326,20 +326,9 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
          "used in a call to select in a call to "
          "TestFcgiClientInterface::RetrieveServerEvent."};
     }
-    int connect_return {-1};
-    if(domain != AF_UNIX)
-    {
-      connect_return = connect(socket_connection, 
-        static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
-        sizeof(struct sockaddr_storage));
-    }
-    else
-    {
-      connect_return = connect(socket_connection,
-        static_cast<const struct sockaddr*>(static_cast<void*>(&unix_addr)),
-        sizeof(struct sockaddr_un));
-    }
-    if(connect_return == -1)
+    if(connect(socket_connection,
+      static_cast<const struct sockaddr*>(static_cast<void*>(&addr_store)),
+      addr_size) == -1)
     {
       // An error occurred. See if connection can be retried.
       close(socket_connection);
