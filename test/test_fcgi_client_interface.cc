@@ -425,6 +425,25 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   return socket_connection;
 }
 
+std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
+{
+  std::set<fcgi_si::RequestIdentifier>::const_iterator
+     least_upper_iter {completed_request_set_.lower_bound({connection, 0})};
+  if((least_upper_iter == completed_request_set_.cend()) ||
+      (least_upper_iter->descriptor() > connection))
+  {
+    return 0U;
+  }
+  else
+  {
+    std::set<fcgi_si::RequestIdentifier>::const_iterator next_iter
+      {(connection != std::numeric_limits<int>::max()) ?
+        completed_request_set_.lower_bound({connection + 1, 0U}) :
+        completed_request_set_.end()};
+    return std::distance(least_upper_iter, next_iter);
+  }
+}
+
 std::map<int, TestFcgiClientInterface::ConnectionState>::iterator
 TestFcgiClientInterface::ConnectedCheck(int connection)
 {
@@ -819,17 +838,42 @@ void TestFcgiClientInterface::FailedWrite(
   }
 }
 
+bool TestFcgiClientInterface::IsConnected(int connection) const
+{
+  std::map<int, ConnectionState>::const_iterator found_iter
+    {connection_map_.find(connection)};
+  return (found_iter == connection_map_.end()) ? false :
+    found_iter->second.connected;  
+}
+
 std::size_t TestFcgiClientInterface::ManagementRequestCount(int connection) const
 {
   std::map<int, ConnectionState>::const_iterator connection_iter
     {connection_map_.find(connection)};
   if(connection_iter == connection_map_.cend())
   {
-    throw std::invalid_argument {"In a call to "
-      "fcgi_si_test::TestFcgiClientInterface::ManagementRequestCount, "
-      "connection was not managed by the interface instance."};
+    return 0U;
   }
   return connection_iter->second.management_queue.size();
+}
+
+std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
+{
+  std::map<fcgi_si::RequestIdentifier, RequestData>::const_iterator
+     least_upper_iter {pending_request_map_.lower_bound({connection, 0U})};
+  if((least_upper_iter == pending_request_map_.cend()) ||
+      (least_upper_iter->first.descriptor() > connection))
+  {
+    return 0U;
+  }
+  else
+  {
+    std::map<fcgi_si::RequestIdentifier, RequestData>::const_iterator next_iter
+      {(connection != std::numeric_limits<int>::max()) ?
+        pending_request_map_.lower_bound({connection + 1, 0U}) :
+        pending_request_map_.end()};
+    return std::distance(least_upper_iter, next_iter);
+  }
 }
 
 std::map<fcgi_si::RequestIdentifier, 

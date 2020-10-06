@@ -4256,7 +4256,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
    } while(false);
 
-  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, "FcgiRequestGeneration");
+  fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+    "FcgiRequestGeneration");
   fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
 }
 

@@ -377,6 +377,13 @@ class TestFcgiClientInterface
   //       instances which were generated for them no longer refer to requests.
   bool CloseConnection(int connection);
 
+  inline std::size_t CompletedRequestCount() const noexcept
+  {
+    return completed_request_set_.size();
+  }
+
+  std::size_t CompletedRequestCount(int connection) const;
+
   // Attempts to connect to an IPv4, IPv6, or UNIX domain stream socket as
   // determined by the format of address. For UNIX domain addresses, port is
   // disregarded and the current working directory is used to interpret
@@ -417,12 +424,21 @@ class TestFcgiClientInterface
     return number_connected_;
   }
 
+  bool IsConnected(int connection) const;
+
   std::size_t ManagementRequestCount(int connection) const;
 
   inline std::size_t ReadyEventCount() const noexcept
   {
     return micro_event_queue_.size();
   }
+
+  inline std::size_t PendingRequestCount() const noexcept
+  {
+    return pending_request_map_.size();
+  }
+
+  std::size_t PendingRequestCount(int connection) const;
 
   // Attempts to release the FastCGI request identifier of id when id refers
   // to a request which is completed and unreleased.
@@ -730,7 +746,6 @@ class TestFcgiClientInterface
 
   struct ConnectionState
   {
-    // Move construction and move assignment may throw.
     bool                                  connected;
     a_component::IdManager<std::uint16_t> id_manager;
     RecordState                           record_state;
