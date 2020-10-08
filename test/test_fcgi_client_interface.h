@@ -239,6 +239,11 @@ class InvalidRecord : public ServerEvent
 class GetValuesResult : public ServerEvent
 {
  public:
+  inline bool IsCorrupt() const noexcept
+  {
+    return corrupt_response_;
+  }
+
   inline const ParamsMap& RequestMap() const noexcept
   {
     return request_params_map_;
@@ -517,17 +522,20 @@ class TestFcgiClientInterface
   // 2) If true was returned, then a FastCGI request abort was sent for id.
   bool SendAbortRequest(fcgi_si::RequestIdentifier id);
 
-  // Attempts to send a management request with content given by
-  // [byte_ptr, byte_ptr + length) and management request type given by type
-  // to connection.
+  // Attempts to send a management request to connection with the specified
+  // binary sequence as content and a management request type given by type.
   //
   // Parameters:
   // connection: The descriptor of a socket connection.
   // type:       The type of the management request. A type defined by the
   //             FastCGI protocol is not required.
+  // (Copy overload)
   // byte_ptr:   A pointer to the first byte in the byte sequence which will
   //             form the content of the management request.
   // length:     The length of the content byte sequence.
+  // (Move overload)
+  // data:       The data to be moved internally and sent to the server over
+  //             connection.
   // 
   // Preconditions: none
   //
@@ -555,58 +563,21 @@ class TestFcgiClientInterface
   //       added to the micro server event queue.
   // 2) If true was returned:
   //    a) The management request was sent.
-  //    b) A ManagementRequestData instance with a copy of the byte sequence 
-  //       given by [byte_ptr, byte_ptr + length) was enqueued to the
-  //       management request queue of connection.
+  //    b) Data was stored to allow an appropriate response object to be
+  //       initialized upon receipt of a response. The response object will
+  //       contain a reference to a byte sequence equal the specified content
+  //       byte sequence.
+  //    c) For the move overload: No copy of data was made. data is in a
+  //       moved from state.
   bool SendBinaryManagementRequest(int connection,
     fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length);
-  
-  // Attempts to send a management request with content given by data and
-  // management request type given by type to connection.
-  //
-  // Parameters:
-  // connection: The descriptor of a socket connection.
-  // type:       The type of the management request. A type defined by the
-  //             FastCGI protocol is not required.
-  // data:       The data to be moved into an internal queue and sent to
-  //             the server over connection.
-  // 
-  // Preconditions: none
-  //
-  // Exceptions:
-  // 1) A call may throw exceptions derived from std::exception.
-  // 2) If a throw occurs, one of the following holds:
-  //    a) The strong exception guarantee.
-  //    b) An error occurred when writing to the connection, and the connection
-  //       was corrupted as a result. The connection was closed by a call
-  //       to CloseConnection. A ConnectionClosure instance was added to the
-  //       micro server event queue.
-  //
-  // Termination:
-  // 1) If an error or exception would cause SendAbortRequest to return or
-  //    throw when an invariant of TestFcgiClientInterface is potentially
-  //    violated, the program is terminated.
-  //
-  // Effects:
-  // 1) If false was returned, then one of the following occurred:
-  //    a) connection was not a connected socket descriptor which was opened by
-  //       the interface.
-  //    b) data.size() was larger than fcgi_si::kMaxRecordContentByteLength.
-  //    c) It was discovered that the server closed the connection. When
-  //       connection closure was discovered, a ConnectionClosure instance was
-  //       added to the micro server event queue.
-  // 2) If true was returned:
-  //    a) The management request was sent.
-  //    b) A ManagementRequestData instance with the byte sequence of data was
-  //       enqueued to the management request queue of connection.
   bool SendBinaryManagementRequest(int connection,
     fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data);
 
   // Attempts to send an FCGI_GET_VALUES management request on connection.
   // Names are taken from params_map. Regardless of the values of the
   // name-value pairs of params_map, the name-value pair values are encoded as
-  // if they were empty. A copy of params_map with empty values is made and
-  // managed by *this.
+  // if they were empty.
   //
   // Parameters:
   // connection: The descriptor of a socket connection.
@@ -641,53 +612,12 @@ class TestFcgiClientInterface
   //       added to the micro server event queue.
   // 2) If true was returned:
   //    a) The management request was sent.
-  //    b) A ManagementRequestData instance with a ParamsMap instance with the
-  //       names of params_map and empty values was enqueued to the management
-  //       request queue of connection.
+  //    b) The data of the request, with name-value pair values ignored, was
+  //       stored to allow appropriate initialization of a GetValuesResult
+  //       object upon receipt of a response.
+  //    c) For the move overload: No copy of params_map was made. params_map
+  //       is in a moved-from state.
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
-
-  // Attempts to send an FCGI_GET_VALUES management request on connection.
-  // Names are taken from params_map. Regardless of the values of the
-  // name-value pairs of params_map, the name-value pair values are encoded as
-  // if they were empty. The values of params_map are cleared. params_map is
-  // then moved to storage managed by *this.
-  //
-  // Parameters:
-  // connection: The descriptor of a socket connection.
-  // params_map: A map of names to be encoded in the FastCGI name-value pair
-  //             format and sent to connection. Values of the map are ignored.
-  // 
-  // Preconditions: none
-  //
-  // Exceptions:
-  // 1) A call may throw exceptions derived from std::exception.
-  // 2) If a throw occurs, one of the following holds:
-  //    a) The strong exception guarantee.
-  //    b) An error occurred when writing to the connection, and the connection
-  //       was corrupted as a result. The connection was closed by a call
-  //       to CloseConnection. A ConnectionClosure instance was added to the
-  //       micro server event queue.
-  //
-  // Termination:
-  // 1) If an error or exception would cause SendAbortRequest to return or
-  //    throw when an invariant of TestFcgiClientInterface is potentially
-  //    violated, the program is terminated.
-  //
-  // Effects:
-  // 1) If false was returned, then one of the following occured:
-  //    a) connection was not a connected socket descriptor which was opened by
-  //       the interface.
-  //    b) The names of params_map and empty values required more than one
-  //       FastCGI record when they were encoded with a call to
-  //       fcgi_si::EncodeNameValuePairs.
-  //    c) It was discovered that the server closed the connection. When
-  //       connection closure was discovered, a ConnectionClosure instance was
-  //       added to the micro server event queue.
-  // 2) If true was returned:
-  //    a) The management request was sent.
-  //    b) The values of params_map were cleared. params_map was then moved to
-  //       a ManagementRequestData instance. This instance was then enqueued
-  //       to the management request queue of connection.
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
   //

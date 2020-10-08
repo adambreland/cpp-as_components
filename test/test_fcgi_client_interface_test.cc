@@ -32,8 +32,7 @@ namespace {
   }
 } // namespace
 
-// A Google Test test fixture for testing
-// fcgi_si_test::TestFcgiClientInterface::SendGetValuesRequest.
+// A Google Test test fixture.
 class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
 {
  protected:
@@ -54,7 +53,7 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
       close(listening_socket_);
       EXPECT_NE(unlink(unix_path_), -1) << std::strerror(errno);
     }
-    // Clear the timeout flag.
+    // Clear the timeout flag to reset shared state.
     test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
     fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
       "TestFcgiClientInterfaceGetValuesResult");
@@ -62,10 +61,15 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
     fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
   }
 
+  // AF_UNIX files cannot be created in the Bazel temporary file directory
+  // because its name is too long.
   const char* unix_path_ {"/tmp/TestFcgiClientInterfaceManagementRequests"};
   int listening_socket_ {-1};
   fcgi_si_test::FileDescriptorLeakChecker fdlc_ {};
 };
+
+
+
 
 TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
 {
@@ -76,6 +80,8 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   // which cause false to be returned is tested.
   //
   // Examined properties:
+  //
+ 
   // 
   //
   // Modules which testing depends on:
@@ -245,6 +251,46 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
 
 TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
 {
+  // Discussion
+  // 1) Management requests and responses each use a single FastCGI record.
+  //    Because of this, tests which examine correct interface behavior when
+  //    responses are received over multiple records are not relevant.
+  //
+  // Test cases:
+  // Tests for which calls to SendGetValueRequest return true.
+  // 1) A single request is made with the copy overload and the correct
+  //    response is returned.
+  // 2) As 1, but the move overload is used.
+  // 3) To ensure that the client interface correctly handles request order,
+  //    two distinct requests are made in series. Then the server interface
+  //    is allowed to process the requests. It is verified that the client
+  //    interface returns the correct responses in the order in which the
+  //    requests were enqueued.
+  // 4) To ensure that the client interface correctly handles connection
+  //    closure by the client interface user in the case that FastCGI
+  //    identifier values are allocated for a connection, an FCGI_GET_VALUES
+  //    request is made when a pending application request is present. Then
+  //    the connection is closed by the user. A new connection with the same
+  //    descriptor value is made. Then a management request is made which
+  //    should have a response which is distinct from the response that would
+  //    have been returned for the previous request. It is verified that the
+  //    correct response it returned.
+  //
+  // Tests for which calls to SendGetValueRequest return false.
+  // 
+  //
+
+
+
+
+
+
+
+
+
+
+
+
   // Testing explanation
   // This test examines the behavior of TestFcgiClientInterface when
   // SendGetValuesRequest is called on a new interface instance. The copy and
