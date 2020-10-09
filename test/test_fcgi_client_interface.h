@@ -24,8 +24,14 @@ namespace fcgi_si_test {
 
 using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
 
-// This is a reference type which contains the metadata of a FastCGI request
+//    This is a reference type which contains the metadata of a FastCGI request
 // and references to the data of the request.
+// 1) TestFcgiClientInterface::SendRequest accepts an FcgiRequest instance
+//    in its parameter list.
+// 2) FcgiResponse, a subtype of ServerEvent, uses FcgiRequest in its interface.
+//
+//    Note that a user of FcgiRequest must ensure that the contained pointers
+// remain valid while TestFcgiClientInterface may use their values.
 struct FcgiRequest
 {
   // Request metadata.
@@ -40,6 +46,15 @@ struct FcgiRequest
   const std::uint8_t* data_end;
 };
 
+// A ManagementRequestData instance is used to store the information of a
+// FastCGI management request.
+// 1) An FCGI_GET_VAULES request is represented as a ManagementRequestData
+//    instance with the appropriate type, a ParamsMap instance which stores
+//    the name-value pairs of the request, and an empty data field.
+// 2) All other management requests are treated as non-defined binary requests.
+//    A ManagementRequestData instance is passed to SendBinaryManagementRequest
+//    in this case. The type field is populated as desired, the params_map
+//    field is empty, and data holds the FastCGI record content of the request.
 struct ManagementRequestData
 {
   fcgi_si::FcgiType         type {0U};
@@ -59,6 +74,12 @@ class ServerEvent
 class ConnectionClosure : public ServerEvent
 {
   public:
+    // 1) For default-constructed instances, RequestId returns the
+    //    RequestIdentifier given by (-1, 0).
+    // 2) For other, non-moved-from instances, RequestId returns the
+    //    RequestIdentifier given by (connection, 0) where connection is a
+    //    local socket descriptor of a socket which was discovered to have been
+    //    closed by its peer.
     inline fcgi_si::RequestIdentifier RequestId() const noexcept override
     {
       return connection_holder_;
@@ -84,6 +105,10 @@ class ConnectionClosure : public ServerEvent
     fcgi_si::RequestIdentifier connection_holder_;
 };
 
+// A class which:
+// 1) Stores the response to a FastCGI application request.
+// 2) Allows access to the information of the request as represented by a
+//    FcgiRequest instance and the RequestIdentifier of the request.
 class FcgiResponse : public ServerEvent
 {
  public:
@@ -164,6 +189,120 @@ class FcgiResponse : public ServerEvent
   fcgi_si::RequestIdentifier request_id_;
 };
 
+class GetValuesResult : public ServerEvent
+{
+ public:
+  // 1) Returns true if a FastCGI name-value pair encoding error was detected
+  //    in the response for the FCGI_GET_VALUES request described
+  //    by RequestMap.
+  //    a) If true is returned, then ResponseMap returns an empty map. The
+  //       received erroneous data was discarded.
+  // 2) Returns false if no FastCGI name-value pair encoding error was detected.
+  //    IsCorrupt returns false for default-constructed instances.
+  //    a) For non-default constructed instances, ResponseMap returns the map
+  //       of name-value pairs which was encoded in the FCGI_GET_VALUES_RESULT
+  //       record sent in response to the request described by RequestMap.
+  inline bool IsCorrupt() const noexcept
+  {
+    return corrupt_response_;
+  }
+
+  inline const ParamsMap& RequestMap() const noexcept
+  {
+    return request_params_map_;
+  }
+
+  // 1) For a default constructed instance, RequestId returns the
+  //    RequestIdentifier given by (-1, 0).
+  // 2) For other, non-moved-from instances, RequestId returns the
+  //    RequestIdentifier given by (connection, 0) where connection is the
+  //    local socket descriptor of the socket over which the the
+  //    FCGI_GET_VALUES request and its response were sent.
+  inline fcgi_si::RequestIdentifier RequestId() const noexcept override
+  {
+    return request_id_;
+  }
+
+  inline const ParamsMap& ResponseMap() const noexcept
+  {
+    return response_params_map_;
+  }
+
+  inline GetValuesResult() noexcept
+  : corrupt_response_ {false},
+    request_id_ {-1, 0U},
+    request_params_map_ {},
+    response_params_map_ {}
+  {}
+
+  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id,
+    const ParamsMap& request, const ParamsMap& response)
+  : corrupt_response_ {corruption},
+    request_id_ {request_id},
+    request_params_map_ {request},
+    response_params_map_ {response}
+  {}
+
+  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id,
+    ParamsMap&& request, ParamsMap&& response) noexcept
+  : corrupt_response_ {corruption},
+    request_id_ {request_id},
+    request_params_map_ {std::move(request)},
+    response_params_map_ {std::move(response)}
+  {}
+
+  GetValuesResult(const GetValuesResult&) = default;
+  GetValuesResult(GetValuesResult&&) = default;
+
+  GetValuesResult& operator=(const GetValuesResult&) = default;
+  GetValuesResult& operator=(GetValuesResult&&) = default;
+
+  ~GetValuesResult() override = default;
+
+ private:
+  bool                       corrupt_response_;
+  fcgi_si::RequestIdentifier request_id_;
+  ParamsMap                  request_params_map_;
+  ParamsMap                  response_params_map_;
+};
+
+//    This class represents a FastCGI record which was deemed invalid. All of
+// the information of the record except for the value of the reserved header
+// byte and the values of padding bytes, if any, may be inspected.
+//    A record is deemed invalid if:
+// 1) The value of the version byte of the record header is not equal to one.
+// 2) A type-based record property was not met. These properties may depend
+//    on the request history of the client interface.
+//    FCGI_END_REQUEST:
+//    a) The content length is not equal to its specified length, eight bytes.
+//    b) The record concerns a request which does not exist.
+//    c) The record would imply termination of a response before the streams of
+//       the response are complete.
+//    FCGI_STDOUT:
+//    a) The record concerns a request which does not exist.
+//    b) The record concerns a request whose response has a completed
+//       FCGI_STDOUT stream.
+//    FCGI_STDERR:
+//    a) As for FCGI_STDOUT, mutatis mutandis.
+//    FCGI_GET_VALUES_RESULT:
+//    a) The FastCGI identifier of the record is not zero.
+//    b) No management requests exist for the connection over which the record
+//       was sent.
+//    c) The management request at the beginning of the management request
+//       queue does is not an FCGI_GET_VALUES request.
+//    FCGI_UNKNOWN_TYPE:
+//    a) The FastCGI identifier of the record is not zero.
+//    b) No management requests exist for the connection over which the record
+//       was sent.
+//    c) The content length is not equal to its specified length, eight bytes.
+//    d) The management request at the beginning of the management request
+//       queue does is an FCGI_GET_VALUES request. All FastCGI application
+//       servers must accept FCGI_GET_VALUES requests, and FCGI_GET_VALUES
+//       is the only management request type specified in the first version of
+//       the FastCGI protocol.
+//    Any other record type:
+//    a) All other types are rejected as they should not be sent to a FastCGI
+//       client server.
 class InvalidRecord : public ServerEvent
 {
  public:
@@ -236,75 +375,26 @@ class InvalidRecord : public ServerEvent
   std::uint8_t               padding_length_;
 };
 
-class GetValuesResult : public ServerEvent
-{
- public:
-  inline bool IsCorrupt() const noexcept
-  {
-    return corrupt_response_;
-  }
-
-  inline const ParamsMap& RequestMap() const noexcept
-  {
-    return request_params_map_;
-  }
-
-  inline fcgi_si::RequestIdentifier RequestId() const noexcept override
-  {
-    return request_id_;
-  }
- 
-  inline const ParamsMap& ResponseMap() const noexcept
-  {
-    return response_params_map_;
-  }
-
-  inline GetValuesResult() noexcept
-  : corrupt_response_ {false},
-    request_id_ {-1, 0U},
-    request_params_map_ {},
-    response_params_map_ {}
-  {}
-
-  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id, 
-    const ParamsMap& request, const ParamsMap& response)
-  : corrupt_response_ {corruption},
-    request_id_ {request_id},
-    request_params_map_ {request},
-    response_params_map_ {response}
-  {}
-
-  inline GetValuesResult(bool corruption, fcgi_si::RequestIdentifier request_id, 
-    ParamsMap&& request, ParamsMap&& response) noexcept
-  : corrupt_response_ {corruption},
-    request_id_ {request_id},
-    request_params_map_ {std::move(request)},
-    response_params_map_ {std::move(response)}
-  {}
-
-  GetValuesResult(const GetValuesResult&) = default;
-  GetValuesResult(GetValuesResult&&) = default;
-  
-  GetValuesResult& operator=(const GetValuesResult&) = default;
-  GetValuesResult& operator=(GetValuesResult&&) = default;
-
-  ~GetValuesResult() override = default;
-
- private:
-  bool                       corrupt_response_;
-  fcgi_si::RequestIdentifier request_id_;
-  ParamsMap                  request_params_map_;
-  ParamsMap                  response_params_map_;
-};
-
 class UnknownType : public ServerEvent
 {
  public:
+  // 1) For a default constructed instance, Request accesses a default-
+  //    constructed ManagementRequestData instance.
+  // 2) For other, non-moved-from instances, Request accesses a
+  //    ManagementRequestData instance with the data of the
+  //    appropriate ManagementRequestData instance which was used in a call to
+  //    TestFcgiClientInterface::SendBinaryManagementRequest.
   inline const ManagementRequestData& Request() const noexcept
   {
     return request_;
   }
 
+  // 1) For a default constructed instance, RequestId returns the
+  //    RequestIdentifier given by (-1, 0).
+  // 2) For other, non-moved-from instances, RequestId returns the
+  //    RequestIdentifier given by (connection, 0) where connection is the
+  //    local socket descriptor of the socket over which the management
+  //    request and its corresponding FCGI_UNKNOWN_TYPE response were sent.
   inline fcgi_si::RequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
@@ -349,8 +439,80 @@ class UnknownType : public ServerEvent
   ManagementRequestData      request_;
 };
 
-                    ////// The interface class. //////
+                    ////// TestFcgiClientInterface //////
 
+//    TestFcgiClientInterface provides an implementation of the FastCGI
+// protocol for programs which make requests of FastCGI application servers.
+// Such programs may be called clients or client servers.
+//    The interface allows connections to be made to distinct FastCGI
+// application servers. Different socket domains may be used; all connections
+// are stream-based as FastCGI requires stream-based sockets.
+//    Each interface instance has a management request queue for each
+// connection. As all management requests on a given connection share the same
+// request identifier (connection, 0), management request order is preserved
+// by the queue. Responses to management requests are associated with
+// management requests according to request order.
+//    A user can manually close a connection through a call to CloseConnection.
+// When this is done, all pending application requests and pending management
+// requests are lost. The interface informs a user that an application server
+// closed a connection by returning an appropriate ConnectionClosure instance
+// from a call to RetrieveServerEvent. As for manual closure, all pending
+// application and management requests are lost when this occurs.
+//    The interface uses the notion of allocated and released request
+// identifiers. All request identifiers are initially unallocated. This is
+// equivalent to being released. When a request is made, a FastCGI identifier
+// is chosen by the interface. Let this identifier be ID. The pair
+// (connection, ID) is used to construct an fcgi_si::RequestIdentifier instance.
+// This value within RequestIdentifier identifies the request. Once the request
+// is made, this value transitions from being released to being allocated. Only
+// released values are used for new requests. Once a response has been received
+// for a request identified by value v = (connection, ID), value is not
+// released until a call to ReleaseId(v) or ReleaseId(connection) is made. This
+// is true regardless of intervening closure of connection by an application
+// server or through calls of CloseConnection(connection).
+//    Note that the handling of allocated and released request identifiers for
+// requests which received a response (completed requests) prevents the reuse
+// of a request identifier before it is explicitly released by the user of
+// the interface. This allows processing of the responses to requests to be
+// deferred while preventing ambiguous request identifier values.
+//    TestFcgiServerEvent uses instances of types derived from the abstract
+// type ServerEvent to represent information which was received from
+// application servers. ServerEvent was defined for this purpose. An internal
+// queue is used to store events.
+//    The event queue is also used by SendAbortRequest,
+// SendBinaryManagementRequest, and SendGetValuesRequest to report the detection
+// during their invocation of the closure of a connection by its peer.
+//
+//    Several features of the interface make it suited for programs which
+// test implementations of the FastCGI protocol for application servers or
+// which test application servers.
+// 1) The interface is not concurrent (though I/O multiplexing on connections
+//    is performed).
+//    a) Interface methods may not be safely called from multiple threads.
+//    b) A single server event may be retrieved at a time. Calls to
+//       RetrieveServerEvent block until an event is ready.
+//    c) Methods which do not read incoming data may add events to the common
+//       event queue.
+// 2) InvalidRecord is used to expose invalid records received from application
+//    servers. This behavior is performed instead of dropping the record.
+// 3) Encoding errors in the content of FCGI_GET_VALUES_RESULT records are
+//    exposed through the IsCorrupt method of GetValuesResult.
+// 4) A reference type is used to represent request values when requests are
+//    submitted to the interface by a user. Copies of request data are not made
+//    by the interface. This allows a reduction of the memory footprint of
+//    the internal state used to represent and track requests while still
+//    allowing request data identity to be returned with the response to a
+//    request. It also allows the data of a single request to be reused with
+//    low overhead in the case where many requests with the same data are
+//    submitted to an application server.
+// 5) Management requests with types other than FCGI_GET_VALUES can be sent.
+//    The content of such requests is not constrained.
+// 6) Errors and exceptions are handled simply. This is appropriate and
+//    acceptable for testing code.
+//    a) In some cases, program termination by the interface is allowed.
+//    b) Though methods have clearly defined exception specifications,
+//       exceptions are propagated with little expectation of or support for
+//       recovery.
 class TestFcgiClientInterface
 {
  public:
@@ -382,11 +544,19 @@ class TestFcgiClientInterface
   //       instances which were generated for them no longer refer to requests.
   bool CloseConnection(int connection);
 
+  // Returns the total number of completed and unreleased requests which are
+  // managed by the interface. When non-zero, this value may be decreased by an
+  // appropriate call of ReleaseId.
   inline std::size_t CompletedRequestCount() const noexcept
   {
     return completed_request_set_.size();
   }
 
+  // Returns the number of completed and unreleased requests which were made on
+  // any connection which was identified by a socket descriptor equal to
+  // connection. When non-zero, this value may be decreased by a call of
+  // ReleaseId(connection) or ReleaseId(v) where the connection of v is
+  // connection and v identifies a completed and unreleased request.
   std::size_t CompletedRequestCount(int connection) const;
 
   // Attempts to connect to an IPv4, IPv6, or UNIX domain stream socket as
@@ -424,13 +594,20 @@ class TestFcgiClientInterface
   // 3) EINTR was ignored during the invocation.
   int Connect(const char* address, in_port_t network_port);
 
+  // Returns the total number of connected socket descriptors which are managed
+  // by the interface.
   inline int ConnectionCount() const noexcept
   {
     return number_connected_;
   }
 
+  // Returns true if connection is a connected socket descriptor managed by
+  // the interface. Note that false is returned in the case that connection
+  // is closed but request identifiers which are associated with completed
+  // requests on connection are present.
   bool IsConnected(int connection) const;
 
+  // Returns the number of pending management requests for connection.
   std::size_t ManagementRequestCount(int connection) const;
 
   inline std::size_t ReadyEventCount() const noexcept
@@ -438,11 +615,13 @@ class TestFcgiClientInterface
     return micro_event_queue_.size();
   }
 
+  // Returns the total number of pending requests.
   inline std::size_t PendingRequestCount() const noexcept
   {
     return pending_request_map_.size();
   }
 
+  // Returns the number of pending requests for connection.
   std::size_t PendingRequestCount(int connection) const;
 
   // Attempts to release the FastCGI request identifier of id when id refers

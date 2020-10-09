@@ -1634,7 +1634,7 @@ TestFcgiClientInterface::SendRequest(int connection,
   }
   catch(...)
   {
-    // The first write happens to be use operations which cannot throw.
+    // The first write happens to use operations which cannot throw.
     // Accordingly, if this catch block is reached, then some data will have
     // been written.
     try // noexcept-equivalent block.
