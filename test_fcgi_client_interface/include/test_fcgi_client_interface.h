@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_TEST_FCGI_CLIENT_INTERFACE_H_
-#define A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_TEST_FCGI_CLIENT_INTERFACE_H_
+#ifndef A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#define A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
 
 #include <sys/select.h>
 #include <netinet/in.h>
@@ -1118,7 +1118,7 @@ class TestFcgiClientInterface
   static constexpr const char* write_or_select_ {"write or select"};
 };
 
-} // namespace a_component
 } // namespace fcgi
+} // namespace a_component
 
-#endif // A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_TEST_FCGI_CLIENT_INTERFACE_H_
+#endif // A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_

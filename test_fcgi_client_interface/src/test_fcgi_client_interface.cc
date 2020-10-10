@@ -1781,5 +1781,5 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
   return pending_iter;
 }
 
-} // namespace a_component
 } // namespace fcgi
+} // namespace a_component
