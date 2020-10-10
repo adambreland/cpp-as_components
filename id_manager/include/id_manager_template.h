@@ -186,9 +186,6 @@ class IdManager
   std::map<I, I> id_intervals_;
 
   static_assert(std::is_integral<I>::value, "An integral type must be used.");
-  static_assert(std::is_nothrow_default_constructible<std::map<I, I>>::value);
-  static_assert(std::is_nothrow_move_constructible<std::map<I, I>>::value);
-  static_assert(std::is_nothrow_move_assignable<std::map<I, I>>::value);
 };
 
 template<typename I>
