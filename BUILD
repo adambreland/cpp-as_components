@@ -1,7 +1,6 @@
 exports_files([
     "include/protocol_constants.h",
-    "include/request_identifier.h",
-    "include/utilities.h"
+    "include/request_identifier.h"
 ])
 
 cc_library(

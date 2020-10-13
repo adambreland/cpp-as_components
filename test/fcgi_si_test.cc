@@ -535,8 +535,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
   // 1) fcgi_si::EncodeNameValuePairs
   // 2) fcgi_si::ExtractBinaryNameValuePairs
   // 3) fcgi_si::PopulateHeader
-  // 4) socket_functions::ScatterGatherSocketWrite
-  // 5) socket_functions::SocketRead
+  // 4) a_component::socket_functions::ScatterGatherSocketWrite
+  // 5) a_component::socket_functions::SocketRead
   // 6) fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
   //
   // Other modules whose testing depends on this module: none.
@@ -582,7 +582,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
       return;
     }
 
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[0], a.iovec_ptr, a.iovec_count, 
       a.number_to_write)) != 0U)
     {
@@ -614,7 +614,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
     bool read {true};
     while(read)
     {
-      std::size_t read_return {socket_functions::SocketRead(
+      std::size_t read_return {a_component::socket_functions::SocketRead(
         spiac.client_descriptors()[0], read_buffer, 128U)};
       returned_result.insert(returned_result.end(), read_buffer, 
         read_buffer + read_return);
@@ -892,8 +892,8 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   //    padding is used.
   //
   // Modules which testing depends on:
-  // 1) socket_functions::SocketRead
-  // 2) socket_functions::SocketWrite
+  // 1) a_component::socket_functions::SocketRead
+  // 2) a_component::socket_functions::SocketWrite
   // 3) fcgi_si::PopulateHeader
   // 4) fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients
   // 
@@ -911,8 +911,8 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     {
       fcgi_si_test::GTestNonFatalSingleProcessInterfaceAndClients spiac
         {args, 1};
-      if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
-        buffer_ptr, count) < count)
+      if(a_component::socket_functions::SocketWrite(
+        spiac.client_descriptors()[0], buffer_ptr, count) < count)
       {
         ADD_FAILURE() << "Writing a request to the interface could not be "
           "performed in full in" << case_suffix << '\n' << std::strerror(errno);
@@ -924,8 +924,9 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
       constexpr int_fast32_t response_length 
         {2 * fcgi_si::FCGI_HEADER_LEN};
       std::uint8_t read_buffer[response_length] = {};
-      if(socket_functions::SocketRead(spiac.client_descriptors()[0],
-        read_buffer, response_length) < (response_length))
+      if(a_component::socket_functions::SocketRead(
+        spiac.client_descriptors()[0], read_buffer, response_length) 
+        < (response_length))
       {
         ADD_FAILURE() << "Fewer than the expected number of bytes were read "
           "of the response by the interface to an unknown management request "
@@ -956,7 +957,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
         << case_suffix;
       
       // Ensure that unexpected information was not received.
-      std::size_t read_return {socket_functions::SocketRead(
+      std::size_t read_return {a_component::socket_functions::SocketRead(
         spiac.client_descriptors()[0], read_buffer, 1)};
       if(read_return != 0U)
       {
@@ -1226,7 +1227,7 @@ RunTest()
     // bytes are expected. These represent the port of the interface for the
     // internet domains and a ready signal for AF_UNIX.
     in_port_t port {};
-    std::size_t socket_read {socket_functions::SocketRead(
+    std::size_t socket_read {a_component::socket_functions::SocketRead(
       socket_pair_array_[1],
       static_cast<std::uint8_t*>(static_cast<void*>(&port)), 
       sizeof(port)
@@ -1355,11 +1356,11 @@ RunTest()
       }
       // Signal the interface process that a connection was made and wait
       // for the interface to signal that another connection can be made.
-      std::size_t signal_to {socket_functions::SocketWrite(
+      std::size_t signal_to {a_component::socket_functions::SocketWrite(
         socket_pair_array_[1], &null_byte, 1)};
       if(signal_to < 1)
         _exit(EXIT_FAILURE);
-      std::size_t signal_from {socket_functions::SocketRead(
+      std::size_t signal_from {a_component::socket_functions::SocketRead(
         socket_pair_array_[1], &received_byte, 1)};
       if(signal_from < 1)
         _exit(EXIT_FAILURE);
@@ -1400,7 +1401,7 @@ RunTest()
     std::vector<std::uint8_t> status_list {};
     for(std::size_t i {0}; i < total_connections; ++i)
     {
-      std::size_t read_status {socket_functions::SocketRead(
+      std::size_t read_status {a_component::socket_functions::SocketRead(
         client_socket_descriptor_list[i], &received_byte, 1)};
       if(read_status != 0)
         status_list.push_back(2U); // Received data.
@@ -1411,8 +1412,9 @@ RunTest()
       else
         _exit(EXIT_FAILURE);       // Error trying to read. 
     }
-    std::size_t status_report_transmission {socket_functions::SocketWrite(
-      socket_pair_array_[1], status_list.data(), status_list.size())};
+    std::size_t status_report_transmission {a_component::socket_functions::
+      SocketWrite(socket_pair_array_[1], status_list.data(),
+      status_list.size())};
     _exit((status_report_transmission < status_list.size()) ? 
       EXIT_FAILURE : EXIT_SUCCESS);
   }
@@ -1456,9 +1458,9 @@ RunTest()
   }
 
   // Write the port for internet domains and at least a byte for AF_UNIX.
-  std::size_t port_write {socket_functions::SocketWrite(socket_pair_array_[0], 
-    static_cast<std::uint8_t*>(static_cast<void*>(&std::get<2>(inter_tuple_))),
-    sizeof(std::get<2>(inter_tuple_)))};
+  std::size_t port_write {a_component::socket_functions::SocketWrite(
+    socket_pair_array_[0], static_cast<std::uint8_t*>(static_cast<void*>(
+    &std::get<2>(inter_tuple_))), sizeof(std::get<2>(inter_tuple_)))};
   if(port_write < sizeof(std::get<2>(inter_tuple_)))
   {
     ADD_FAILURE() << "An error occurred while sending the port to the "
@@ -1474,7 +1476,7 @@ RunTest()
   {
     // Wait for client process readiness. A connection should be pending
     // on the interface.
-    std::size_t client_signal {socket_functions::SocketRead(
+    std::size_t client_signal {a_component::socket_functions::SocketRead(
       socket_pair_array_[0], &received_byte, 1)};
     if(client_signal < 1)
     {
@@ -1519,7 +1521,7 @@ RunTest()
     if(connection_count == args_.overload_after)
       std::get<0>(inter_tuple_)->set_overload(true);
     // Signal that the interface processed the connection.
-    std::size_t socket_write {socket_functions::SocketWrite(
+    std::size_t socket_write {a_component::socket_functions::SocketWrite(
       socket_pair_array_[0], &null_byte, 1)};
     if(socket_write < 1)
     {
@@ -1535,7 +1537,7 @@ RunTest()
   // Wait for the connection status report.
   std::vector<std::uint8_t> status_report(total_connections, 0U);
   // WARNING: writes directly to a vector buffer.
-  std::size_t status_report_read {socket_functions::SocketRead(
+  std::size_t status_report_read {a_component::socket_functions::SocketRead(
     socket_pair_array_[0], status_report.data(), 
     total_connections)};
   if(status_report_read < std::size_t(total_connections))
@@ -1616,8 +1618,8 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   //    and it fails.
   // 
   // Modules which testing depends on:
-  // 1) socket_functions::SocketRead
-  // 2) socker_functions::SocketWrite
+  // 1) a_component::socket_functions::SocketRead
+  // 2) a_component::socker_functions::SocketWrite
   //
   // Modules whose testing depends on this module: none.
   //
@@ -2070,8 +2072,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     for(std::size_t i {0U}; i != pairs_size; ++i)
     {
       std::size_t previous_size {requests.size()};
-      if(socket_functions::SocketWrite(spiac.client_descriptors().at(0U),
-        pairs[i].first, pairs[i].second) < pairs[i].second)
+      if(a_component::socket_functions::SocketWrite(
+        spiac.client_descriptors().at(0U), pairs[i].first, pairs[i].second)
+        < pairs[i].second)
       {
         ADD_FAILURE() << "A part of the request could not be written in full "
           "in " << case_message << '\n' << std::strerror(errno);
@@ -2367,7 +2370,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     fcgi_si::PopulateHeader(terminal_stdin_record,
       fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
 
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       begin_record, 2 * fcgi_si::FCGI_HEADER_LEN) 
       < 2 * fcgi_si::FCGI_HEADER_LEN)
     {
@@ -2393,7 +2396,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     std::tuple<struct iovec*, int, std::size_t> sgsw_return 
-      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+      {a_component::socket_functions::ScatterGatherSocketWrite(
+        spiac.client_descriptors()[0],
         std::get<2>(pair_encoding_return).data(), 
         std::get<2>(pair_encoding_return).size(), 
         std::get<1>(pair_encoding_return))};
@@ -2403,7 +2407,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         "could be written." << '\n' << std::strerror(errno);
       break;
     }
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       terminal_params_record, fcgi_si::FCGI_HEADER_LEN) != 
         fcgi_si::FCGI_HEADER_LEN)
     {
@@ -2428,7 +2432,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     std::tuple<struct iovec*, int, std::size_t> stdin_sgsw_return
-      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+      {a_component::socket_functions::ScatterGatherSocketWrite(
+        spiac.client_descriptors()[0],
         std::get<1>(partition_return).data(), 
         std::get<1>(partition_return).size(), std::get<2>(partition_return))};
     if(std::get<2>(stdin_sgsw_return) != 0U)
@@ -2437,7 +2442,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         << '\n' << std::strerror(errno);
       break;
     }
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(
+      spiac.client_descriptors()[0],
       terminal_stdin_record, fcgi_si::FCGI_HEADER_LEN) < 
       fcgi_si::FCGI_HEADER_LEN)
     {
@@ -2508,7 +2514,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
     
     // Write the FCGI_BEGIN_REQUEST record. 
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       begin_record, 3U) < 3U)
     {
       ADD_FAILURE() << "Incomplete begin request record write, first fragment."
@@ -2520,7 +2526,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       ADD_FAILURE() << accept_error;
       break;
     };
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       begin_record + 3U, (2*fcgi_si::FCGI_HEADER_LEN) - 3U) < 
       ((2*fcgi_si::FCGI_HEADER_LEN) - 3U))
     {
@@ -2556,7 +2562,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     for(std::size_t i {0U}; i < partial_number; ++i)
       partial_byte_count += std::get<2>(pair_encoding_return)[i].iov_len;
     std::tuple<struct iovec*, int, std::size_t> sgsw_return 
-      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+      {a_component::socket_functions::ScatterGatherSocketWrite(
+        spiac.client_descriptors()[0],
         std::get<2>(pair_encoding_return).data(), 
         partial_number, partial_byte_count)};
     if(std::get<2>(sgsw_return) != 0U)
@@ -2571,7 +2578,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       ADD_FAILURE() << accept_error;
       break;
     }
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[0], 
       std::get<2>(pair_encoding_return).data() + partial_number, 
       std::get<2>(pair_encoding_return).size() - partial_number, 
@@ -2583,7 +2590,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         << std::strerror(errno);
       break;
     }
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       terminal_params_record, fcgi_si::FCGI_HEADER_LEN) != 
         fcgi_si::FCGI_HEADER_LEN)
     {
@@ -2608,7 +2615,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     std::tuple<struct iovec*, int, std::size_t> stdin_sgsw_return
-      {socket_functions::ScatterGatherSocketWrite(spiac.client_descriptors()[0],
+      {a_component::socket_functions::ScatterGatherSocketWrite(
+        spiac.client_descriptors()[0],
         std::get<1>(partition_return).data(), 
         std::get<1>(partition_return).size(), std::get<2>(partition_return))};
     if(std::get<2>(stdin_sgsw_return) != 0U)
@@ -2617,7 +2625,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         << std::strerror(errno);
       break;
     }
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       terminal_stdin_record, 4U) < 4U)
     {
       ADD_FAILURE() << "The first fragment of the terminal stdin record was "
@@ -2629,7 +2637,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       ADD_FAILURE() << accept_error;
       break;
     }
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       terminal_stdin_record + 4U, fcgi_si::FCGI_HEADER_LEN - 4U) < 
       (fcgi_si::FCGI_HEADER_LEN - 4U))
     {
@@ -2670,8 +2678,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     int write_count {0};
     for(std::pair<const std::uint8_t*, std::size_t> write_pair : write_pairs)
     {
-      if(socket_functions::SocketWrite(spiac_ptr->client_descriptors()[0],
-        write_pair.first, write_pair.second) < write_pair.second)
+      if(a_component::socket_functions::SocketWrite(
+        spiac_ptr->client_descriptors()[0], write_pair.first, write_pair.second)
+        < write_pair.second)
       {
         ADD_FAILURE() << "An error occurred while writing the request."
           << '\n' << std::strerror(errno);
@@ -2761,7 +2770,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       request_data.Fcgi_id, 0U, 0U);
 
     // Write the begin record.
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       begin_record, 2 * fcgi_si::FCGI_HEADER_LEN) < 
       (2 * fcgi_si::FCGI_HEADER_LEN))
     {
@@ -2782,7 +2791,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     )->void
     {
       std::tuple<struct iovec*, int, std::size_t> sgsw_return 
-        {socket_functions::ScatterGatherSocketWrite(
+        {a_component::socket_functions::ScatterGatherSocketWrite(
           spiac.client_descriptors()[0], 
           std::get<1>(*part_return_ptr).data(),
           std::get<1>(*part_return_ptr).size(),
@@ -2793,9 +2802,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
           "in " << test_case_name << '\n' << std::strerror(errno);
         return;
       }
-      if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
-        terminal_buffer_ptr, fcgi_si::FCGI_HEADER_LEN) < 
-        fcgi_si::FCGI_HEADER_LEN)
+      if(a_component::socket_functions::SocketWrite(
+        spiac.client_descriptors()[0], terminal_buffer_ptr,
+        fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
       {
         ADD_FAILURE() << "The terminal FCGI_STDIN record could not be "
           "written in full in " << test_case_name << '\n'
@@ -2809,7 +2818,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       switch(type) {
         case fcgi_si::FcgiType::kFCGI_PARAMS : {
           std::tuple<struct iovec*, int, std::size_t> sgsw_return
-            {socket_functions::ScatterGatherSocketWrite(
+            {a_component::socket_functions::ScatterGatherSocketWrite(
               spiac.client_descriptors()[0],
               std::get<2>(encoded_pairs_return).data(),
               std::get<2>(encoded_pairs_return).size(),
@@ -2820,9 +2829,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
               "content in " << test_case_name << '\n' << std::strerror(errno);
             return;
           }
-          if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
-            terminal_params, fcgi_si::FCGI_HEADER_LEN) < 
-            fcgi_si::FCGI_HEADER_LEN)
+          if(a_component::socket_functions::SocketWrite(
+            spiac.client_descriptors()[0], terminal_params,
+            fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
           {
             ADD_FAILURE() << "The terminal FCGI_PARAMS record was not sent in "
               "full in " << test_case_name << '\n' << std::strerror(errno);
@@ -3154,8 +3163,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     fcgi_si::PopulateHeader(records + (14 * fcgi_si::FCGI_HEADER_LEN),
       fcgi_si::FcgiType::kFCGI_STDIN, request_data.Fcgi_id, 0U, 0U);
 
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], records,
-      record_array_length) < record_array_length)
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
+      records, record_array_length) < record_array_length)
     {
       ADD_FAILURE() << "An error occurred when writing the record sequence.";
       break;
@@ -3347,14 +3356,14 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const int& in {spiac.client_descriptors()[0]};
     std::vector<fcgi_si::FcgiRequest> request_list {};
     // R-b, A-b
-    if(socket_functions::SocketWrite(in, begin_records[0], 
+    if(a_component::socket_functions::SocketWrite(in, begin_records[0], 
        4 * fcgi_si::FCGI_HEADER_LEN) < (4 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
     }
     // R-p
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<2>(params_encoding_list[0]).data(),
          std::get<2>(params_encoding_list[0]).size(),
@@ -3366,14 +3375,14 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // AcceptRequests
     AcceptAndAddRequests(&spiac, &request_list);
     // F-b
-    if(socket_functions::SocketWrite(in, begin_records[2], 
+    if(a_component::socket_functions::SocketWrite(in, begin_records[2], 
        2 * fcgi_si::FCGI_HEADER_LEN) < (2 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
     }
     // A-p
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<2>(params_encoding_list[1]).data(),
          std::get<2>(params_encoding_list[1]).size(),
@@ -3385,14 +3394,15 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // AcceptRequests
     AcceptAndAddRequests(&spiac, &request_list);
     // A-pe
-    if(socket_functions::SocketWrite(in, terminal_params_records[1], 
-       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    if(a_component::socket_functions::SocketWrite(in,
+      terminal_params_records[1],  1 * fcgi_si::FCGI_HEADER_LEN) < 
+      (1 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
     }
     // F-d
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<1>(encoded_data_records).data(),
          std::get<1>(encoded_data_records).size(),
@@ -3402,14 +3412,14 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-de
-     if(socket_functions::SocketWrite(in, terminal_data_record, 
+     if(a_component::socket_functions::SocketWrite(in, terminal_data_record, 
        1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
     }
     // F-s
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<1>(stdin_encoding_list[2]).data(),
          std::get<1>(stdin_encoding_list[2]).size(),
@@ -3419,8 +3429,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-se
-    if(socket_functions::SocketWrite(in, terminal_filter_stdin_record, 
-       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    if(a_component::socket_functions::SocketWrite(in,
+      terminal_filter_stdin_record, 1 * fcgi_si::FCGI_HEADER_LEN) <
+      (1 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
@@ -3428,14 +3439,15 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // AcceptRequests
     AcceptAndAddRequests(&spiac, &request_list);
     // R-pe
-    if(socket_functions::SocketWrite(in, terminal_params_records[0], 
-       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    if(a_component::socket_functions::SocketWrite(in,
+      terminal_params_records[0], 1 * fcgi_si::FCGI_HEADER_LEN) <
+      (1 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
     }
     // R-s
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<1>(stdin_encoding_list[0]).data(),
          std::get<1>(stdin_encoding_list[0]).size(),
@@ -3445,7 +3457,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-p
-    if(std::get<2>(socket_functions::ScatterGatherSocketWrite(
+    if(std::get<2>(a_component::socket_functions::ScatterGatherSocketWrite(
          in, 
          std::get<2>(params_encoding_list[2]).data(),
          std::get<2>(params_encoding_list[2]).size(),
@@ -3455,8 +3467,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-pe
-    if(socket_functions::SocketWrite(in, terminal_params_records[2], 
-       1 * fcgi_si::FCGI_HEADER_LEN) < (1 * fcgi_si::FCGI_HEADER_LEN))
+    if(a_component::socket_functions::SocketWrite(in,
+      terminal_params_records[2], 1 * fcgi_si::FCGI_HEADER_LEN) <
+      (1 * fcgi_si::FCGI_HEADER_LEN))
     {
       ADD_FAILURE() << "Write error" << '\n' << std::strerror(errno);
       break;
@@ -3509,8 +3522,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     std::uint8_t begin_record[header_length] = {};
     fcgi_si::PopulateBeginRequestRecord(begin_record, request_data.Fcgi_id,
       request_data.role, request_data.fcgi_keep_conn);
-    if(socket_functions::SocketWrite(socket_descriptor, begin_record,
-      header_length) < header_length)
+    if(a_component::socket_functions::SocketWrite(socket_descriptor,
+      begin_record, header_length) < header_length)
     {
       ADD_FAILURE() << "An error occurred while sending the FCGI_BEGIN_REQUEST "
         "record in " << test_case_name;
@@ -3555,7 +3568,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       message += test_case_name;
 
       std::tuple<struct iovec*, int, std::size_t> sgsw_return
-        {socket_functions::ScatterGatherSocketWrite(
+        {a_component::socket_functions::ScatterGatherSocketWrite(
           socket_descriptor,
           std::get<1>(encoding_return).data(),
           std::get<1>(encoding_return).size(),
@@ -3570,7 +3583,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       {
         std::uint8_t end[fcgi_si::FCGI_HEADER_LEN] = {};
         fcgi_si::PopulateHeader(end, type, request_data.Fcgi_id, 0U, 0U);
-        if(socket_functions::SocketWrite(socket_descriptor, end,
+        if(a_component::socket_functions::SocketWrite(socket_descriptor, end,
           fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
         {
           ADD_FAILURE() << message << '\n' << std::strerror(errno);
@@ -3615,7 +3628,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     const char* params_message {"An error occurred while sending the "
       "FCGI_PARAMS data in "};
     std::tuple<struct iovec*, int, std::size_t> params_sgsw_return
-      {socket_functions::ScatterGatherSocketWrite(
+      {a_component::socket_functions::ScatterGatherSocketWrite(
         socket_descriptor,
         std::get<2>(params_encoding_return).data(),
         std::get<2>(params_encoding_return).size(),
@@ -3629,7 +3642,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     std::uint8_t params_end[fcgi_si::FCGI_HEADER_LEN] = {};
     fcgi_si::PopulateHeader(params_end, fcgi_si::FcgiType::kFCGI_PARAMS,
       request_data.Fcgi_id, 0U, 0U);
-    if(socket_functions::SocketWrite(socket_descriptor, params_end,
+    if(a_component::socket_functions::SocketWrite(socket_descriptor, params_end,
       fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
     {
       ADD_FAILURE() << params_message << test_case_name << '\n'
@@ -4065,14 +4078,14 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     std::vector<fcgi_si::FcgiRequest> request_list {};
     std::tuple<struct iovec*, int, std::size_t> sgsw_return {};
     // R1-b-p
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0], 
       responder_1_begin, 3U) < 3U)
     {
       ADD_FAILURE() << std::strerror(errno);
       break;
     }
     // F-b
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[1], 
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[1], 
       filter_begin, 2 * fcgi_si::FCGI_HEADER_LEN) < 
       2 * fcgi_si::FCGI_HEADER_LEN)
     {
@@ -4082,7 +4095,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // AcceptRequests
     AcceptAndAddRequests(&spiac, &request_list);
     // R1-b-c
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_1_begin + 3U, (2 * fcgi_si::FCGI_HEADER_LEN) - 3U) < 
       ((2 * fcgi_si::FCGI_HEADER_LEN) - 3U))
     {
@@ -4090,7 +4103,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R2-b
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_2_begin, 2 * fcgi_si::FCGI_HEADER_LEN) < 
       2 * fcgi_si::FCGI_HEADER_LEN)
     {
@@ -4100,7 +4113,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // R2-p-p
     int R2pp_partial_iovec_count {std::max<int>(1,
       std::get<2>(encoded_responder_2_params).size() / 2)};
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[0], 
       std::get<2>(encoded_responder_2_params).data(),
       R2pp_partial_iovec_count);
@@ -4110,7 +4123,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-p
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[1], 
       std::get<2>(encoded_filter_params).data(),
       std::get<2>(encoded_filter_params).size(), 
@@ -4123,7 +4136,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // F-s-p
     int Fsp_partial_iovec_count {std::max<int>(1,
       std::get<1>(encoded_filter_stdin).size() / 2)};
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[1],
       std::get<1>(encoded_filter_stdin).data(),
       Fsp_partial_iovec_count);
@@ -4135,7 +4148,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // AcceptRequests
     AcceptAndAddRequests(&spiac, &request_list);
     // F-s-c
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[1],
       std::get<1>(encoded_filter_stdin).data() + Fsp_partial_iovec_count,
       int(std::get<1>(encoded_filter_stdin).size()) - Fsp_partial_iovec_count);
@@ -4145,17 +4158,19 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R2-p-c
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[0], 
-      std::get<2>(encoded_responder_2_params).data() + R2pp_partial_iovec_count,
-      int(std::get<2>(encoded_responder_2_params).size()) -  R2pp_partial_iovec_count);
+      std::get<2>(encoded_responder_2_params).data() +
+        R2pp_partial_iovec_count,
+      int(std::get<2>(encoded_responder_2_params).size()) -
+        R2pp_partial_iovec_count);
     if(std::get<2>(sgsw_return) != 0U)
     {
       ADD_FAILURE();
       break;
     }
     // R2-se
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_2_end_records + fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
     {
@@ -4163,7 +4178,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R2-pe
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_2_end_records, fcgi_si::FCGI_HEADER_LEN) <
       fcgi_si::FCGI_HEADER_LEN)
     {
@@ -4171,7 +4186,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R1-p
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[0], 
       std::get<2>(encoded_responder_1_params).data(),
       std::get<2>(encoded_responder_1_params).size(),
@@ -4182,7 +4197,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R1-pe
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_1_end_records, fcgi_si::FCGI_HEADER_LEN) <
       fcgi_si::FCGI_HEADER_LEN)
     {
@@ -4190,7 +4205,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // F-d
-    sgsw_return = socket_functions::ScatterGatherSocketWrite(
+    sgsw_return = a_component::socket_functions::ScatterGatherSocketWrite(
       spiac.client_descriptors()[1], 
       std::get<1>(encoded_filter_data).data(),
       std::get<1>(encoded_filter_data).size(),
@@ -4203,7 +4218,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     // F-pe
     // F-se
     // F-de
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[1],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[1],
       filter_end_records, 3 * fcgi_si::FCGI_HEADER_LEN) <
       (3 * fcgi_si::FCGI_HEADER_LEN))
     {
@@ -4211,7 +4226,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       break;
     }
     // R1-se
-    if(socket_functions::SocketWrite(spiac.client_descriptors()[0],
+    if(a_component::socket_functions::SocketWrite(spiac.client_descriptors()[0],
       responder_1_end_records + fcgi_si::FCGI_HEADER_LEN,
       fcgi_si::FCGI_HEADER_LEN) < fcgi_si::FCGI_HEADER_LEN)
     {

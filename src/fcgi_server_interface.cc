@@ -10,8 +10,8 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdint>          // For std::uint8_t and others.
-#include <cstdlib>          // For std::getenv(), std::size_t, and EXIT_FAILURE.
+#include <cstdint>        // For std::uint8_t and others.
+#include <cstdlib>        // For std::getenv(), std::size_t, and EXIT_FAILURE.
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -1361,8 +1361,8 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
   // 
   // Send record.
   struct timeval timeout {write_block_timeout, 0};
-  std::size_t number_written {socket_functions::WriteOnSelect(connection, 
-    buffer_ptr, count, &timeout)};
+  std::size_t number_written {a_component::socket_functions::
+    WriteOnSelect(connection, buffer_ptr, count, &timeout)};
   
   // Check for errors which prevented a full write.
   if(number_written < static_cast<std::size_t>(count))
@@ -1407,7 +1407,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     {
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "An error from a call to "
-        "socket_functions::WriteOnSelect."};
+        "a_component::socket_functions::WriteOnSelect."};
     } 
   }
   return true;

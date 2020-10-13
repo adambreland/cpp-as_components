@@ -901,8 +901,8 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       interface_state_lock.unlock();
 
     std::tuple<struct iovec*, int, std::size_t> write_return
-      {socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr, iovec_count,
-        working_number_to_write)};
+      {a_component::socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr,
+        iovec_count, working_number_to_write)};
     // Start return processing if-else-if ladder.
     if(std::get<2>(write_return) == 0) // All data was written.
     {

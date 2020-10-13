@@ -378,8 +378,8 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
     //
     // Note that reading does not require synchronization as only the
     // interface reads from the connected sockets.
-    std::int_fast32_t number_bytes_received(socket_functions::SocketRead(
-      connection_, read_buffer, kBufferSize));
+    std::int_fast32_t number_bytes_received(a_component::socket_functions::
+      SocketRead(connection_, read_buffer, kBufferSize));
 
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
