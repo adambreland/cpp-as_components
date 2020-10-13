@@ -3,6 +3,7 @@
 
 #include "include/utility.h"
 
+#include <sys/select.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -73,7 +74,7 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 
   // Determine the initial values of the break variables.
 
-  long remaining_iovec_count {iovec_MAX};
+  long remaining_iovec_count {sysconf(_SC_IOV_MAX)};
   // Use the current Linux default if information cannot be obtained.
   if(remaining_iovec_count == -1)
     remaining_iovec_count = 1024;

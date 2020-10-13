@@ -11,16 +11,12 @@
 #include <mutex>
 #include <vector>
 
+#include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
-#include "include/request_data.h"
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
 namespace fcgi_si {
-
-// Forward declaration to break the cyclic dependencies between FcgiRequest
-// and FcgiServerInterface include directives.
-class FcgiServerInterface;
 
 // FcgiRequest objects are produced by an instance of FcgiServerInterface. 
 // A request object contains all of the information given to the interface by a
@@ -250,7 +246,7 @@ class FcgiRequest {
   ~FcgiRequest();
 
  private:
-  friend class fcgi_si::FcgiServerInterface;
+  friend class FcgiServerInterface;
 
   // The constructor is private as only an FcgiServerInterface object
   // should create FcgiRequest objects through calls to AcceptRequests().
@@ -302,7 +298,8 @@ class FcgiRequest {
   // 2) After construction, request_status_ == RequestStatus::kRequestAssigned
   //    for the RequestData object given by *request_data_ptr.
   FcgiRequest(RequestIdentifier request_id, unsigned long interface_id,
-    FcgiServerInterface* interface_ptr, RequestData* request_data_ptr,
+    FcgiServerInterface* interface_ptr,
+    FcgiServerInterface::RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr,
     int write_fd);
 
@@ -512,7 +509,7 @@ class FcgiRequest {
   unsigned long associated_interface_id_;
   FcgiServerInterface* interface_ptr_;
   RequestIdentifier request_identifier_;
-  RequestData* request_data_ptr_;
+  FcgiServerInterface::RequestData* request_data_ptr_;
   std::mutex* write_mutex_ptr_;
   bool* bad_connection_state_ptr_;
   int interface_pipe_write_descriptor_;

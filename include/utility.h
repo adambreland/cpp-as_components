@@ -14,6 +14,10 @@
 
 namespace fcgi_si {
 
+// The system-dependent maximum struct iovec array length for scatter-gatter
+// I/O.
+const long iovec_MAX {sysconf(_SC_IOV_MAX)};
+
 // Encodes length in the FastCGI name-value pair format and stores the
 // output sequence of four bytes in the byte buffer pointed to by byte_iter.
 //

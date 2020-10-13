@@ -1,5 +1,3 @@
-#include "include/record_status.h"
-
 #include <cstdint>          // For std::uint32_t.
 #include <cstring>          // For std::memcpy
 #include <limits>
@@ -37,13 +35,14 @@
 //       data of the request.
 namespace fcgi_si {
 
-RecordStatus::
+FcgiServerInterface::RecordStatus::
 RecordStatus(int connection, FcgiServerInterface* interface_ptr)
 : connection_ {connection},
   i_ptr_ {interface_ptr}
 {}
 
-RecordStatus::RecordStatus(RecordStatus&& record_status) noexcept
+FcgiServerInterface::RecordStatus::
+RecordStatus(RecordStatus&& record_status) noexcept
 : connection_ {record_status.connection_},
   bytes_received_ {record_status.bytes_received_},
   content_bytes_expected_ {record_status.content_bytes_expected_},
@@ -58,7 +57,8 @@ RecordStatus::RecordStatus(RecordStatus&& record_status) noexcept
   std::memcpy(header_, record_status.header_, FCGI_HEADER_LEN);
 }
 
-RecordStatus& RecordStatus::operator=(RecordStatus&& record_status) noexcept
+FcgiServerInterface::RecordStatus& FcgiServerInterface::RecordStatus::
+operator=(RecordStatus&& record_status) noexcept
 {
   if(this != &record_status)
   {
@@ -78,7 +78,7 @@ RecordStatus& RecordStatus::operator=(RecordStatus&& record_status) noexcept
   return *this;
 }
 
-void RecordStatus::ClearRecord() noexcept
+void FcgiServerInterface::RecordStatus::ClearRecord() noexcept
 {
   // connection_ is unchanged.
   std::memset(header_, 0, FCGI_HEADER_LEN);
@@ -92,7 +92,7 @@ void RecordStatus::ClearRecord() noexcept
   // i_ptr_ is unchanged.
 }
 
-RequestIdentifier RecordStatus::ProcessCompleteRecord()
+RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
 {
   auto InterfaceCheck = [this]()->void
   {
@@ -350,7 +350,7 @@ RequestIdentifier RecordStatus::ProcessCompleteRecord()
 // 1) May acquire and release interface_state_mutex_.
 // 2) May implicitly acquire and release the write mutex associated with
 //    the connection of the RecordStatus object.
-std::vector<RequestIdentifier> RecordStatus::ReadRecords()
+std::vector<RequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
 {
   auto InterfaceCheck = [this]()->void
   {
@@ -678,7 +678,7 @@ std::vector<RequestIdentifier> RecordStatus::ReadRecords()
   return request_identifiers;
 }
 
-void RecordStatus::UpdateAfterHeaderCompletion()
+void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion()
 {
   // Extract number of content bytes from two bytes.
   content_bytes_expected_ = header_[kHeaderContentLengthB1Index];

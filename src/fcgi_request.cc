@@ -20,9 +20,7 @@
 
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/fcgi_server_interface.h"
 #include "include/protocol_constants.h"
-#include "include/request_data.h"
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
@@ -261,7 +259,7 @@ FcgiRequest::FcgiRequest(
   RequestIdentifier request_id,
   unsigned long interface_id,
   FcgiServerInterface* interface_ptr,
-  RequestData* request_data_ptr,
+  FcgiServerInterface::RequestData* request_data_ptr,
   std::mutex* write_mutex_ptr,
   bool* bad_connection_state_ptr,
   int write_fd)
@@ -282,7 +280,8 @@ FcgiRequest::FcgiRequest(
 {
   if((interface_ptr == nullptr || request_data_ptr == nullptr
      || write_mutex_ptr == nullptr || bad_connection_state_ptr == nullptr)
-     || (request_data_ptr->request_status_ == RequestStatus::kRequestAssigned))
+     || (request_data_ptr->request_status_ ==
+         FcgiServerInterface::RequestStatus::kRequestAssigned))
   {
     auto NullPointerCheck = [](void* ptr)->const char*
     {
@@ -307,7 +306,8 @@ FcgiRequest::FcgiRequest(
     else
     {
       error_status +=
-        (request_data_ptr->request_status_ == RequestStatus::kRequestAssigned)
+        (request_data_ptr->request_status_ ==
+         FcgiServerInterface::RequestStatus::kRequestAssigned)
         ? "assigned\n" : "unassigned\n";
     }
     throw std::logic_error {error_status};
@@ -323,7 +323,8 @@ FcgiRequest::FcgiRequest(
   
   // Update the status of the RequestData object to reflect its use in the
   // construction of an FcgiRequest which will be exposed to the application.
-  request_data_ptr_->request_status_ = RequestStatus::kRequestAssigned;
+  request_data_ptr_->request_status_ =
+    FcgiServerInterface::RequestStatus::kRequestAssigned;
 }
 
 FcgiRequest::FcgiRequest(FcgiRequest&& request) noexcept
@@ -933,7 +934,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           // The loop exits only when writing won't block or an error occurs.
           FD_ZERO(&write_set);
           FD_SET(fd, &write_set);
-          timeout = {write_block_timeout, 0};
+          timeout = {FcgiServerInterface::write_block_timeout, 0};
           int select_return {};
           if((select_return = select(select_descriptor_range, nullptr, 
             &write_set, nullptr, &timeout)) <= 0)

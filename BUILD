@@ -40,8 +40,6 @@ cc_library(
         "include/protocol_constants.h",
         "include/fcgi_request.h",
         "include/fcgi_server_interface.h",
-        "include/record_status.h",
-        "include/request_data.h",
         "include/request_identifier.h",
         "fcgi_si.h"
     ],

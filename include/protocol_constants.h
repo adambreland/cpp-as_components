@@ -82,15 +82,6 @@ enum class FcgiType : std::uint8_t
   kFCGI_UNKNOWN_TYPE      = 11
 };
 
-// The system-dependent maximum struct iovec array length for scatter-gatter
-// I/O.
-const long iovec_MAX {sysconf(_SC_IOV_MAX)};
-
-// A timeout for blocking calls related to writing to prevent infinite blocking
-// in the unusual case that a mutex is held by the blocked thread.
-// The number of seconds until such a call times out.
-constexpr time_t write_block_timeout {300};
-
 } // namespace fcgi_si
 
 #endif // FCGI_SERVER_INTERFACE_INCLUDE_PROTOCOL_CONSTANTS_H_

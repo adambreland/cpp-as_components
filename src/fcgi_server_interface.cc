@@ -24,8 +24,6 @@
 
 #include "include/fcgi_request.h"
 #include "include/protocol_constants.h"
-#include "include/record_status.h"
-#include "include/request_data.h"
 #include "include/request_identifier.h"
 #include "include/utility.h"
 
@@ -91,6 +89,9 @@
 namespace fcgi_si {
 
 // Initialize static class data members.
+// Non-shared:
+// write_block_timeout is initialized with a constexpr in the class definition.
+// Shared:
 std::mutex FcgiServerInterface::interface_state_mutex_ {};
 unsigned long FcgiServerInterface::interface_identifier_ {0U};
 unsigned long FcgiServerInterface::previous_interface_identifier_ {0U};

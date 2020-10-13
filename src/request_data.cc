@@ -1,19 +1,20 @@
-#include "include/request_data.h"
-
 #include <algorithm>
 #include <cstdint>         // For uint16_t.
 #include <map>
 #include <vector>
 
+#include "include/fcgi_server_interface.h"
 #include "include/utility.h"
 
 namespace fcgi_si {
 
-RequestData::RequestData(uint16_t role, bool close_connection)
+FcgiServerInterface::RequestData::
+RequestData(uint16_t role, bool close_connection)
 : role_ {role}, close_connection_ {close_connection}
 {}
 
-bool RequestData::CheckRequestCompletionWithConditionalUpdate() noexcept
+bool FcgiServerInterface::RequestData::
+CheckRequestCompletionWithConditionalUpdate() noexcept
 {
   if(role_ == FCGI_RESPONDER)
   {
@@ -52,7 +53,7 @@ bool RequestData::CheckRequestCompletionWithConditionalUpdate() noexcept
   }
 }
 
-bool RequestData::ProcessFCGI_PARAMS()
+bool FcgiServerInterface::RequestData::ProcessFCGI_PARAMS()
 {
   try
   {
