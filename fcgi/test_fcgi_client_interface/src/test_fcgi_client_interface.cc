@@ -1455,7 +1455,7 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
 
 fcgi_si::RequestIdentifier
 TestFcgiClientInterface::SendRequest(int connection,
-  const FcgiRequest& request)
+  const FcgiRequestDataReference& request)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};

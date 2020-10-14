@@ -26,13 +26,15 @@ using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
 
 //    This is a reference type which contains the metadata of a FastCGI request
 // and references to the data of the request.
-// 1) TestFcgiClientInterface::SendRequest accepts an FcgiRequest instance
-//    in its parameter list.
-// 2) FcgiResponse, a subtype of ServerEvent, uses FcgiRequest in its interface.
+// 1) TestFcgiClientInterface::SendRequest accepts an FcgiRequestDataReference
+//    instance in its parameter list.
+// 2) FcgiResponse, a subtype of ServerEvent, uses FcgiRequestDataReference in
+//    its interface.
 //
-//    Note that a user of FcgiRequest must ensure that the contained pointers
-// remain valid while TestFcgiClientInterface may use their values.
-struct FcgiRequest
+//    Note that a user of FcgiRequestDataReference must ensure that the
+// contained pointers remain valid while TestFcgiClientInterface may use their
+// values.
+struct FcgiRequestDataReference
 {
   // Request metadata.
   std::uint16_t       role;
@@ -108,7 +110,8 @@ class ConnectionClosure : public ServerEvent
 // A class which:
 // 1) Stores the response to a FastCGI application request.
 // 2) Allows access to the information of the request as represented by a
-//    FcgiRequest instance and the RequestIdentifier of the request.
+//    FcgiRequestDataReference instance and the RequestIdentifier of the
+//    request.
 class FcgiResponse : public ServerEvent
 {
  public:
@@ -132,7 +135,7 @@ class FcgiResponse : public ServerEvent
     return protocol_status_;
   }
 
-  inline const FcgiRequest& Request() const noexcept
+  inline const FcgiRequestDataReference& Request() const noexcept
   {
     return request_;
   }
@@ -148,7 +151,7 @@ class FcgiResponse : public ServerEvent
     const std::vector<std::uint8_t>& stderr, 
     const std::vector<std::uint8_t>& stdout,
     std::uint8_t protocol_status,
-    const FcgiRequest& request, 
+    const FcgiRequestDataReference& request, 
     fcgi_si::RequestIdentifier request_id)
   : app_status_      {app_status},
     fcgi_stderr_     {stderr},
@@ -162,7 +165,7 @@ class FcgiResponse : public ServerEvent
     std::vector<std::uint8_t>&& stderr, 
     std::vector<std::uint8_t>&& stdout,
     std::uint8_t protocol_status,
-    const FcgiRequest& request,
+    const FcgiRequestDataReference& request,
     fcgi_si::RequestIdentifier request_id) noexcept
   : app_status_      {app_status},
     fcgi_stderr_     {std::move(stderr)},
@@ -185,7 +188,7 @@ class FcgiResponse : public ServerEvent
   std::vector<std::uint8_t>  fcgi_stderr_;
   std::vector<std::uint8_t>  fcgi_stdout_;
   std::uint8_t               protocol_status_;
-  FcgiRequest                request_;
+  FcgiRequestDataReference   request_;
   fcgi_si::RequestIdentifier request_id_;
 };
 
@@ -801,7 +804,7 @@ class TestFcgiClientInterface
 
   //
   fcgi_si::RequestIdentifier SendRequest(int connection,
-    const FcgiRequest& request);
+    const FcgiRequestDataReference& request);
 
   TestFcgiClientInterface();
 
@@ -881,7 +884,7 @@ class TestFcgiClientInterface
     {}
 
     inline RequestData(
-      FcgiRequest new_request,
+      FcgiRequestDataReference new_request,
       std::vector<std::uint8_t>&& stdout_content,
       bool stdout_status,
       std::vector<std::uint8_t>&& stderr_content,
@@ -902,7 +905,7 @@ class TestFcgiClientInterface
 
     ~RequestData()                             = default;
 
-    FcgiRequest               request;
+    FcgiRequestDataReference  request;
     std::vector<std::uint8_t> fcgi_stdout;
     bool                      stdout_completed;
     std::vector<std::uint8_t> fcgi_stderr;
