@@ -1,4 +1,4 @@
-#include "include/test_fcgi_client_interface.h"
+#include "test/include/test_fcgi_client_interface.h"
 
 #include <arpa/inet.h>
 #include <signal.h>
@@ -16,9 +16,15 @@
 #include <memory>
 #include <vector>
 
-#include "external/fcgi_si/include/protocol_constants.h"
-#include "external/fcgi_si/test/fcgi_si_testing_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
+
+#include "include/protocol_constants.h"
+#include "test/include/fcgi_si_testing_utilities.h"
+
+namespace a_component {
+namespace fcgi {
+namespace test {
+namespace test {
 
 // A signal handler and an associated atomic boolean for testing
 // fcgi_si_test::TestFcgiClientInterface::SendGetValuesRequest.
@@ -37,8 +43,8 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
  protected:
   void SetUp() override
   {
-    fcgi_si_test::GTestFatalIgnoreSignal(SIGPIPE);
-    fcgi_si_test::GTestFatalSetSignalDisposition(SIGALRM, &SigAlrmHandler);
+    GTestFatalIgnoreSignal(SIGPIPE);
+    GTestFatalSetSignalDisposition(SIGALRM, &SigAlrmHandler);
     ASSERT_TRUE(test_fcgi_client_interface_fcgi_server_accept_timeout.
       is_lock_free());
     // Ensure that the the timeout flag is cleared.
@@ -54,17 +60,17 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
     }
     // Clear the timeout flag to reset shared state.
     test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
-    fcgi_si_test::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
+    GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
       "TestFcgiClientInterfaceGetValuesResult");
-    fcgi_si_test::GTestFatalRestoreSignal(SIGALRM);
-    fcgi_si_test::GTestFatalRestoreSignal(SIGPIPE);
+    GTestFatalRestoreSignal(SIGALRM);
+    GTestFatalRestoreSignal(SIGPIPE);
   }
 
   // AF_UNIX files cannot be created in the Bazel temporary file directory
   // because its name is too long.
   const char* unix_path_ {"/tmp/TestFcgiClientInterfaceManagementRequests"};
   int listening_socket_ {-1};
-  fcgi_si_test::FileDescriptorLeakChecker fdlc_ {};
+  FileDescriptorLeakChecker fdlc_ {};
 };
 
 
@@ -90,7 +96,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   //    local (AF_UNIX) sockets.
   //
   // Other modules whose testing depends on this module: none.
-  struct fcgi_si_test::InterfaceCreationArguments inter_args {};
+  struct InterfaceCreationArguments inter_args {};
   inter_args.domain          = AF_UNIX;
   inter_args.backlog         = 5;
   inter_args.max_connections = 10;
@@ -99,17 +105,17 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   inter_args.unix_path       = nullptr;
   inter_args.unix_path       = unix_path_;
 
-  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
   inter_return {};
   ASSERT_NO_THROW(inter_return =
-    fcgi_si_test::GTestNonFatalCreateInterface(inter_args));
-  std::unique_ptr<fcgi_si::FcgiServerInterface>& inter_uptr
+    GTestNonFatalCreateInterface(inter_args));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
   listening_socket_ = std::get<1>(inter_return);
 
   // Create an interface and check initial state.
-  a_component::fcgi::TestFcgiClientInterface client_inter {};
+  TestFcgiClientInterface client_inter {};
   EXPECT_EQ(client_inter.ConnectionCount(), 0);
   EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
   int local_socket {};
@@ -125,22 +131,22 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   EXPECT_EQ(management_count, 0U);
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> params_map
   {
-    {fcgi_si::FCGI_MAX_CONNS, {}},
-    {fcgi_si::FCGI_MAX_REQS, {}},
-    {fcgi_si::FCGI_MPXS_CONNS, {}}
+    {FCGI_MAX_CONNS, {}},
+    {FCGI_MAX_REQS, {}},
+    {FCGI_MPXS_CONNS, {}}
   };
   // Encode the map ma
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, params_map));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  params_map[fcgi_si::FCGI_MAX_CONNS].clear();
+  params_map[FCGI_MAX_CONNS].clear();
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
   name_only_copy {params_map};
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 1U);
-  std::vector<fcgi_si::FcgiRequest> accept_result {};
+  std::vector<FcgiRequest> accept_result {};
   struct itimerval timeout
   {
     {0, 0},   // it_interval (don't repeat)
@@ -163,19 +169,19 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
     ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
     EXPECT_EQ(accept_result.size(), 0U);
   }
-  std::unique_ptr<a_component::fcgi::ServerEvent> result_uptr {};
+  std::unique_ptr<ServerEvent> result_uptr {};
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 0U);
-  a_component::fcgi::GetValuesResult* gvr_ptr
-    {dynamic_cast<a_component::fcgi::GetValuesResult*>(result_uptr.get())};
+  GetValuesResult* gvr_ptr
+    {dynamic_cast<GetValuesResult*>(result_uptr.get())};
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(params_map, gvr_ptr->RequestMap());
-  params_map[fcgi_si::FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
-  params_map[fcgi_si::FCGI_MAX_REQS] = std::vector<std::uint8_t>
+  params_map[FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
+  params_map[FCGI_MAX_REQS] = std::vector<std::uint8_t>
     {'1', '0', '0'};
-  params_map[fcgi_si::FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  params_map[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
   EXPECT_EQ(params_map, gvr_ptr->ResponseMap());
 
   // Start testing the move overload.
@@ -200,7 +206,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 0U);
-  gvr_ptr = dynamic_cast<a_component::fcgi::GetValuesResult*>(result_uptr.get());
+  gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(name_only_copy, gvr_ptr->RequestMap());
   EXPECT_EQ(result_copy, gvr_ptr->ResponseMap());
@@ -217,7 +223,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   // Check for a return of false when a call is made with a map that cannot
   // be encoded in a single record.
   std::vector<std::uint8_t>
-    large_name(fcgi_si::kMaxRecordContentByteLength + 1, 1U);
+    large_name(kMaxRecordContentByteLength + 1, 1U);
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
     large_name_map {{std::move(large_name), {1U}}};
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
@@ -241,8 +247,8 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendBinaryManagementRequest)
   EXPECT_EQ(client_inter.ConnectionCount(), 0);
   ASSERT_EQ(client_inter.ReadyEventCount(), 1U);
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  a_component::fcgi::ConnectionClosure* closure_ptr
-    {dynamic_cast<a_component::fcgi::ConnectionClosure*>(result_uptr.get())};
+  ConnectionClosure* closure_ptr
+    {dynamic_cast<ConnectionClosure*>(result_uptr.get())};
   ASSERT_NE(closure_ptr, nullptr);
   EXPECT_EQ(closure_ptr->RequestId().descriptor(), local_socket);
   EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
@@ -303,7 +309,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
   //    local (AF_UNIX) sockets.
   //
   // Other modules whose testing depends on this module: none.
-  struct fcgi_si_test::InterfaceCreationArguments inter_args {};
+  struct InterfaceCreationArguments inter_args {};
   inter_args.domain          = AF_UNIX;
   inter_args.backlog         = 5;
   inter_args.max_connections = 10;
@@ -314,17 +320,17 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
 
   // Create a server interface to respond to FCGI_GET_VALUES requests sent
   // by a client interface.
-  std::tuple<std::unique_ptr<fcgi_si::FcgiServerInterface>, int, in_port_t>
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
   inter_return {};
   ASSERT_NO_THROW(inter_return =
-    fcgi_si_test::GTestNonFatalCreateInterface(inter_args));
-  std::unique_ptr<fcgi_si::FcgiServerInterface>& inter_uptr
+    GTestNonFatalCreateInterface(inter_args));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
   listening_socket_ = std::get<1>(inter_return);
 
   // Create an interface and check initial state.
-  a_component::fcgi::TestFcgiClientInterface client_inter {};
+  TestFcgiClientInterface client_inter {};
   EXPECT_EQ(client_inter.ConnectionCount(), 0);
   EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
   int local_socket {};
@@ -340,21 +346,21 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
   EXPECT_EQ(management_count, 0U);
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>> params_map
   {
-    {fcgi_si::FCGI_MAX_CONNS, {10U}},
-    {fcgi_si::FCGI_MAX_REQS, {}},
-    {fcgi_si::FCGI_MPXS_CONNS, {}}
+    {FCGI_MAX_CONNS, {10U}},
+    {FCGI_MAX_REQS, {}},
+    {FCGI_MPXS_CONNS, {}}
   };
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, params_map));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  params_map[fcgi_si::FCGI_MAX_CONNS].clear();
+  params_map[FCGI_MAX_CONNS].clear();
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
   name_only_copy {params_map};
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 1U);
-  std::vector<fcgi_si::FcgiRequest> accept_result {};
+  std::vector<FcgiRequest> accept_result {};
   struct itimerval timeout
   {
     {0, 0},   // it_interval (don't repeat)
@@ -377,19 +383,19 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
     ASSERT_NO_THROW(accept_result = inter_uptr->AcceptRequests());
     EXPECT_EQ(accept_result.size(), 0U);
   }
-  std::unique_ptr<a_component::fcgi::ServerEvent> result_uptr {};
+  std::unique_ptr<ServerEvent> result_uptr {};
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 0U);
-  a_component::fcgi::GetValuesResult* gvr_ptr
-    {dynamic_cast<a_component::fcgi::GetValuesResult*>(result_uptr.get())};
+  GetValuesResult* gvr_ptr
+    {dynamic_cast<GetValuesResult*>(result_uptr.get())};
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(params_map, gvr_ptr->RequestMap());
-  params_map[fcgi_si::FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
-  params_map[fcgi_si::FCGI_MAX_REQS] = std::vector<std::uint8_t>
+  params_map[FCGI_MAX_CONNS] = std::vector<std::uint8_t> {'1', '0'};
+  params_map[FCGI_MAX_REQS] = std::vector<std::uint8_t>
     {'1', '0', '0'};
-  params_map[fcgi_si::FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  params_map[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
   EXPECT_EQ(params_map, gvr_ptr->ResponseMap());
 
   // Start testing the move overload.
@@ -414,7 +420,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
   EXPECT_EQ(management_count, 0U);
-  gvr_ptr = dynamic_cast<a_component::fcgi::GetValuesResult*>(result_uptr.get());
+  gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(name_only_copy, gvr_ptr->RequestMap());
   EXPECT_EQ(result_copy, gvr_ptr->ResponseMap());
@@ -431,7 +437,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
   // Check for a return of false when a call is made with a map that cannot
   // be encoded in a single record.
   std::vector<std::uint8_t>
-    large_name(fcgi_si::kMaxRecordContentByteLength + 1, 1U);
+    large_name(kMaxRecordContentByteLength + 1, 1U);
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
     large_name_map {{std::move(large_name), {1U}}};
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
@@ -455,9 +461,14 @@ TEST_F(TestFcgiClientInterfaceManagementRequests, SendGetValuesRequest)
   EXPECT_EQ(client_inter.ConnectionCount(), 0);
   ASSERT_EQ(client_inter.ReadyEventCount(), 1U);
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  a_component::fcgi::ConnectionClosure* closure_ptr
-    {dynamic_cast<a_component::fcgi::ConnectionClosure*>(result_uptr.get())};
+  ConnectionClosure* closure_ptr
+    {dynamic_cast<ConnectionClosure*>(result_uptr.get())};
   ASSERT_NE(closure_ptr, nullptr);
   EXPECT_EQ(closure_ptr->RequestId().descriptor(), local_socket);
   EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
 }
+
+} // namespace test
+} // namespace test
+} // namespace fcgi
+} // namespace a_component

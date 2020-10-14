@@ -1,4 +1,4 @@
-#include "include/test_fcgi_client_interface.h"
+#include "test/include/test_fcgi_client_interface.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -25,14 +25,16 @@
 #include <type_traits>
 #include <utility>
 
-#include "external/fcgi_si/include/protocol_constants.h"
-#include "external/fcgi_si/include/request_identifier.h"
-#include "external/fcgi_si/include/utility.h"
 #include "external/id_manager/include/id_manager_template.h"
 #include "external/socket_functions/include/socket_functions.h"
 
+#include "include/protocol_constants.h"
+#include "include/request_identifier.h"
+#include "include/utilities.h"
+
 namespace a_component {
 namespace fcgi {
+namespace test {
 
 // Invariants and properties of completed_request_set_, connection_map_, and
 // pending_request_map_.
@@ -155,9 +157,9 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     return false;
   ConnectionState* state_ptr {&(connection_iter->second)};
 
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_start
+  std::map<RequestIdentifier, RequestData>::iterator pending_start
     {pending_request_map_.lower_bound({connection, 0U})};
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_end
+  std::map<RequestIdentifier, RequestData>::iterator pending_end
     {(connection < std::numeric_limits<int>::max()) ?
       pending_request_map_.lower_bound({connection + 1, 0U}) :
       pending_request_map_.end()};
@@ -170,7 +172,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
 
   // Determine if the item in connection_map_ should be erased. When request
   // IDs for completed requests are present, the item should not be erased.
-  std::set<fcgi_si::RequestIdentifier>::iterator completed_start
+  std::set<RequestIdentifier>::iterator completed_start
     {completed_request_set_.lower_bound({connection, 0U})};
   // Are completed-but-unreleased requests present?
   if((completed_start != completed_request_set_.end()) &&
@@ -182,7 +184,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     // id_manager.
     a_component::IdManager<std::uint16_t>* id_manager_ptr
       {&(state_ptr->id_manager)};
-    for(std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+    for(std::map<RequestIdentifier, RequestData>::iterator
       pending_start_copy {pending_start};
       pending_start_copy != pending_end;
       ++pending_start_copy)
@@ -217,7 +219,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     while(pending_start != pending_end)
     {
       id_manager_ptr->ReleaseId(pending_start->first.Fcgi_id());
-      std::map<fcgi_si::RequestIdentifier, RequestData>::iterator safe_eraser
+      std::map<RequestIdentifier, RequestData>::iterator safe_eraser
         {pending_start};
       ++pending_start;
       pending_request_map_.erase(safe_eraser);
@@ -427,7 +429,7 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
 
 std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
 {
-  std::set<fcgi_si::RequestIdentifier>::const_iterator
+  std::set<RequestIdentifier>::const_iterator
      least_upper_iter {completed_request_set_.lower_bound({connection, 0})};
   if((least_upper_iter == completed_request_set_.cend()) ||
       (least_upper_iter->descriptor() > connection))
@@ -436,7 +438,7 @@ std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
   }
   else
   {
-    std::set<fcgi_si::RequestIdentifier>::const_iterator next_iter
+    std::set<RequestIdentifier>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
         completed_request_set_.lower_bound({connection + 1, 0U}) :
         completed_request_set_.end()};
@@ -482,9 +484,9 @@ void TestFcgiClientInterface::ExamineSelectReturn()
         // pending_iter->first.descriptor() == descriptor. In other words,
         // in the loop below, pending_iter will always refer to the end or to a
         // pending request in the collection of requests for descriptor.
-        std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+        std::map<RequestIdentifier, RequestData>::iterator
         pending_end {pending_request_map_.end()};
-        std::map<fcgi_si::RequestIdentifier, RequestData>::iterator
+        std::map<RequestIdentifier, RequestData>::iterator
         pending_iter {pending_end};
 
         // Start reading until the connection blocks.
@@ -505,10 +507,10 @@ void TestFcgiClientInterface::ExamineSelectReturn()
             // Header
             std::uint8_t received_header
               {state_ptr->record_state.header_bytes_received};
-            if(received_header < fcgi_si::FCGI_HEADER_LEN)
+            if(received_header < FCGI_HEADER_LEN)
             {
               std::uint8_t remaining_header {static_cast<std::uint8_t>(
-                fcgi_si::FCGI_HEADER_LEN - received_header)};
+                FCGI_HEADER_LEN - received_header)};
               std::uint8_t copy_size {(remaining_data >= remaining_header) ?
                 remaining_header : static_cast<std::uint8_t>(remaining_data)};
               std::memcpy(state_ptr->record_state.header + received_header,
@@ -517,7 +519,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               remaining_data                                -= copy_size;
               received_header                               += copy_size;
               state_ptr->record_state.header_bytes_received  = received_header;
-              if(received_header == fcgi_si::FCGI_HEADER_LEN)
+              if(received_header == FCGI_HEADER_LEN)
               {
                 try
                 {
@@ -551,11 +553,11 @@ void TestFcgiClientInterface::ExamineSelectReturn()
             //
             // Also, some common state for Content and Padding.
             std::uint16_t fcgi_id {state_ptr->record_state.fcgi_id};
-            fcgi_si::FcgiType record_type {state_ptr->record_state.type};
+            FcgiType record_type {state_ptr->record_state.type};
             auto PendingIterCheckAndUpdate =
             [&pending_iter, &pending_end, &descriptor, &fcgi_id, this]()->void
             {
-              fcgi_si::RequestIdentifier id {descriptor, fcgi_id};
+              RequestIdentifier id {descriptor, fcgi_id};
               if((pending_iter == pending_end) || (pending_iter->first != id))
               {
                 pending_iter = pending_request_map_.find(id);
@@ -582,7 +584,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               std::uint8_t* current_end {current_byte + copy_size};
               if(!(state_ptr->record_state.invalidated) &&
                  (fcgi_id != 0U)                        &&
-                 (record_type != fcgi_si::FcgiType::kFCGI_END_REQUEST))
+                 (record_type != FcgiType::kFCGI_END_REQUEST))
               {
                 // Type is either FCGI_STDOUT or FCGI_STDERR.
                 try
@@ -595,7 +597,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                   // A throw indicates an internal logic error than cannot be
                   // recovered from. Logging may be put here later. 
                 }
-                bool is_out {record_type == fcgi_si::FcgiType::kFCGI_STDOUT};
+                bool is_out {record_type == FcgiType::kFCGI_STDOUT};
                 std::vector<std::uint8_t>::iterator content_end_iter {(is_out) ?
                   pending_iter->second.fcgi_stdout.end() :
                   pending_iter->second.fcgi_stderr.end()};
@@ -616,7 +618,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               }
               else
               {
-                if(record_type == fcgi_si::FcgiType::kFCGI_END_REQUEST)
+                if(record_type == FcgiType::kFCGI_END_REQUEST)
                 {
                   try
                   {
@@ -698,9 +700,9 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                 {
                   // Ensure that pending_iter refers to the appropriate pending
                   // request.
-                  if((record_type == fcgi_si::FcgiType::kFCGI_END_REQUEST) ||
-                    (record_type == fcgi_si::FcgiType::kFCGI_STDERR)      ||
-                    (record_type == fcgi_si::FcgiType::kFCGI_STDOUT))
+                  if((record_type == FcgiType::kFCGI_END_REQUEST) ||
+                     (record_type == FcgiType::kFCGI_STDERR)      ||
+                     (record_type == FcgiType::kFCGI_STDOUT))
                   {
                     PendingIterCheckAndUpdate();
                   }
@@ -859,7 +861,7 @@ std::size_t TestFcgiClientInterface::ManagementRequestCount(int connection) cons
 
 std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
 {
-  std::map<fcgi_si::RequestIdentifier, RequestData>::const_iterator
+  std::map<RequestIdentifier, RequestData>::const_iterator
      least_upper_iter {pending_request_map_.lower_bound({connection, 0U})};
   if((least_upper_iter == pending_request_map_.cend()) ||
       (least_upper_iter->first.descriptor() > connection))
@@ -868,7 +870,7 @@ std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
   }
   else
   {
-    std::map<fcgi_si::RequestIdentifier, RequestData>::const_iterator next_iter
+    std::map<RequestIdentifier, RequestData>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
         pending_request_map_.lower_bound({connection + 1, 0U}) :
         pending_request_map_.end()};
@@ -876,11 +878,11 @@ std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
   }
 }
 
-std::map<fcgi_si::RequestIdentifier, 
+std::map<RequestIdentifier, 
   TestFcgiClientInterface::RequestData>::iterator
 TestFcgiClientInterface::ProcessCompleteRecord(
   std::map<int, ConnectionState>::iterator connection_iter,
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter)
+  std::map<RequestIdentifier, RequestData>::iterator pending_iter)
 {
   // The organization of the implementations of the cases below allows
   // the strong exception guarantee to be satisfied. This requires the
@@ -910,7 +912,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
     TryToAssignLastQueueItemPointer(&back_ptr);
     *new_event = InvalidRecord
     {
-      state_ptr->record_state.header[fcgi_si::kHeaderVersionIndex],
+      state_ptr->record_state.header[kHeaderVersionIndex],
       state_ptr->record_state.type,
       {connection_iter->first, state_ptr->record_state.fcgi_id},
       std::move(state_ptr->record_state.local_buffer),
@@ -921,7 +923,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
   else
   {
     switch(state_ptr->record_state.type) {
-      case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
+      case FcgiType::kFCGI_END_REQUEST : {
         // Extract the application status.
         std::uint8_t* data_ptr {state_ptr->record_state.local_buffer.data()};
         std::int32_t local_app_status {*data_ptr};
@@ -960,21 +962,21 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         pending_iter = pending_request_map_.end();
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_STDOUT : {
+      case FcgiType::kFCGI_STDOUT : {
         if(state_ptr->record_state.content_bytes_expected == 0U)
         {
           pending_iter->second.stdout_completed = true;
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_STDERR : {
+      case FcgiType::kFCGI_STDERR : {
         if(state_ptr->record_state.content_bytes_expected == 0U)
         {
           pending_iter->second.stderr_completed = true;
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
+      case FcgiType::kFCGI_GET_VALUES_RESULT : {
         // An attempt is made to extract a name-value pair map from the
         // byte sequence which was sent by the server. If a failure occurs,
         // which includes the presence of duplicate names, an empty map is
@@ -991,7 +993,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
           using NameValuePair = 
             std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>;
           std::vector<NameValuePair> name_value_list 
-            {fcgi_si::ExtractBinaryNameValuePairs(
+            {ExtractBinaryNameValuePairs(
               buffer_ptr->data(), local_buffer_size)};
           if(name_value_list.size())
           {
@@ -1035,7 +1037,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         state_ptr->management_queue.pop_front();
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE : {
+      case FcgiType::kFCGI_UNKNOWN_TYPE : {
         std::unique_ptr<UnknownType> new_event {new UnknownType {}};
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
@@ -1062,7 +1064,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
   return pending_iter;
 }
 
-bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
+bool TestFcgiClientInterface::ReleaseId(RequestIdentifier id)
 {
   int connection {id.descriptor()};
   std::map<int, ConnectionState>::iterator connection_iter
@@ -1073,14 +1075,14 @@ bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
   }
   else
   {
-    std::set<fcgi_si::RequestIdentifier>::iterator completed_end
+    std::set<RequestIdentifier>::iterator completed_end
       {completed_request_set_.end()};
     a_component::IdManager<std::uint16_t>* id_manager_ptr
       {&(connection_iter->second.id_manager)};
     std::uint16_t fcgi_id {id.Fcgi_id()};
 
     bool pending {pending_request_map_.find(id) != pending_request_map_.end()};
-    std::set<fcgi_si::RequestIdentifier>::iterator completed_iter
+    std::set<RequestIdentifier>::iterator completed_iter
         {completed_request_set_.find(id)};
     bool completed {completed_iter != completed_end};
     bool used {id_manager_ptr->IsUsed(fcgi_id)};
@@ -1100,7 +1102,7 @@ bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
       bool more_before {false};
       if(completed_iter != completed_request_set_.begin())
       {
-        std::set<fcgi_si::RequestIdentifier>::iterator previous_completed
+        std::set<RequestIdentifier>::iterator previous_completed
           {completed_iter};
         --previous_completed;
         if(previous_completed->descriptor() == connection)
@@ -1108,7 +1110,7 @@ bool TestFcgiClientInterface::ReleaseId(fcgi_si::RequestIdentifier id)
           more_before = true;
         }
       }
-      std::set<fcgi_si::RequestIdentifier>::iterator next_completed
+      std::set<RequestIdentifier>::iterator next_completed
         {completed_iter};
       next_completed++;
       bool more_after {(next_completed != completed_end) ?
@@ -1146,9 +1148,9 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
   bool connected {connection_iter->second.connected};
   a_component::IdManager<std::uint16_t>* id_manager_ptr
     {&(connection_iter->second.id_manager)};
-  std::set<fcgi_si::RequestIdentifier>::iterator start
+  std::set<RequestIdentifier>::iterator start
     {completed_request_set_.lower_bound({connection, 0U})};
-  std::set<fcgi_si::RequestIdentifier>::iterator end
+  std::set<RequestIdentifier>::iterator end
     {(connection < std::numeric_limits<int>::max()) ?
       completed_request_set_.lower_bound({connection + 1, 0U}) :
       completed_request_set_.end()};
@@ -1160,7 +1162,7 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
     // Ensure that each completed request is present in the id_manager.
     //
     // Absence of a completed requests in the pending map is not verified.
-    for(std::set<fcgi_si::RequestIdentifier>::iterator
+    for(std::set<RequestIdentifier>::iterator
       start_copy {start}; start_copy != end; ++start_copy)
     {
       std::uint16_t local_id {start_copy->Fcgi_id()};
@@ -1273,9 +1275,9 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
   }
 }
 
-bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
+bool TestFcgiClientInterface::SendAbortRequest(RequestIdentifier id)
 {
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter
+  std::map<RequestIdentifier, RequestData>::iterator pending_iter
     {pending_request_map_.find(id)};
   if(pending_iter == pending_request_map_.end())
   {
@@ -1288,12 +1290,12 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
   {
     return false;
   }
-  std::uint8_t abort_header[fcgi_si::FCGI_HEADER_LEN] = {};
-  fcgi_si::PopulateHeader(abort_header, fcgi_si::FcgiType::kFCGI_ABORT_REQUEST,
+  std::uint8_t abort_header[FCGI_HEADER_LEN] = {};
+  PopulateHeader(abort_header, FcgiType::kFCGI_ABORT_REQUEST,
     id.Fcgi_id(), 0U, 0U);
   std::size_t write_return {socket_functions::WriteOnSelect(connection,
-    abort_header, fcgi_si::FCGI_HEADER_LEN, nullptr)};
-  if(write_return < fcgi_si::FCGI_HEADER_LEN)
+    abort_header, FCGI_HEADER_LEN, nullptr)};
+  if(write_return < FCGI_HEADER_LEN)
   {
     FailedWrite(connection_iter, errno, write_return == 0U, false,
       write_or_select_);
@@ -1303,7 +1305,7 @@ bool TestFcgiClientInterface::SendAbortRequest(fcgi_si::RequestIdentifier id)
 }
 
 bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-    fcgi_si::FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
+    FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};
@@ -1318,7 +1320,7 @@ bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
 }
 
 bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-    fcgi_si::FcgiType type, std::vector<std::uint8_t>&& data)
+    FcgiType type, std::vector<std::uint8_t>&& data)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};
@@ -1333,10 +1335,10 @@ bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
 
 bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(
   std::map<int, ConnectionState>::iterator connection_iter,
-  fcgi_si::FcgiType type, ManagementRequestData&& queue_item)
+  FcgiType type, ManagementRequestData&& queue_item)
 {
   std::size_t length {queue_item.data.size()};
-  if(length > static_cast<std::size_t>(fcgi_si::kMaxRecordContentByteLength))
+  if(length > static_cast<std::size_t>(kMaxRecordContentByteLength))
   {
     return false;
   }
@@ -1352,17 +1354,17 @@ bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(
   std::uint8_t mod_length {static_cast<std::uint8_t>(length % 8)};
   std::uint8_t padding_length {static_cast<std::uint8_t>(
     (mod_length) ? (8 - mod_length) : 0U)};
-  std::uint8_t header[fcgi_si::FCGI_HEADER_LEN] = {};
-  fcgi_si::PopulateHeader(header, type, 0U, length, padding_length);
+  std::uint8_t header[FCGI_HEADER_LEN] = {};
+  PopulateHeader(header, type, 0U, length, padding_length);
   constexpr int iovec_count {3};
   struct iovec iovec_array[iovec_count] = {};
   iovec_array[0].iov_base = header;
-  iovec_array[0].iov_len  = fcgi_si::FCGI_HEADER_LEN;
+  iovec_array[0].iov_len  = FCGI_HEADER_LEN;
   iovec_array[1].iov_base = data_ptr;
   iovec_array[1].iov_len  = length;
   iovec_array[2].iov_base = padding;
   iovec_array[2].iov_len  = padding_length;
-  std::size_t number_to_write {fcgi_si::FCGI_HEADER_LEN + length +
+  std::size_t number_to_write {FCGI_HEADER_LEN + length +
     padding_length};
 
   return SendManagementRequestHelper(connection_iter, iovec_array,
@@ -1386,7 +1388,7 @@ bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
     new_map.insert({i->first, {}});
   }
   return SendGetValuesRequestHelper(connection_iter,
-    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(new_map), {}});
+    {FcgiType::kFCGI_GET_VALUES, std::move(new_map), {}});
 }
 
 bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
@@ -1405,7 +1407,7 @@ bool TestFcgiClientInterface::SendGetValuesRequest(int connection,
     i->second.clear();
   }
   return SendGetValuesRequestHelper(connection_iter,
-    {fcgi_si::FcgiType::kFCGI_GET_VALUES, std::move(params_map), {}});
+    {FcgiType::kFCGI_GET_VALUES, std::move(params_map), {}});
 }
 
 bool TestFcgiClientInterface::SendGetValuesRequestHelper(
@@ -1420,10 +1422,10 @@ bool TestFcgiClientInterface::SendGetValuesRequestHelper(
 
   std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
     std::vector<std::uint8_t>, std::size_t, ParamsMap::iterator> encode_return
-    {fcgi_si::EncodeNameValuePairs(queue_item.params_map.begin(),
+    {EncodeNameValuePairs(queue_item.params_map.begin(),
        queue_item.params_map.end(), queue_item.type, 0U, 0U)};
   
-  if(fcgi_si::EncodeNVPairSingleRecordFailure(encode_return,
+  if(EncodeNVPairSingleRecordFailure(encode_return,
     queue_item.params_map.end()))
   {
     return false;
@@ -1453,15 +1455,14 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   return true;
 }
 
-fcgi_si::RequestIdentifier
-TestFcgiClientInterface::SendRequest(int connection,
+RequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   const FcgiRequestDataReference& request)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};
   if(connection_iter == connection_map_.end())
   {
-    return fcgi_si::RequestIdentifier {};
+    return RequestIdentifier {};
   }
   ConnectionState* state_ptr       {&(connection_iter->second)};
   std::uint16_t    new_id          {state_ptr->id_manager.GetId()};
@@ -1500,9 +1501,9 @@ TestFcgiClientInterface::SendRequest(int connection,
         return true;
       };
 
-      constexpr int_fast32_t begin_length {2U * fcgi_si::FCGI_HEADER_LEN};
+      constexpr int_fast32_t begin_length {2U * FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
-      fcgi_si::PopulateBeginRequestRecord(begin_record, new_id, role,
+      PopulateBeginRequestRecord(begin_record, new_id, role,
         request.keep_conn);
       if(!SocketWriteHelper(begin_record, begin_length))
       {
@@ -1512,9 +1513,9 @@ TestFcgiClientInterface::SendRequest(int connection,
 
       // Capturing all variables up to this point by reference is simpler than
       // specifying a parameter list.
-      auto DataAndStdinWriter = [&](fcgi_si::FcgiType type)->bool
+      auto DataAndStdinWriter = [&](FcgiType type)->bool
       {
-        bool is_data {type == fcgi_si::FcgiType::kFCGI_DATA};
+        bool is_data {type == FcgiType::kFCGI_DATA};
         // PartitionByteSequence will produce ending stream records if
         // begin_iter == end_iter. terminated is used to ensure that one
         // ending record is always produced.
@@ -1529,7 +1530,7 @@ TestFcgiClientInterface::SendRequest(int connection,
         {
           std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
             std::size_t, const std::uint8_t*> partition 
-            {fcgi_si::PartitionByteSequence(start_iter, end_iter,
+            {PartitionByteSequence(start_iter, end_iter,
               type, new_id)};
           std::tuple<struct iovec*, int, std::size_t> partition_write
             {socket_functions::ScatterGatherSocketWrite(connection,
@@ -1552,20 +1553,20 @@ TestFcgiClientInterface::SendRequest(int connection,
         return true;
       };
 
-      if(!(((role == fcgi_si::FCGI_RESPONDER) ||
-            (role == fcgi_si::FCGI_AUTHORIZER))  && 
+      if(!(((role == FCGI_RESPONDER) ||
+            (role == FCGI_AUTHORIZER))  && 
           (request.data_begin == request.data_end)))
       {
-        if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_DATA))
+        if(!DataAndStdinWriter(FcgiType::kFCGI_DATA))
         {
           break;
         }
       }
 
-      if(!((role == fcgi_si::FCGI_AUTHORIZER) && 
+      if(!((role == FCGI_AUTHORIZER) && 
            (request.stdin_begin == request.stdin_end)))
       {
-        if(!DataAndStdinWriter(fcgi_si::FcgiType::kFCGI_STDIN))
+        if(!DataAndStdinWriter(FcgiType::kFCGI_STDIN))
         {
           break;
         }
@@ -1581,8 +1582,8 @@ TestFcgiClientInterface::SendRequest(int connection,
         {
           std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
             std::vector<std::uint8_t>, std::size_t, ParamsMap::const_iterator>
-          params_encoding {fcgi_si::EncodeNameValuePairs(start_iter, end_iter,
-            fcgi_si::FcgiType::kFCGI_PARAMS, new_id, offset)};
+          params_encoding {EncodeNameValuePairs(start_iter, end_iter,
+            FcgiType::kFCGI_PARAMS, new_id, offset)};
           if(!std::get<0>(params_encoding))
           {
             saved_errno = EINVAL;
@@ -1606,10 +1607,10 @@ TestFcgiClientInterface::SendRequest(int connection,
       if(!write_error)
       {
         // A terminal FCGI_PARAMS record must be sent in all cases.
-        std::uint8_t params_record[fcgi_si::FCGI_HEADER_LEN] = {};
-        fcgi_si::PopulateHeader(params_record, fcgi_si::FcgiType::kFCGI_PARAMS,
+        std::uint8_t params_record[FCGI_HEADER_LEN] = {};
+        PopulateHeader(params_record, FcgiType::kFCGI_PARAMS,
           new_id, 0U, 0U);
-        SocketWriteHelper(params_record, fcgi_si::FCGI_HEADER_LEN);
+        SocketWriteHelper(params_record, FCGI_HEADER_LEN);
       }
     } while(false);
     if(write_error)
@@ -1624,7 +1625,7 @@ TestFcgiClientInterface::SendRequest(int connection,
       }
       FailedWrite(connection_iter, saved_errno, nothing_written, false,
         "write");
-      return fcgi_si::RequestIdentifier {};
+      return RequestIdentifier {};
     }
     // Insert a new RequestData instance to pending_request_map_.
     pending_request_map_.insert({
@@ -1649,42 +1650,42 @@ TestFcgiClientInterface::SendRequest(int connection,
     }
     throw;
   }
-  return fcgi_si::RequestIdentifier {connection, new_id};
+  return RequestIdentifier {connection, new_id};
 }
 
-std::map<fcgi_si::RequestIdentifier, 
+std::map<RequestIdentifier, 
   TestFcgiClientInterface::RequestData>::iterator
 TestFcgiClientInterface::UpdateOnHeaderCompletion(
   std::map<int, ConnectionState>::iterator connection_iter,
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_iter)
+  std::map<RequestIdentifier, RequestData>::iterator pending_iter)
 {
   int descriptor {connection_iter->first};
   ConnectionState* state_ptr {&(connection_iter->second)};
-  std::map<fcgi_si::RequestIdentifier, RequestData>::iterator pending_end
+  std::map<RequestIdentifier, RequestData>::iterator pending_end
     {pending_request_map_.end()};
 
   // Extract the header information.
   std::uint8_t protocol_version {state_ptr->record_state.
-    header[fcgi_si::kHeaderVersionIndex]};
-  fcgi_si::FcgiType record_type {static_cast<fcgi_si::FcgiType>(
-    state_ptr->record_state.header[fcgi_si::kHeaderTypeIndex])};
+    header[kHeaderVersionIndex]};
+  FcgiType record_type {static_cast<FcgiType>(
+    state_ptr->record_state.header[kHeaderTypeIndex])};
   std::uint16_t fcgi_id {state_ptr->record_state.
-    header[fcgi_si::kHeaderRequestIDB1Index]};
+    header[kHeaderRequestIDB1Index]};
   fcgi_id <<= 8U;
   fcgi_id += state_ptr->record_state.
-    header[fcgi_si::kHeaderRequestIDB0Index];
+    header[kHeaderRequestIDB0Index];
   std::uint16_t expected_content {state_ptr->record_state.
-    header[fcgi_si::kHeaderContentLengthB1Index]};
+    header[kHeaderContentLengthB1Index]};
   expected_content <<= 8U;
   expected_content += state_ptr->record_state.
-    header[fcgi_si::kHeaderContentLengthB0Index];
+    header[kHeaderContentLengthB0Index];
   std::uint8_t expected_padding {state_ptr->record_state.
-    header[fcgi_si::kHeaderPaddingLengthIndex]};
+    header[kHeaderPaddingLengthIndex]};
 
   auto PendingIterCheckAndUpdate = 
   [&pending_iter, &descriptor, &fcgi_id, &pending_end, this]()->void
   {
-    fcgi_si::RequestIdentifier id {descriptor, fcgi_id};
+    RequestIdentifier id {descriptor, fcgi_id};
     if((pending_iter == pending_end) || (pending_iter->first != id))
     {
       // It is acceptable for find to return end as a spurious record may
@@ -1702,7 +1703,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
   else
   {
     switch(record_type) {
-      case fcgi_si::FcgiType::kFCGI_END_REQUEST : {
+      case FcgiType::kFCGI_END_REQUEST : {
         PendingIterCheckAndUpdate();
         // Among other questions, does a request exist for this end record?
         // Note that a pending request is moved to the completed map upon its
@@ -1716,7 +1717,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_STDOUT : {
+      case FcgiType::kFCGI_STDOUT : {
         PendingIterCheckAndUpdate();
         if((pending_iter == pending_end)                 ||
            (pending_iter->second.stdout_completed))
@@ -1725,7 +1726,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_STDERR : {
+      case FcgiType::kFCGI_STDERR : {
         PendingIterCheckAndUpdate();
         if((pending_iter == pending_end)                 ||
            (pending_iter->second.stderr_completed))
@@ -1734,21 +1735,21 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_GET_VALUES_RESULT : {
+      case FcgiType::kFCGI_GET_VALUES_RESULT : {
         if((fcgi_id != 0U)                               ||
            !(state_ptr->management_queue.size())         ||
-           (fcgi_si::FcgiType::kFCGI_GET_VALUES != state_ptr->
+           (FcgiType::kFCGI_GET_VALUES != state_ptr->
               management_queue.front().type))
         {
           error_detected = true;
         }
         break;
       }
-      case fcgi_si::FcgiType::kFCGI_UNKNOWN_TYPE : {
+      case FcgiType::kFCGI_UNKNOWN_TYPE : {
         if((fcgi_id != 0U)                              ||
            (expected_content != 8U)                     ||
            !(state_ptr->management_queue.size())        ||
-           (fcgi_si::FcgiType::kFCGI_GET_VALUES == state_ptr->
+           (FcgiType::kFCGI_GET_VALUES == state_ptr->
               management_queue.front().type))
         {
           error_detected = true;
@@ -1781,5 +1782,6 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
   return pending_iter;
 }
 
+} // namespace test
 } // namespace fcgi
 } // namespace a_component

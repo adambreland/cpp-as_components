@@ -1,15 +1,15 @@
-# Compiler intermediate files
+# Compiler intermediate files.
+*.i
 *.s
 *.o
 *.so
 *.a
 
-# External dependencies
+# External dependency symbolic links.
 external/
 
-# Bazel files
+# Bazel build ouputs.
 bazel*
 
-# VS Code
+# VS Code configuration files.
 .vscode/
-

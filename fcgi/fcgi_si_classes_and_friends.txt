@@ -1,0 +1,20 @@
+fcgi_si classes and friend relationships.
+
+Classes:
+  Classes with a friend or which are a friend:
+    FCGIRequest
+    FCGIServerInterface
+    RecordStatus
+    RequestData
+
+  Classes without friendship:
+    RequestIdentifier
+
+Enum classes:
+  FCGIType
+  RequestStatus
+
+Friends: A -> B means A is a friend of B.
+  FCGIRequest   -> RequestData
+  FCGIRequest  <-> FCGIServerInterface
+  RecordStatus  -> FCGIServerInterface
