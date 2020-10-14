@@ -14,24 +14,21 @@
 namespace fcgi_si {
 
 // Protocol Constants
-  /* General
 constexpr int                          FCGI_LISTENSOCK_FILENO         {0};
-     This value is not strictly used for the listening socket descriptor
-     value. */
 constexpr std::int_fast32_t            FCGI_HEADER_LEN                {8};
-constexpr std::uint8_t                 FCGI_VERSION_1                 {1};
-constexpr std::uint16_t                FCGI_NULL_REQUEST_ID           {0};
+constexpr std::uint8_t                 FCGI_VERSION_1                 {1U};
+constexpr std::uint16_t                FCGI_NULL_REQUEST_ID           {0U};
   // Flags
-constexpr std::uint8_t                 FCGI_KEEP_CONN                 {1};
+constexpr std::uint8_t                 FCGI_KEEP_CONN                 {1U};
   // Roles
-constexpr std::uint16_t                FCGI_RESPONDER                 {1};
-constexpr std::uint16_t                FCGI_AUTHORIZER                {2};
-constexpr std::uint16_t                FCGI_FILTER                    {3};
+constexpr std::uint16_t                FCGI_RESPONDER                 {1U};
+constexpr std::uint16_t                FCGI_AUTHORIZER                {2U};
+constexpr std::uint16_t                FCGI_FILTER                    {3U};
   // Protocol status values for FCGI_END_REQUEST records.
-constexpr std::uint8_t                 FCGI_REQUEST_COMPLETE          {0};
-constexpr std::uint8_t                 FCGI_CANT_MPX_CONN             {1};
-constexpr std::uint8_t                 FCGI_OVERLOADED                {2};
-constexpr std::uint8_t                 FCGI_UNKNOWN_ROLE              {3};
+constexpr std::uint8_t                 FCGI_REQUEST_COMPLETE          {0U};
+constexpr std::uint8_t                 FCGI_CANT_MPX_CONN             {1U};
+constexpr std::uint8_t                 FCGI_OVERLOADED                {2U};
+constexpr std::uint8_t                 FCGI_UNKNOWN_ROLE              {3U};
   // Default FCGI_GET_VALUES record variables.
   // (As character byte sequences encoded in ASCII/UTF-8.)
 const     std::vector<std::uint8_t>   FCGI_MAX_CONNS
@@ -69,17 +66,17 @@ constexpr std::int_fast32_t            kMaxRecordContentByteLength    {(1LU << 1
 // Enum class for header type values.
 enum class FcgiType : std::uint8_t
 {
-  kFCGI_BEGIN_REQUEST     = 1,       // From client.
-  kFCGI_ABORT_REQUEST     = 2,       // From client.
-  kFCGI_END_REQUEST       = 3,
-  kFCGI_PARAMS            = 4,       // From client.
-  kFCGI_STDIN             = 5,       // From client.
-  kFCGI_STDOUT            = 6,
-  kFCGI_STDERR            = 7,
-  kFCGI_DATA              = 8,       // From client.
-  kFCGI_GET_VALUES        = 9,       // From client.
-  kFCGI_GET_VALUES_RESULT = 10,
-  kFCGI_UNKNOWN_TYPE      = 11
+  kFCGI_BEGIN_REQUEST     = 1U,       // From client.
+  kFCGI_ABORT_REQUEST     = 2U,       // From client.
+  kFCGI_END_REQUEST       = 3U,
+  kFCGI_PARAMS            = 4U,       // From client.
+  kFCGI_STDIN             = 5U,       // From client.
+  kFCGI_STDOUT            = 6U,
+  kFCGI_STDERR            = 7U,
+  kFCGI_DATA              = 8U,       // From client.
+  kFCGI_GET_VALUES        = 9U,       // From client.
+  kFCGI_GET_VALUES_RESULT = 10U,
+  kFCGI_UNKNOWN_TYPE      = 11U
 };
 
 } // namespace fcgi_si
