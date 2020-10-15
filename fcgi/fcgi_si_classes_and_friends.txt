@@ -1,20 +1,19 @@
-fcgi_si classes and friend relationships.
+server_interface_combined.h classes and friend relationships.
 
 Classes:
   Classes with a friend or which are a friend:
-    FCGIRequest
-    FCGIServerInterface
-    RecordStatus
-    RequestData
+    FcgiRequest
+    FcgiServerInterface
+    RequestData (member type of FcgiServerInterface)
 
   Classes without friendship:
-    RequestIdentifier
+    FcgiRequestIdentifier
+    RecordStatus (member type of FcgiServerInterface)
 
 Enum classes:
-  FCGIType
-  RequestStatus
+  FcgiType
+  RequestStatus (member type of FcgiServerInterface)
 
-Friends: A -> B means A is a friend of B.
-  FCGIRequest   -> RequestData
-  FCGIRequest  <-> FCGIServerInterface
-  RecordStatus  -> FCGIServerInterface
+Friends: A -> B means A is a friend of B (and vice versa with a left arrow).
+  FcgiRequest   -> RequestData
+  FcgiRequest  <-> FcgiServerInterface

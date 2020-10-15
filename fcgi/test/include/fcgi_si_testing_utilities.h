@@ -119,8 +119,7 @@ class FcgiRequestIdManager
 //    path length limit of UNIX sockets.
 //
 // Exceptions:
-// 1) Throws any exceptions thrown by the constructor of
-//    fcgi_si::FcgiServerInterface. 
+// 1) Throws any exceptions thrown by the constructor of FcgiServerInterface. 
 //    a) The interface socket file descriptor was closed.
 //    b) The pointer to the interface is null.
 // 2) Throws std::system_error if a file for a UNIX socket was created and it
@@ -161,15 +160,13 @@ struct InterfaceCreationArguments
 std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
 GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args);
 
-// This class creates an interface with the parameters provided in inter_args.
-// client_number sockets are created and connected to the interface. These
-// sockets are made non-blocking to facilitate testing FcgiServerInterface
-// and related classes using a single process.
-//
-// The client socket descriptors, the interface, and interface information
+//    This class creates an interface with the parameters provided in
+// inter_args. client_number sockets are created and connected to the
+// interface. These sockets are made non-blocking to facilitate testing
+// FcgiServerInterface and related classes using a single process.
+//    The client socket descriptors, the interface, and interface information
 // are made available through accessors.
-//
-// All socket descriptors which are associated with an instance are closed
+//    All socket descriptors which are associated with an instance are closed
 // by the destructor. If inter_args.domain == AF_UNIX, the socket file is
 // removed by the destructor.
 class GTestNonFatalSingleProcessInterfaceAndClients
@@ -211,7 +208,6 @@ class GTestNonFatalSingleProcessInterfaceAndClients
   
   GTestNonFatalSingleProcessInterfaceAndClients&
   operator=(GTestNonFatalSingleProcessInterfaceAndClients&&) = default;
-
   GTestNonFatalSingleProcessInterfaceAndClients&
   operator=(const GTestNonFatalSingleProcessInterfaceAndClients&) = delete;
 

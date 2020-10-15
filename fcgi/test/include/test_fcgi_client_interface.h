@@ -448,7 +448,8 @@ class UnknownType : public ServerEvent
 
 //    TestFcgiClientInterface provides an implementation of the FastCGI
 // protocol for programs which make requests of FastCGI application servers.
-// Such programs may be called clients or client servers.
+// Such programs may be called clients or client servers from the perspective
+// of FastCGI.
 //    The interface allows connections to be made to distinct FastCGI
 // application servers. Different socket domains may be used; all connections
 // are stream-based as FastCGI requires stream-based sockets.
@@ -467,14 +468,14 @@ class UnknownType : public ServerEvent
 // identifiers. All request identifiers are initially unallocated. This is
 // equivalent to being released. When a request is made, a FastCGI identifier
 // is chosen by the interface. Let this identifier be ID. The pair
-// (connection, ID) is used to construct an fcgi_si::FcgiRequestIdentifier instance.
-// This value within FcgiRequestIdentifier identifies the request. Once the request
-// is made, this value transitions from being released to being allocated. Only
-// released values are used for new requests. Once a response has been received
-// for a request identified by value v = (connection, ID), value is not
-// released until a call to ReleaseId(v) or ReleaseId(connection) is made. This
-// is true regardless of intervening closure of connection by an application
-// server or through calls of CloseConnection(connection).
+// (connection, ID) is used to construct an FcgiRequestIdentifier instance.
+// This value within FcgiRequestIdentifier identifies the request. Once the
+// request is made, this value transitions from being released to being
+// allocated. Only released values are used for new requests. Once a response
+// has been received for a request identified by value v = (connection, ID),
+// value is not released until a call to ReleaseId(v) or ReleaseId(connection)
+// is made. This is true regardless of intervening closure of connection by an
+// application server or through calls of CloseConnection(connection).
 //    Note that the handling of allocated and released request identifiers for
 // requests which received a response (completed requests) prevents the reuse
 // of a request identifier before it is explicitly released by the user of
@@ -485,8 +486,9 @@ class UnknownType : public ServerEvent
 // application servers. ServerEvent was defined for this purpose. An internal
 // queue is used to store events.
 //    The event queue is also used by SendAbortRequest,
-// SendBinaryManagementRequest, and SendGetValuesRequest to report the detection
-// during their invocation of the closure of a connection by its peer.
+// SendBinaryManagementRequest, and SendGetValuesRequest to report the
+// detection during their invocation of the closure of a connection by its
+// peer.
 //
 //    Several features of the interface make it suited for programs which
 // test implementations of the FastCGI protocol for application servers or
