@@ -1,4 +1,4 @@
-#include "include/utilities.h"
+#include "include/fcgi_utilities.h"
 
 #include <cstdlib>
 #include <cstdint>
@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/protocol_constants.h"
+#include "include/fcgi_protocol_constants.h"
 
 namespace a_component {
 namespace fcgi {

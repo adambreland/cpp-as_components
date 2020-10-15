@@ -28,9 +28,9 @@
 #include "external/id_manager/include/id_manager_template.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
-#include "include/utilities.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_utilities.h"
 
 namespace a_component {
 namespace fcgi {
@@ -38,7 +38,7 @@ namespace test {
 
 // Invariants and properties of completed_request_set_, connection_map_, and
 // pending_request_map_.
-// 1) If a RequestIdentifier instance ri is present in completed_request_set_
+// 1) If a FcgiRequestIdentifier instance ri is present in completed_request_set_
 //    or pending_request_map_, then an entry for ri.descriptor() must be
 //    present in connection_map_.
 // 2) If a connection as represented by a ConnectionState instance c of
@@ -56,7 +56,7 @@ namespace test {
 //    keys.
 // 5) The set of FCGI_id values of the id_manager instance for a connection of
 //    a ConnectionState instance c of connection_map_ is identical to the union
-//    of the sets of FCGI_id values of the RequestIdentifier instances which
+//    of the sets of FCGI_id values of the FcgiRequestIdentifier instances which
 //    are associated with the connection of c and which are derived from
 //    completed_request_set_ and pending_request_map_.
 // 6) The functions of the ReleaseId overload set can only release completed-
@@ -157,9 +157,9 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     return false;
   ConnectionState* state_ptr {&(connection_iter->second)};
 
-  std::map<RequestIdentifier, RequestData>::iterator pending_start
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_start
     {pending_request_map_.lower_bound({connection, 0U})};
-  std::map<RequestIdentifier, RequestData>::iterator pending_end
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_end
     {(connection < std::numeric_limits<int>::max()) ?
       pending_request_map_.lower_bound({connection + 1, 0U}) :
       pending_request_map_.end()};
@@ -172,7 +172,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
 
   // Determine if the item in connection_map_ should be erased. When request
   // IDs for completed requests are present, the item should not be erased.
-  std::set<RequestIdentifier>::iterator completed_start
+  std::set<FcgiRequestIdentifier>::iterator completed_start
     {completed_request_set_.lower_bound({connection, 0U})};
   // Are completed-but-unreleased requests present?
   if((completed_start != completed_request_set_.end()) &&
@@ -184,7 +184,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     // id_manager.
     a_component::IdManager<std::uint16_t>* id_manager_ptr
       {&(state_ptr->id_manager)};
-    for(std::map<RequestIdentifier, RequestData>::iterator
+    for(std::map<FcgiRequestIdentifier, RequestData>::iterator
       pending_start_copy {pending_start};
       pending_start_copy != pending_end;
       ++pending_start_copy)
@@ -211,7 +211,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     );
     state_ptr->management_queue.swap(empty_queue);
     state_ptr->connected = false;
-    // The erasure of pending requests requires releasing the RequestIdentifier
+    // The erasure of pending requests requires releasing the FcgiRequestIdentifier
     // values which are associated with these requests from id_manager.
     //
     // It is assumed that ReleaseId will not throw as the check above
@@ -219,7 +219,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     while(pending_start != pending_end)
     {
       id_manager_ptr->ReleaseId(pending_start->first.Fcgi_id());
-      std::map<RequestIdentifier, RequestData>::iterator safe_eraser
+      std::map<FcgiRequestIdentifier, RequestData>::iterator safe_eraser
         {pending_start};
       ++pending_start;
       pending_request_map_.erase(safe_eraser);
@@ -377,10 +377,10 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   try
   {
     // TestFcgiClientInterface allows requests represented by unique
-    // RequestIdentifier values to outlive the connection on which they
+    // FcgiRequestIdentifier values to outlive the connection on which they
     // originated. If a connection is closed and the descriptor value of the
     // connection is used for a new connection, unreleased requests on the
-    // previous connection must be accunted for when new RequestIdentifier
+    // previous connection must be accunted for when new FcgiRequestIdentifier
     // values are chosen. Persisting ConnectionState instances across
     // instances of "connected == true" state allows this through persistence
     // of id_manager instances.
@@ -429,7 +429,7 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
 
 std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
 {
-  std::set<RequestIdentifier>::const_iterator
+  std::set<FcgiRequestIdentifier>::const_iterator
      least_upper_iter {completed_request_set_.lower_bound({connection, 0})};
   if((least_upper_iter == completed_request_set_.cend()) ||
       (least_upper_iter->descriptor() > connection))
@@ -438,7 +438,7 @@ std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
   }
   else
   {
-    std::set<RequestIdentifier>::const_iterator next_iter
+    std::set<FcgiRequestIdentifier>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
         completed_request_set_.lower_bound({connection + 1, 0U}) :
         completed_request_set_.end()};
@@ -484,9 +484,9 @@ void TestFcgiClientInterface::ExamineSelectReturn()
         // pending_iter->first.descriptor() == descriptor. In other words,
         // in the loop below, pending_iter will always refer to the end or to a
         // pending request in the collection of requests for descriptor.
-        std::map<RequestIdentifier, RequestData>::iterator
+        std::map<FcgiRequestIdentifier, RequestData>::iterator
         pending_end {pending_request_map_.end()};
-        std::map<RequestIdentifier, RequestData>::iterator
+        std::map<FcgiRequestIdentifier, RequestData>::iterator
         pending_iter {pending_end};
 
         // Start reading until the connection blocks.
@@ -557,7 +557,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
             auto PendingIterCheckAndUpdate =
             [&pending_iter, &pending_end, &descriptor, &fcgi_id, this]()->void
             {
-              RequestIdentifier id {descriptor, fcgi_id};
+              FcgiRequestIdentifier id {descriptor, fcgi_id};
               if((pending_iter == pending_end) || (pending_iter->first != id))
               {
                 pending_iter = pending_request_map_.find(id);
@@ -861,7 +861,7 @@ std::size_t TestFcgiClientInterface::ManagementRequestCount(int connection) cons
 
 std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
 {
-  std::map<RequestIdentifier, RequestData>::const_iterator
+  std::map<FcgiRequestIdentifier, RequestData>::const_iterator
      least_upper_iter {pending_request_map_.lower_bound({connection, 0U})};
   if((least_upper_iter == pending_request_map_.cend()) ||
       (least_upper_iter->first.descriptor() > connection))
@@ -870,7 +870,7 @@ std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
   }
   else
   {
-    std::map<RequestIdentifier, RequestData>::const_iterator next_iter
+    std::map<FcgiRequestIdentifier, RequestData>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
         pending_request_map_.lower_bound({connection + 1, 0U}) :
         pending_request_map_.end()};
@@ -878,11 +878,11 @@ std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
   }
 }
 
-std::map<RequestIdentifier, 
+std::map<FcgiRequestIdentifier, 
   TestFcgiClientInterface::RequestData>::iterator
 TestFcgiClientInterface::ProcessCompleteRecord(
   std::map<int, ConnectionState>::iterator connection_iter,
-  std::map<RequestIdentifier, RequestData>::iterator pending_iter)
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter)
 {
   // The organization of the implementations of the cases below allows
   // the strong exception guarantee to be satisfied. This requires the
@@ -1064,7 +1064,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
   return pending_iter;
 }
 
-bool TestFcgiClientInterface::ReleaseId(RequestIdentifier id)
+bool TestFcgiClientInterface::ReleaseId(FcgiRequestIdentifier id)
 {
   int connection {id.descriptor()};
   std::map<int, ConnectionState>::iterator connection_iter
@@ -1075,14 +1075,14 @@ bool TestFcgiClientInterface::ReleaseId(RequestIdentifier id)
   }
   else
   {
-    std::set<RequestIdentifier>::iterator completed_end
+    std::set<FcgiRequestIdentifier>::iterator completed_end
       {completed_request_set_.end()};
     a_component::IdManager<std::uint16_t>* id_manager_ptr
       {&(connection_iter->second.id_manager)};
     std::uint16_t fcgi_id {id.Fcgi_id()};
 
     bool pending {pending_request_map_.find(id) != pending_request_map_.end()};
-    std::set<RequestIdentifier>::iterator completed_iter
+    std::set<FcgiRequestIdentifier>::iterator completed_iter
         {completed_request_set_.find(id)};
     bool completed {completed_iter != completed_end};
     bool used {id_manager_ptr->IsUsed(fcgi_id)};
@@ -1102,7 +1102,7 @@ bool TestFcgiClientInterface::ReleaseId(RequestIdentifier id)
       bool more_before {false};
       if(completed_iter != completed_request_set_.begin())
       {
-        std::set<RequestIdentifier>::iterator previous_completed
+        std::set<FcgiRequestIdentifier>::iterator previous_completed
           {completed_iter};
         --previous_completed;
         if(previous_completed->descriptor() == connection)
@@ -1110,7 +1110,7 @@ bool TestFcgiClientInterface::ReleaseId(RequestIdentifier id)
           more_before = true;
         }
       }
-      std::set<RequestIdentifier>::iterator next_completed
+      std::set<FcgiRequestIdentifier>::iterator next_completed
         {completed_iter};
       next_completed++;
       bool more_after {(next_completed != completed_end) ?
@@ -1148,9 +1148,9 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
   bool connected {connection_iter->second.connected};
   a_component::IdManager<std::uint16_t>* id_manager_ptr
     {&(connection_iter->second.id_manager)};
-  std::set<RequestIdentifier>::iterator start
+  std::set<FcgiRequestIdentifier>::iterator start
     {completed_request_set_.lower_bound({connection, 0U})};
-  std::set<RequestIdentifier>::iterator end
+  std::set<FcgiRequestIdentifier>::iterator end
     {(connection < std::numeric_limits<int>::max()) ?
       completed_request_set_.lower_bound({connection + 1, 0U}) :
       completed_request_set_.end()};
@@ -1162,7 +1162,7 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
     // Ensure that each completed request is present in the id_manager.
     //
     // Absence of a completed requests in the pending map is not verified.
-    for(std::set<RequestIdentifier>::iterator
+    for(std::set<FcgiRequestIdentifier>::iterator
       start_copy {start}; start_copy != end; ++start_copy)
     {
       std::uint16_t local_id {start_copy->Fcgi_id()};
@@ -1275,9 +1275,9 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
   }
 }
 
-bool TestFcgiClientInterface::SendAbortRequest(RequestIdentifier id)
+bool TestFcgiClientInterface::SendAbortRequest(FcgiRequestIdentifier id)
 {
-  std::map<RequestIdentifier, RequestData>::iterator pending_iter
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter
     {pending_request_map_.find(id)};
   if(pending_iter == pending_request_map_.end())
   {
@@ -1455,14 +1455,14 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   return true;
 }
 
-RequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
+FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   const FcgiRequestDataReference& request)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};
   if(connection_iter == connection_map_.end())
   {
-    return RequestIdentifier {};
+    return FcgiRequestIdentifier {};
   }
   ConnectionState* state_ptr       {&(connection_iter->second)};
   std::uint16_t    new_id          {state_ptr->id_manager.GetId()};
@@ -1625,7 +1625,7 @@ RequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
       }
       FailedWrite(connection_iter, saved_errno, nothing_written, false,
         "write");
-      return RequestIdentifier {};
+      return FcgiRequestIdentifier {};
     }
     // Insert a new RequestData instance to pending_request_map_.
     pending_request_map_.insert({
@@ -1650,18 +1650,18 @@ RequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     }
     throw;
   }
-  return RequestIdentifier {connection, new_id};
+  return FcgiRequestIdentifier {connection, new_id};
 }
 
-std::map<RequestIdentifier, 
+std::map<FcgiRequestIdentifier, 
   TestFcgiClientInterface::RequestData>::iterator
 TestFcgiClientInterface::UpdateOnHeaderCompletion(
   std::map<int, ConnectionState>::iterator connection_iter,
-  std::map<RequestIdentifier, RequestData>::iterator pending_iter)
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter)
 {
   int descriptor {connection_iter->first};
   ConnectionState* state_ptr {&(connection_iter->second)};
-  std::map<RequestIdentifier, RequestData>::iterator pending_end
+  std::map<FcgiRequestIdentifier, RequestData>::iterator pending_end
     {pending_request_map_.end()};
 
   // Extract the header information.
@@ -1685,7 +1685,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
   auto PendingIterCheckAndUpdate = 
   [&pending_iter, &descriptor, &fcgi_id, &pending_end, this]()->void
   {
-    RequestIdentifier id {descriptor, fcgi_id};
+    FcgiRequestIdentifier id {descriptor, fcgi_id};
     if((pending_iter == pending_end) || (pending_iter->first != id))
     {
       // It is acceptable for find to return end as a spurious record may

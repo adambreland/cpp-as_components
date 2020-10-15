@@ -1,19 +1,18 @@
-#ifndef FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
-#define FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
+#ifndef A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
+#define A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
 
-#include <arpa/inet.h>
-#include <dirent.h>
-#include <signal.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 
-#include <algorithm>
 #include <cstdint>
-#include <iterator>
+#include <cstdlib>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
 #include <vector>
 
-#include "server_interface.h"
+#include "server_interface_combined.h"
 
 // Key:
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the
@@ -109,80 +108,6 @@ class FcgiRequestIdManager
   bool corrupt_ {false};
 };
 
-class FileDescriptorLeakChecker
-{
- public:
-  using value_type     = int;
-  using iterator       = std::vector<int>::iterator;
-  using const_iterator = std::vector<int>::const_iterator;
-
-  void Reinitialize();
-
-  inline std::pair<FileDescriptorLeakChecker::const_iterator, 
-    FileDescriptorLeakChecker::const_iterator> Check()
-  {
-    return CheckHelper(recorded_list_);
-  }
-
-  template<typename It>
-  std::pair<FileDescriptorLeakChecker::const_iterator, 
-  FileDescriptorLeakChecker::const_iterator> Check(It removed_begin, 
-    It removed_end, It added_begin, It added_end);
-
-  inline FileDescriptorLeakChecker()
-  {
-    Reinitialize();
-  }
-  FileDescriptorLeakChecker(const FileDescriptorLeakChecker&) = default;
-  FileDescriptorLeakChecker(FileDescriptorLeakChecker&&) = default;
-
-  FileDescriptorLeakChecker& operator=(const FileDescriptorLeakChecker&)
-    = default;
-  FileDescriptorLeakChecker& operator=(FileDescriptorLeakChecker&&)
-    = default;
-
-  ~FileDescriptorLeakChecker() = default;
-
- private:
-  void CleanUp(DIR* dir_stream_ptr);
-  DIR* CreateDirectoryStream();
-  void RecordDescriptorList(DIR* dir_stream_ptr, std::vector<int>* list_ptr);
-  std::pair<FileDescriptorLeakChecker::const_iterator, 
-    FileDescriptorLeakChecker::const_iterator> 
-    CheckHelper(const std::vector<int>& expected_list);
-
-  // After construction, a sorted list of unique integers.
-  std::vector<int> recorded_list_ {};
-  std::vector<int> leak_list_ {};
-};
-
-//    Creates a temporary file in the temporary directory offered by Bazel
-// and returns a descriptor for the file. The file was unlinked after being
-// created. Failures are reported as Google Test fatal failures. In this case,
-// the function does not return.
-//    Note that a pointer is used as functions which may produce fatal Google
-// Test failures must return void.
-//
-// BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
-void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr);
-
-extern "C" using CSignalHandlerType = void (*)(int);
-
-void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler);
-
-inline void GTestFatalIgnoreSignal(int sig)
-{
-  return GTestFatalSetSignalDisposition(sig, SIG_IGN);
-}
-
-inline void GTestFatalRestoreSignal(int sig)
-{
-  return GTestFatalSetSignalDisposition(sig, SIG_DFL);
-}
-
-void GTestNonFatalCheckAndReportDescriptorLeaks(
-  FileDescriptorLeakChecker* fdlc_ptr,  const std::string& test_name);
-
 // GTestNonFatalCreateInterface
 // Creates a listening socket for an interface, and constructs an interface
 // instance on the heap. Access is provided by a returned unique_ptr to the
@@ -235,11 +160,6 @@ struct InterfaceCreationArguments
 
 std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
 GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args);
-
-// Truncate a file to zero length and seek to the beginning.
-//
-// Failures are reported as Google Test non-fatal failures.
-bool GTestNonFatalPrepareTemporaryFile(int descriptor);
 
 // This class creates an interface with the parameters provided in inter_args.
 // client_number sockets are created and connected to the interface. These
@@ -315,6 +235,4 @@ class GTestNonFatalSingleProcessInterfaceAndClients
 } // namespace fcgi
 } // namespace a_component
 
-#include "test/include/fcgi_si_testing_utilities_templates.h"
-
-#endif  // FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_H_
+#endif  // A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_

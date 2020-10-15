@@ -16,9 +16,11 @@
 #include <memory>
 #include <vector>
 
+#include "external/a_component_testing/include/a_component_testing_utilities.h"
+#include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "include/protocol_constants.h"
+#include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 
 namespace a_component {
@@ -43,8 +45,8 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
  protected:
   void SetUp() override
   {
-    GTestFatalIgnoreSignal(SIGPIPE);
-    GTestFatalSetSignalDisposition(SIGALRM, &SigAlrmHandler);
+    testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
+    testing::gtest::GTestFatalSetSignalDisposition(SIGALRM, &SigAlrmHandler);
     ASSERT_TRUE(test_fcgi_client_interface_fcgi_server_accept_timeout.
       is_lock_free());
     // Ensure that the the timeout flag is cleared.
@@ -60,17 +62,17 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
     }
     // Clear the timeout flag to reset shared state.
     test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
-    GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
+    testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
       "TestFcgiClientInterfaceGetValuesResult");
-    GTestFatalRestoreSignal(SIGALRM);
-    GTestFatalRestoreSignal(SIGPIPE);
+    testing::gtest::GTestFatalRestoreSignal(SIGALRM);
+    testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
   }
 
   // AF_UNIX files cannot be created in the Bazel temporary file directory
   // because its name is too long.
   const char* unix_path_ {"/tmp/TestFcgiClientInterfaceManagementRequests"};
   int listening_socket_ {-1};
-  FileDescriptorLeakChecker fdlc_ {};
+  testing::FileDescriptorLeakChecker fdlc_ {};
 };
 
 

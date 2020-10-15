@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_REQUEST_IDENTIFIER_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_REQUEST_IDENTIFIER_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
 
 #include <cstdint>
 
@@ -14,7 +14,7 @@ namespace fcgi {
 // * An explicit conversion to boolean type converts the value (0, 0) to false
 //   and all other values to true.
 // * Mutation is only allowed through assignment.
-class RequestIdentifier {
+class FcgiRequestIdentifier {
 public:
   inline int descriptor() const noexcept
   {
@@ -29,63 +29,64 @@ public:
   // Default-constructed RequestIdentifier objects are interpreted as null
   // objects and are false when converted to boolean type. Any object which
   // does not compare equal to a default-constructed object converts to true.
-  inline RequestIdentifier() noexcept
+  inline FcgiRequestIdentifier() noexcept
   : pair_ {0, 0U}
   {}
 
-  inline RequestIdentifier(int descriptor, uint16_t Fcgi_id) noexcept
+  inline FcgiRequestIdentifier(int descriptor, uint16_t Fcgi_id) noexcept
   : pair_ {descriptor, Fcgi_id}
   {}
 
-  inline RequestIdentifier(const RequestIdentifier& request_id) noexcept
+  inline FcgiRequestIdentifier(const FcgiRequestIdentifier& request_id) noexcept
   {
     pair_ = request_id.pair_;
   }
 
-  inline RequestIdentifier(RequestIdentifier&& request_id) noexcept
+  inline FcgiRequestIdentifier(FcgiRequestIdentifier&& request_id) noexcept
   {
     pair_ = std::move(request_id.pair_);
   }
 
-  inline RequestIdentifier& operator=(const RequestIdentifier& request_id) 
+  inline FcgiRequestIdentifier& operator=(
+    const FcgiRequestIdentifier& request_id) noexcept
+  {
+    pair_ = request_id.pair_;
+    return *this;
+  }
+
+  inline FcgiRequestIdentifier& operator=(FcgiRequestIdentifier&& request_id)
     noexcept
   {
-    pair_ = request_id.pair_;
-    return *this;
-  }
-
-  inline RequestIdentifier& operator=(RequestIdentifier&& request_id) noexcept
-  {
     pair_ = std::move(request_id.pair_);
     return *this;
   }
 
-  inline bool operator==(const RequestIdentifier& rhs) const noexcept
+  inline bool operator==(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ == rhs.pair_;
   }
 
-  inline bool operator!=(const RequestIdentifier& rhs) const noexcept
+  inline bool operator!=(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ != rhs.pair_;
   }
 
-  inline bool operator<(const RequestIdentifier& rhs) const noexcept
+  inline bool operator<(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ < rhs.pair_;
   }
 
-  inline bool operator<=(const RequestIdentifier& rhs) const noexcept
+  inline bool operator<=(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ <= rhs.pair_;
   }
 
-  inline bool operator>(const RequestIdentifier& rhs) const noexcept
+  inline bool operator>(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ > rhs.pair_;
   }
 
-  inline bool operator>=(const RequestIdentifier& rhs) const noexcept
+  inline bool operator>=(const FcgiRequestIdentifier& rhs) const noexcept
   {
     return pair_ >= rhs.pair_;
   }
@@ -95,7 +96,7 @@ public:
     return (pair_.first || pair_.second) ? true : false;
   }
 
-  ~RequestIdentifier() = default;
+  ~FcgiRequestIdentifier() = default;
 
 private:
   std::pair<int, std::uint16_t> pair_;
@@ -104,4 +105,4 @@ private:
 } // namespace fcgi
 } // namespace a_component
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_REQUEST_IDENTIFIER_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_

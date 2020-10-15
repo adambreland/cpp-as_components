@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_
 
 #include <sys/types.h>     // For ssize_t.
 #include <sys/uio.h>
@@ -12,9 +12,9 @@
 #include <vector>
 
 #include "include/fcgi_server_interface.h"
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
-#include "include/utilities.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_utilities.h"
 
 namespace a_component {
 namespace fcgi {
@@ -154,7 +154,7 @@ class FcgiRequest {
   // identifiers are ordered pairs whose first component is the socket
   // descriptor of the connection of the request and whose second component
   // is the FastCGI ID of the request.
-  inline RequestIdentifier get_request_identifier() const noexcept
+  inline FcgiRequestIdentifier get_request_identifier() const noexcept
   {
     return request_identifier_;
   }
@@ -253,7 +253,7 @@ class FcgiRequest {
   // should create FcgiRequest objects through calls to AcceptRequests().
   //
   // Parameters:
-  // request_id:       The RequestIdentifier used as the key for the request
+  // request_id:       The FcgiRequestIdentifier used as the key for the request
   //                   request_map_.
   // interface_id:     The current value of
   //                   FcgiServerInterface::interface_identifier_. This value
@@ -263,7 +263,7 @@ class FcgiRequest {
   // interface_ptr:    A pointer to the current FcgiServerInterface object.
   //                   The pointer is equal to this in interface method calls.
   // request_data_ptr: A pointer to the RequestData object associated the
-  //                   the RequestIdentifier key of request_map_.
+  //                   the FcgiRequestIdentifier key of request_map_.
   // write_mutex_ptr:  A pointer to the write mutex of the connection
   //                   over which the request was sent. The descriptor of this
   //                   connection is equal to request_id.descriptor().
@@ -298,7 +298,7 @@ class FcgiRequest {
   //    c) Is associated with the interface object which created it.
   // 2) After construction, request_status_ == RequestStatus::kRequestAssigned
   //    for the RequestData object given by *request_data_ptr.
-  FcgiRequest(RequestIdentifier request_id, unsigned long interface_id,
+  FcgiRequest(FcgiRequestIdentifier request_id, unsigned long interface_id,
     FcgiServerInterface* interface_ptr,
     FcgiServerInterface::RequestData* request_data_ptr,
     std::mutex* write_mutex_ptr, bool* bad_connection_state_ptr,
@@ -509,7 +509,7 @@ class FcgiRequest {
     // an associated_interface_id_ value of 0U.
   unsigned long associated_interface_id_;
   FcgiServerInterface* interface_ptr_;
-  RequestIdentifier request_identifier_;
+  FcgiRequestIdentifier request_identifier_;
   FcgiServerInterface::RequestData* request_data_ptr_;
   std::mutex* write_mutex_ptr_;
   bool* bad_connection_state_ptr_;
@@ -537,4 +537,4 @@ class FcgiRequest {
 
 #include "include/fcgi_request_templates.h"
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_

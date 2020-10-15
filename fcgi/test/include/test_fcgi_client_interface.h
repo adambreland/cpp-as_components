@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
-#define A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#ifndef A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#define A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
 
 #include <sys/select.h>
 #include <netinet/in.h>
@@ -17,8 +17,8 @@
 
 #include "external/id_manager/include/id_manager_template.h"
 
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
 
 namespace a_component {
 namespace fcgi {
@@ -71,7 +71,7 @@ struct ManagementRequestData
 class ServerEvent
 {
  public:
-  virtual RequestIdentifier RequestId() const = 0;
+  virtual FcgiRequestIdentifier RequestId() const = 0;
   virtual                   ~ServerEvent()    = default;
 };
 
@@ -79,12 +79,12 @@ class ConnectionClosure : public ServerEvent
 {
   public:
     // 1) For default-constructed instances, RequestId returns the
-    //    RequestIdentifier given by (-1, 0).
+    //    FcgiRequestIdentifier given by (-1, 0).
     // 2) For other, non-moved-from instances, RequestId returns the
-    //    RequestIdentifier given by (connection, 0) where connection is a
+    //    FcgiRequestIdentifier given by (connection, 0) where connection is a
     //    local socket descriptor of a socket which was discovered to have been
     //    closed by its peer.
-    inline RequestIdentifier RequestId() const noexcept override
+    inline FcgiRequestIdentifier RequestId() const noexcept override
     {
       return connection_holder_;
     }
@@ -106,13 +106,13 @@ class ConnectionClosure : public ServerEvent
     ~ConnectionClosure() override = default;
 
   private:
-    RequestIdentifier connection_holder_;
+    FcgiRequestIdentifier connection_holder_;
 };
 
 // A class which:
 // 1) Stores the response to a FastCGI application request.
 // 2) Allows access to the information of the request as represented by a
-//    FcgiRequestDataReference instance and the RequestIdentifier of the
+//    FcgiRequestDataReference instance and the FcgiRequestIdentifier of the
 //    request.
 class FcgiResponse : public ServerEvent
 {
@@ -142,7 +142,7 @@ class FcgiResponse : public ServerEvent
     return request_;
   }
 
-  inline RequestIdentifier RequestId() const noexcept override
+  inline FcgiRequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
@@ -154,7 +154,7 @@ class FcgiResponse : public ServerEvent
     const std::vector<std::uint8_t>& stdout,
     std::uint8_t protocol_status,
     const FcgiRequestDataReference& request, 
-    RequestIdentifier request_id)
+    FcgiRequestIdentifier request_id)
   : app_status_      {app_status},
     fcgi_stderr_     {stderr},
     fcgi_stdout_     {stdout},
@@ -168,7 +168,7 @@ class FcgiResponse : public ServerEvent
     std::vector<std::uint8_t>&& stdout,
     std::uint8_t protocol_status,
     const FcgiRequestDataReference& request,
-    RequestIdentifier request_id) noexcept
+    FcgiRequestIdentifier request_id) noexcept
   : app_status_      {app_status},
     fcgi_stderr_     {std::move(stderr)},
     fcgi_stdout_     {std::move(stdout)},
@@ -191,7 +191,7 @@ class FcgiResponse : public ServerEvent
   std::vector<std::uint8_t>  fcgi_stdout_;
   std::uint8_t               protocol_status_;
   FcgiRequestDataReference   request_;
-  RequestIdentifier request_id_;
+  FcgiRequestIdentifier request_id_;
 };
 
 class GetValuesResult : public ServerEvent
@@ -218,12 +218,12 @@ class GetValuesResult : public ServerEvent
   }
 
   // 1) For a default constructed instance, RequestId returns the
-  //    RequestIdentifier given by (-1, 0).
+  //    FcgiRequestIdentifier given by (-1, 0).
   // 2) For other, non-moved-from instances, RequestId returns the
-  //    RequestIdentifier given by (connection, 0) where connection is the
+  //    FcgiRequestIdentifier given by (connection, 0) where connection is the
   //    local socket descriptor of the socket over which the the
   //    FCGI_GET_VALUES request and its response were sent.
-  inline RequestIdentifier RequestId() const noexcept override
+  inline FcgiRequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
@@ -240,7 +240,7 @@ class GetValuesResult : public ServerEvent
     response_params_map_ {}
   {}
 
-  inline GetValuesResult(bool corruption, RequestIdentifier request_id,
+  inline GetValuesResult(bool corruption, FcgiRequestIdentifier request_id,
     const ParamsMap& request, const ParamsMap& response)
   : corrupt_response_ {corruption},
     request_id_ {request_id},
@@ -248,7 +248,7 @@ class GetValuesResult : public ServerEvent
     response_params_map_ {response}
   {}
 
-  inline GetValuesResult(bool corruption, RequestIdentifier request_id,
+  inline GetValuesResult(bool corruption, FcgiRequestIdentifier request_id,
     ParamsMap&& request, ParamsMap&& response) noexcept
   : corrupt_response_ {corruption},
     request_id_ {request_id},
@@ -266,7 +266,7 @@ class GetValuesResult : public ServerEvent
 
  private:
   bool                       corrupt_response_;
-  RequestIdentifier request_id_;
+  FcgiRequestIdentifier request_id_;
   ParamsMap                  request_params_map_;
   ParamsMap                  response_params_map_;
 };
@@ -321,7 +321,7 @@ class InvalidRecord : public ServerEvent
     return padding_length_;
   }
 
-  inline RequestIdentifier RequestId() const noexcept override
+  inline FcgiRequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
@@ -345,7 +345,7 @@ class InvalidRecord : public ServerEvent
   {}
 
   inline InvalidRecord(std::uint8_t version, FcgiType type,
-    RequestIdentifier request_id, 
+    FcgiRequestIdentifier request_id, 
     const std::vector<std::uint8_t>& content, std::uint8_t padding_length)
   : version_        {version},
     type_           {type},
@@ -355,7 +355,7 @@ class InvalidRecord : public ServerEvent
   {}
 
   inline InvalidRecord(std::uint8_t version, FcgiType type,
-    RequestIdentifier request_id, 
+    FcgiRequestIdentifier request_id, 
     std::vector<std::uint8_t>&& content, std::uint8_t padding_length) noexcept
   : version_        {version},
     type_           {type},
@@ -375,7 +375,7 @@ class InvalidRecord : public ServerEvent
  private:
   std::uint8_t               version_;
   FcgiType                   type_;
-  RequestIdentifier          request_id_;
+  FcgiRequestIdentifier          request_id_;
   std::vector<std::uint8_t>  content_;
   std::uint8_t               padding_length_;
 };
@@ -395,12 +395,12 @@ class UnknownType : public ServerEvent
   }
 
   // 1) For a default constructed instance, RequestId returns the
-  //    RequestIdentifier given by (-1, 0).
+  //    FcgiRequestIdentifier given by (-1, 0).
   // 2) For other, non-moved-from instances, RequestId returns the
-  //    RequestIdentifier given by (connection, 0) where connection is the
+  //    FcgiRequestIdentifier given by (connection, 0) where connection is the
   //    local socket descriptor of the socket over which the management
   //    request and its corresponding FCGI_UNKNOWN_TYPE response were sent.
-  inline RequestIdentifier RequestId() const noexcept override
+  inline FcgiRequestIdentifier RequestId() const noexcept override
   {
     return request_id_;
   }
@@ -416,14 +416,14 @@ class UnknownType : public ServerEvent
     request_ {static_cast<FcgiType>(0U), {}, {}}
   {}
 
-  inline UnknownType(RequestIdentifier request_id,
+  inline UnknownType(FcgiRequestIdentifier request_id,
     std::uint8_t type, const ManagementRequestData& request)
   : request_id_         {request_id},
     unknown_type_       {type},
     request_ {request}
   {}
 
-  inline UnknownType(RequestIdentifier request_id,
+  inline UnknownType(FcgiRequestIdentifier request_id,
     std::uint8_t type, ManagementRequestData&& request) noexcept
   : request_id_         {request_id},
     unknown_type_       {type},
@@ -439,7 +439,7 @@ class UnknownType : public ServerEvent
   ~UnknownType() override = default;
 
  private:
-  RequestIdentifier request_id_;
+  FcgiRequestIdentifier request_id_;
   std::uint8_t               unknown_type_;
   ManagementRequestData      request_;
 };
@@ -467,8 +467,8 @@ class UnknownType : public ServerEvent
 // identifiers. All request identifiers are initially unallocated. This is
 // equivalent to being released. When a request is made, a FastCGI identifier
 // is chosen by the interface. Let this identifier be ID. The pair
-// (connection, ID) is used to construct an fcgi_si::RequestIdentifier instance.
-// This value within RequestIdentifier identifies the request. Once the request
+// (connection, ID) is used to construct an fcgi_si::FcgiRequestIdentifier instance.
+// This value within FcgiRequestIdentifier identifies the request. Once the request
 // is made, this value transitions from being released to being allocated. Only
 // released values are used for new requests. Once a response has been received
 // for a request identified by value v = (connection, ID), value is not
@@ -545,7 +545,7 @@ class TestFcgiClientInterface
   // 2) Otherwise, true was returned.
   //    a) Requests on connection for which responses had been received
   //       in-full and which were not released by the user remain active.
-  //    b) Pending requests were released: the fcgi_si::RequestIdentifier
+  //    b) Pending requests were released: the fcgi_si::FcgiRequestIdentifier
   //       instances which were generated for them no longer refer to requests.
   bool CloseConnection(int connection);
 
@@ -635,7 +635,7 @@ class TestFcgiClientInterface
   // Parameters:
   // id: When id refers to a completed but unreleased request, id will have
   //     been returned by a call to SendRequest and will be the
-  //     RequestIdentifier value that is returned by a call to RequestId on
+  //     FcgiRequestIdentifier value that is returned by a call to RequestId on
   //     a ServerEvent instance which was returned by a call to
   //     RetrieveServerEvent.
   //
@@ -650,7 +650,7 @@ class TestFcgiClientInterface
   //    unreleased request.
   // 2) If true was returned, then the FastCGI request identifier of id was
   //    released.
-  bool ReleaseId(RequestIdentifier id);
+  bool ReleaseId(FcgiRequestIdentifier id);
 
   // Attempts to release all FastCGI request identifiers on connection which
   // are associated with completed but unreleased requests.
@@ -704,7 +704,7 @@ class TestFcgiClientInterface
   //    When connection closure was discovered, a ConnectionClosure instance
   //    was added to the micro server event queue.
   // 2) If true was returned, then a FastCGI request abort was sent for id.
-  bool SendAbortRequest(RequestIdentifier id);
+  bool SendAbortRequest(FcgiRequestIdentifier id);
 
   // Attempts to send a management request to connection with the specified
   // binary sequence as content and a management request type given by type.
@@ -805,7 +805,7 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
   //
-  RequestIdentifier SendRequest(int connection,
+  FcgiRequestIdentifier SendRequest(int connection,
     const FcgiRequestDataReference& request);
 
   TestFcgiClientInterface();
@@ -1024,7 +1024,7 @@ class TestFcgiClientInterface
   // 3) 
   // 4) If the type of the record was FCGI_END_REQUEST and the record was valid,
   //    then the entry for the request was removed from pending_request_map_
-  //    and the RequestIdentifier of the request was added to
+  //    and the FcgiRequestIdentifier of the request was added to
   //    completed_request_set_.
   // 5)    If the type of the record was either FCGI_STDOUT or FCGI_STDERR, the
   //    record was valid, and the content length of the record was zero, then
@@ -1035,10 +1035,10 @@ class TestFcgiClientInterface
   // 6) The RecordState instance of the ConnectionState instance referred to
   //    by connection_iter_ was reinitialized.
   // 7) A valid iterator to pending_request_map_ was returned.
-  std::map<RequestIdentifier, RequestData>::iterator
+  std::map<FcgiRequestIdentifier, RequestData>::iterator
   ProcessCompleteRecord(
     std::map<int, ConnectionState>::iterator connection_iter,
-    std::map<RequestIdentifier, RequestData>::iterator pending_iter);
+    std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter);
 
   bool SendBinaryManagementRequestHelper(
     std::map<int, ConnectionState>::iterator connection_iter,
@@ -1105,14 +1105,14 @@ class TestFcgiClientInterface
   //    connection_iter: type, fcgi_id, content_bytes_expected, and
   //    padding_bytes_expected.
   // 4) A valid iterator of pending_request_map_ was returned.
-  std::map<RequestIdentifier, RequestData>::iterator
+  std::map<FcgiRequestIdentifier, RequestData>::iterator
   UpdateOnHeaderCompletion(
     std::map<int, ConnectionState>::iterator connection_iter,
-    std::map<RequestIdentifier, RequestData>::iterator pending_iter);
+    std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter);
 
-  std::set<RequestIdentifier>              completed_request_set_;
+  std::set<FcgiRequestIdentifier>              completed_request_set_;
   std::map<int, ConnectionState>                    connection_map_;
-  std::map<RequestIdentifier, RequestData> pending_request_map_;
+  std::map<FcgiRequestIdentifier, RequestData> pending_request_map_;
   std::list<std::unique_ptr<ServerEvent>>           micro_event_queue_;
   int                                               number_connected_;
   // I/O multiplexing tracking state
@@ -1127,4 +1127,4 @@ class TestFcgiClientInterface
 } // namespace fcgi
 } // namespace a_component
 
-#endif // A_COMPONENT_TEST_FCGI_CLIENT_INTERFACE_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#endif // A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_

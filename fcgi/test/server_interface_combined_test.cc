@@ -1,4 +1,4 @@
-#include "server_interface.h"
+#include "server_interface_combined.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -28,6 +28,8 @@
 #include <tuple>
 #include <vector>
 
+#include "external/a_component_testing/include/a_component_testing_utilities.h"
+#include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 #include "external/socket_functions/include/socket_functions.h"
 
@@ -114,7 +116,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // Other modules whose testing depends on this module: none.
 
   // Leak checker
-  FileDescriptorLeakChecker fdlc {};
+  testing::FileDescriptorLeakChecker fdlc {};
 
   auto ClearFcgiWebServerAddrs = []()->void
   {
@@ -130,7 +132,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // Create a temporary regular file.
   {
     int temp_fd {};
-    GTestFatalCreateBazelTemporaryFile(&temp_fd);
+    testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_fd);
     EXPECT_THROW(FcgiServerInterface(temp_fd, 1, 1), std::exception);
     close(temp_fd);
   }
@@ -488,7 +490,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   }
 
   // Check for file descriptor leaks:
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, 
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, 
     "ConstructionExceptionsAndDirectlyObservableEffects");
 }
 
@@ -545,10 +547,10 @@ TEST(FcgiServerInterface, FcgiGetValues)
   //
   // Other modules whose testing depends on this module: none.
 
-  FileDescriptorLeakChecker fdlc {};
+  testing::FileDescriptorLeakChecker fdlc {};
 
   // Ensure that SIGALRM has its default disposition.
-  GTestFatalRestoreSignal(SIGALRM);
+  testing::gtest::GTestFatalRestoreSignal(SIGALRM);
 
   // Lambda functions for test case implementations.
   struct ScatterGatherSocketWriteArgs
@@ -582,7 +584,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
     {
       ADD_FAILURE() << "An exception was thrown when the normal "
         "GTestNonFatalSingleProcessInterfaceAndClients "
-        " constructor was called in" << case_suffix << '\n' << e.what();
+        "constructor was called in" << case_suffix << '\n' << e.what();
       return;
     }
 
@@ -867,7 +869,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
     FcgiGetValuesTest(args, {}, 9);
   }
 
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "FcgiGetValues");
 }
 
@@ -903,7 +905,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   // 
   // Other modules whose testing depends on this module: none.
 
-  FileDescriptorLeakChecker fdlc {};
+  testing::FileDescriptorLeakChecker fdlc {};
 
   auto UnknownManagementRecordTester = [](
     struct InterfaceCreationArguments args,
@@ -1083,7 +1085,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     static_cast<FcgiType>(100) , 5);
   }
 
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "UnknownManagementRequests");
 }
 
@@ -1633,11 +1635,11 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   // of TestCaseRunner to ensure that restoration takes place.
 
   // Ensure that SIGALRM has its default disposition.
-  GTestFatalRestoreSignal(SIGALRM);  
+  testing::gtest::GTestFatalRestoreSignal(SIGALRM);  
 
   // Ignore SIGPIPE. The disposition will be inherited by the child produced
   // in the test.
-  GTestFatalIgnoreSignal(SIGPIPE);
+  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
 
   // Ensure that FCGI_WEB_SERVER_ADDRS has a fixed state (bound and empty).
   if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
@@ -1646,7 +1648,7 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
       << '\n' << std::strerror(errno);
   }
 
-  FileDescriptorLeakChecker fdlc {};
+  testing::FileDescriptorLeakChecker fdlc {};
 
   const char* path {"/tmp/fcgi_si_test_UNIX_interface_socket"};
 
@@ -1803,11 +1805,11 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
         "to setenv in case 7." << '\n' << std::strerror(errno);
   }
   
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "ConnectionAcceptanceAndRejection");
 
   // Restore the default SIGPIPE disposition.
-  GTestFatalRestoreSignal(SIGPIPE);
+  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, FcgiRequestGeneration)
@@ -2018,8 +2020,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
         new_requests.end()));
   };
 
-  FileDescriptorLeakChecker fdlc {};
-  GTestFatalIgnoreSignal(SIGPIPE);
+  testing::FileDescriptorLeakChecker fdlc {};
+  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
 
                     // Single connection test cases.
 
@@ -4275,9 +4277,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     EXPECT_EQ(spiac.interface().get_overload(), false);
    } while(false);
 
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "FcgiRequestGeneration");
-  GTestFatalRestoreSignal(SIGPIPE);
+  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
@@ -4343,13 +4345,14 @@ TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
   //
   // Other modules whose testing depends on this module:
 
-  GTestFatalIgnoreSignal(SIGPIPE);
+  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
 
-  FileDescriptorLeakChecker fdlc {};
+  testing::FileDescriptorLeakChecker fdlc {};
 
 
-  GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, "RequestAcceptanceAndRejection");
-  GTestFatalRestoreSignal(SIGPIPE);
+  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
+    "RequestAcceptanceAndRejection");
+  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
 }
 
 TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)

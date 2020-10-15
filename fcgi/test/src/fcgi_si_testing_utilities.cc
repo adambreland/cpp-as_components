@@ -1,14 +1,15 @@
 #include "test/include/fcgi_si_testing_utilities.h"
 
-#include <dirent.h>
 #include <fcntl.h>
-#include <stdlib.h>
+#include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -19,17 +20,15 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "include/protocol_constants.h"
-
-// Key:
-// BAZEL DEPENDENCY  This marks a feature which is provided by the Bazel
-//                   testing run-time environment. 
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_server_interface.h"
 
 namespace a_component {
 namespace fcgi {
@@ -41,73 +40,6 @@ std::string CaseSuffix(int test_case)
   case_suffix.append(std::to_string(test_case));
   case_suffix.append(".");
   return case_suffix;
-}
-
-void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
-{
-  if(!descriptor_ptr)
-    FAIL() << "descriptor_ptr was null.";
-  static const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
-  if(!tmpdir_ptr)
-    FAIL() << "The directory for temporary files supplied by Bazel is missing.";
-  std::string temp_template {tmpdir_ptr};
-  temp_template += "/fcgi_si_TEST_XXXXXX";
-  std::unique_ptr<char []> char_array_uptr {new char[temp_template.size() + 1]};
-    // Initialize the new character array.
-  std::memcpy(char_array_uptr.get(), temp_template.data(), 
-    temp_template.size() + 1);
-  int temp_descriptor {mkstemp(char_array_uptr.get())};
-  if(temp_descriptor < 0)
-    FAIL() << "An error occurred while trying to create a temporary file." <<
-      '\n' << strerror(errno);
-  if(unlink(char_array_uptr.get()) < 0)
-  {
-    // Retrieve the errno error string before calling close.
-    std::string errno_message {strerror(errno)};
-    close(temp_descriptor);
-    FAIL() << "The temporary file could not be unlinked." << '\n' <<
-      errno_message;
-  }
-  *descriptor_ptr = temp_descriptor;
-}
-
-void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler)
-{
-  sigset_t sigset {};
-  if(sigemptyset(&sigset) == -1)
-  {
-    FAIL() << "A call to sigempty set from a call to "
-      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
-  }
-  struct sigaction sa {};
-  sa.sa_handler = handler;
-  sa.sa_mask    = sigset;
-  sa.sa_flags   = 0;
-  if(sigaction(sig, &sa, nullptr) == -1)
-  {
-    FAIL() << "A call to sigaction from a call to "
-      "GTestFatalSetSignalDisposition failed." << '\n' << std::strerror(errno);
-  }
-  return;
-}
-
-void GTestNonFatalCheckAndReportDescriptorLeaks(
-  FileDescriptorLeakChecker* fdlc_ptr, 
-  const std::string& test_name)
-{
-  std::pair<FileDescriptorLeakChecker::const_iterator, 
-    FileDescriptorLeakChecker::const_iterator> iter_pair 
-    {fdlc_ptr->Check()};
-  if(iter_pair.first != iter_pair.second)
-  {
-    std::string message {"File descriptors were leaked in "};
-    message.append(test_name).append(": ");
-    for(/*no-op*/; iter_pair.first != iter_pair.second; ++(iter_pair.first))
-    {
-      message.append(std::to_string(*(iter_pair.first))).append(" ");
-    } 
-    ADD_FAILURE() << message;
-  }
 }
 
 std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
@@ -220,23 +152,6 @@ GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args)
         AF_INET_addr.sin_port :
         AF_INET6_addr.sin6_port)
   );
-}
-
-bool GTestNonFatalPrepareTemporaryFile(int descriptor)
-{
-  // Truncate the temporary file and seek to the beginning.
-  if(ftruncate(descriptor, 0) < 0)
-  {
-    ADD_FAILURE() << "A call to ftruncate failed.";
-    return false;
-  }
-  off_t lseek_return {lseek(descriptor, 0, SEEK_SET)};
-  if(lseek_return < 0)
-  {
-    ADD_FAILURE() << "A call to lseek failed.";
-    return false;
-  }
-  return true;
 }
 
 std::tuple<bool, bool, bool, bool, std::size_t, std::vector<std::uint8_t>>
@@ -418,95 +333,6 @@ ExtractContent(int fd, FcgiType type, std::uint16_t id)
     header_count,
     content_bytes
   );
-}
-
-std::pair<FileDescriptorLeakChecker::const_iterator, 
-  FileDescriptorLeakChecker::const_iterator> 
-FileDescriptorLeakChecker::
-CheckHelper(const std::vector<int>& expected_list)
-{
-  std::vector<int> current_list {};
-  std::vector<int> new_leak_list {};
-  DIR* dir_stream_ptr {CreateDirectoryStream()};
-  try
-  {
-    // Add the symmetric difference of expected_list and current_list
-    // to new_leak_list. The symmetric difference is partitioned into
-    // descriptors which are present when they are not expected (leaks)
-    // and descriptors which are not present when they are expected (spurious
-    // closures.)
-    RecordDescriptorList(dir_stream_ptr, &current_list);
-    std::set_symmetric_difference(expected_list.begin(), expected_list.end(),
-      current_list.begin(), current_list.end(), 
-      std::back_insert_iterator<std::vector<int>>(new_leak_list));
-  }
-  catch(...)
-  {
-    CleanUp(dir_stream_ptr);
-    throw;
-  }
-  CleanUp(dir_stream_ptr);
-  new_leak_list.swap(leak_list_);
-  return std::make_pair(leak_list_.begin(), leak_list_.end());
-}
-
-void FileDescriptorLeakChecker::CleanUp(DIR* dir_stream_ptr)
-{
-  if(closedir(dir_stream_ptr) == -1)
-  {
-    std::error_code ec {errno, std::system_category()};
-    throw std::system_error {ec, "closedir"};
-  }
-}
-
-DIR* FileDescriptorLeakChecker::CreateDirectoryStream()
-{
-  // Retrieve the process ID to identify the correct folder in the proc
-  // filesystem.
-  pid_t pid {getpid()};
-  std::string descriptor_path {"/proc/"};
-  (descriptor_path += std::to_string(pid)) += "/fd";
-  DIR* dir_stream_ptr {opendir(descriptor_path.data())};
-  if(!dir_stream_ptr)
-  {
-    std::error_code ec {errno, std::system_category()};
-    throw std::system_error {ec, "opendir"};
-  }
-  return dir_stream_ptr;
-}
-
-void FileDescriptorLeakChecker::RecordDescriptorList(DIR* dir_stream_ptr,
-  std::vector<int>* list_ptr)
-{
-  errno = 0;
-  while(struct dirent* entry_ptr {readdir(dir_stream_ptr)})
-    list_ptr->push_back(std::atoi(entry_ptr->d_name));
-  if(errno != 0)
-  {
-    std::error_code ec {errno, std::system_category()};
-    throw std::system_error {ec, "readdir"};
-  }
-  std::sort(list_ptr->begin(), list_ptr->end());
-  // Integer uniqueness is assumed based on the organization of /proc/<PID>/fd.
-}
-
-void FileDescriptorLeakChecker::Reinitialize()
-{
-  std::vector<int> new_list {};
-  std::vector<int> new_leak_list {};
-  DIR* dir_stream_ptr {CreateDirectoryStream()}; // Always non-null.
-  try
-  {
-    RecordDescriptorList(dir_stream_ptr, &new_list);
-  }
-  catch(...)
-  {
-    CleanUp(dir_stream_ptr);
-    throw;
-  }
-  CleanUp(dir_stream_ptr);
-  recorded_list_.swap(new_list);
-  leak_list_.swap(new_leak_list);
 }
 
 void FcgiRequestIdManager::CorruptionCheck()

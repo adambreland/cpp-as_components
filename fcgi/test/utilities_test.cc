@@ -1,4 +1,4 @@
-#include "include/utilities.h"
+#include "include/fcgi_utilities.h"
 
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -14,9 +14,10 @@
 #include <utility>
 #include <vector>
 
+#include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "include/protocol_constants.h"
+#include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 
 namespace a_component {
@@ -730,7 +731,7 @@ TEST(Utility, EncodeNameValuePairs)
   using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
   int temp_fd {};
-  GTestFatalCreateBazelTemporaryFile(&temp_fd);
+  testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_fd);
 
   auto EncodeNameValuePairTester = [temp_fd]
   (
@@ -742,7 +743,7 @@ TEST(Utility, EncodeNameValuePairs)
     std::vector<NameValuePair>::const_iterator error_iter
   )->void
   {
-    if(!GTestNonFatalPrepareTemporaryFile(temp_fd))
+    if(!testing::gtest::GTestNonFatalPrepareTemporaryFile(temp_fd))
     {
       ADD_FAILURE() << "A temporary file could not be prepared." << '\n'
         << message;
@@ -1243,7 +1244,7 @@ TEST(Utility, PartitionByteSequence)
 
   // BAZEL DEPENDENCY
   int temp_descriptor {};
-  GTestFatalCreateBazelTemporaryFile(&temp_descriptor);
+  testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_descriptor);
   
   auto PartitionByteSequenceTester = [temp_descriptor](
     const std::string& message,

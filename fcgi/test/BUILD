@@ -1,14 +1,14 @@
 cc_library(
     name      = "test_fcgi_client_interface",
     deps      = [
-        "//:utilities",
+        "//:fcgi_utilities",
         "@socket_functions//:socket_functions"
     ],
     srcs      = ["//test:src/test_fcgi_client_interface.cc"],
     hdrs      = [
         "//test:include/test_fcgi_client_interface.h",
-        "//:include/protocol_constants.h",
-        "//:include/request_identifier.h",
+        "//:include/fcgi_protocol_constants.h",
+        "//:include/fcgi_request_identifier.h",
         "@id_manager//:include/id_manager_template.h"
     ],
     copts     = [
@@ -16,7 +16,7 @@ cc_library(
         "-g",
         "-O2",
         "-Wextra",
-        "-iquote .",
+        "-iquote ."
     ],
     visibility = ["//visibility:public"]
 )
@@ -24,12 +24,11 @@ cc_library(
 cc_library(
     name       = "fcgi_si_testing_utilities",
     deps       = [
-        "//:server_interface",
+        "//:server_interface_combined",
         "@googletest//:gtest"
     ],
     srcs       = [
         "//test:src/fcgi_si_testing_utilities.cc",
-        "//test:include/fcgi_si_testing_utilities_templates.h"
     ],
     hdrs       = ["//test:include/fcgi_si_testing_utilities.h"],
     copts      = [
@@ -37,16 +36,17 @@ cc_library(
         "-g",
         "-O2",
         "-Wextra",
-        "-iquote ."        
+        "-iquote ."   
     ],
     visibility = ["//visibility:public"]
 )
 
 cc_test(
-    name       = "utilities_test",
+    name       = "fcgi_utilities_test",
     deps       = [
-        "//:utilities",
+        "//:fcgi_utilities",
         "//test:fcgi_si_testing_utilities",
+        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
@@ -54,25 +54,25 @@ cc_test(
     copts      = [
         "-std=c++17",
         "-g",
-        "-Wextra",
-        "-iquote .",
+        "-Wextra"
     ]
 )
 
 cc_test(
-    name       = "server_interface_test",
+    name       = "server_interface_combined_test",
     deps       = [
-        "//:server_interface",
+        "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
+        "@a_component_testing//:a_component_testing_utilities",
+        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
         "@socket_functions//:socket_functions",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
-    srcs       = ["//test:server_interface_test.cc"],
+    srcs       = ["//test:server_interface_combined_test.cc"],
     copts      = [
         "-std=c++17",
         "-g",
-        "-Wextra",
-        "-iquote .",
+        "-Wextra"
     ]
 )

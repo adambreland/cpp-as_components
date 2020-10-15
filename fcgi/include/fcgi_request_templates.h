@@ -1,8 +1,8 @@
-// Template definitions for fcgi_si::FcgiRequest. This file is included as
+// Template definitions for FcgiRequest. This file is included as
 // a template definition header by the FcgiRequest header.
 
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 
 #include "include/fcgi_request.h"
 
@@ -15,8 +15,8 @@
 #include <utility>
 #include <vector>
 
-#include "include/protocol_constants.h"
-#include "include/utilities.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_utilities.h"
 
 namespace a_component {
 namespace fcgi {
@@ -62,4 +62,4 @@ bool FcgiRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
 } // namespace fcgi
 } // namespace a_component
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_

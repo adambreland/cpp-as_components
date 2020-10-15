@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
 
 #include <cstdint>       // For uint8_t, ... .
 #include <cstdlib>       // For EXIT_FAILURE.
@@ -9,8 +9,8 @@
 #include <set>
 #include <vector>
 
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
 
 namespace a_component {
 namespace fcgi {
@@ -388,7 +388,7 @@ class FcgiServerInterface {
     //    effects. For example, interface state may have been updated to track
     //    partially-complete requests or the interface may have sent the
     //    response to a FastCGI management request to a client.
-    std::vector<RequestIdentifier> ReadRecords();
+    std::vector<FcgiRequestIdentifier> ReadRecords();
 
     RecordStatus() = default;
     RecordStatus(int connection, FcgiServerInterface* interface_ptr);
@@ -427,8 +427,8 @@ class FcgiServerInterface {
     }
 
     //    Takes various actions depending on the type of the completed record
-    // and returns either a non-null RequestIdentifier object or a null object
-    // (RequestIdentifier {}). A non-null object indicates that the associated
+    // and returns either a non-null FcgiRequestIdentifier object or a null object
+    // (FcgiRequestIdentifier {}). A non-null object indicates that the associated
     // request is complete and ready to be used to construct an FcgiRequest
     // object.
     //    Intended to be used within the implementation of ReadRecords.
@@ -441,9 +441,9 @@ class FcgiServerInterface {
     //    complete record.
     // 
     // Caller Responsibilities:
-    // 1) If a non-null RequestIdentifier object is returned, the list of
-    //    RequestIdentifier objects returned by ReadRecords must contain a
-    //    RequestIdentifier object equivalent to the returned object.
+    // 1) If a non-null FcgiRequestIdentifier object is returned, the list of
+    //    FcgiRequestIdentifier objects returned by ReadRecords must contain a
+    //    FcgiRequestIdentifier object equivalent to the returned object.
     //
     // Synchronization:
     // 1) May acquire and release interface_state_mutex_.
@@ -457,19 +457,19 @@ class FcgiServerInterface {
     //
     // Effects:
     // 1) Records which were deemed invalid upon completion of their headers are
-    //    ignored. A null RequestIdentifier object is returned. (Note that all
+    //    ignored. A null FcgiRequestIdentifier object is returned. (Note that all
     //    record types not listed below which are not management records are
     //    deemed invalid.)
     // 2) Management record:
-    //    a) A null RequestIdentifier object is returned. An appropriate
+    //    a) A null FcgiRequestIdentifier object is returned. An appropriate
     //       response is sent over connection_.
     //    b) For FCGI_GET_VALUES, an FCGI_GET_VALUES_RESULT record is sent.
     //    c) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
     // 3) Begin request record:
-    //    a) A null RequestIdentifier object is returned. 
+    //    a) A null FcgiRequestIdentifier object is returned. 
     //    b) request_id_.Fcgi_id() is made active.
     // 4) Abort record:
-    //    a) A null RequestIdentifier object is returned.
+    //    a) A null FcgiRequestIdentifier object is returned.
     //    b) If the request of the record is present and has not been assigned, 
     //       the request is deleted, an FCGI_END_REQUEST record is sent to the 
     //       client, and request_id_.Fcgi_id() is made inactive. 
@@ -489,12 +489,12 @@ class FcgiServerInterface {
     //    b) If the size of the content section of the record is non-zero, the
     //       content is appended to the corresponding stream content buffer in 
     //       the RequestData object associated with the identifier. A null
-    //       RequestIdentifier object is returned.
+    //       FcgiRequestIdentifier object is returned.
     //    c) If the size of the content section of the record is zero, the
     //       corresponding stream is completed. The RequestData object is
     //       checked for completion. If complete, the identifier is returned.
-    //       If it is not complete, a null RequestIdentifier object is returned.
-    RequestIdentifier ProcessCompleteRecord();
+    //       If it is not complete, a null FcgiRequestIdentifier object is returned.
+    FcgiRequestIdentifier ProcessCompleteRecord();
 
     //    Updates record information given a complete header so that the
     // processing of received record data can continue. For example, the byte
@@ -566,7 +566,7 @@ class FcgiServerInterface {
     // type. This is appropriate as no record identity has yet been assigned to
     // the RecordStatus object.
     FcgiType type_ {static_cast<FcgiType>(0U)};
-    RequestIdentifier request_id_ {};
+    FcgiRequestIdentifier request_id_ {};
 
     // When the header is completed, the record is either rejected or
     // accepted. This is performed by UpdateAfterHeaderCompletion.
@@ -784,7 +784,7 @@ class FcgiServerInterface {
   // maintaining the invariant between request_map_ and request_count_map_.
   //
   // Parameters:
-  // request_id:       The RequestIdentifier value of the new element.
+  // request_id:       The FcgiRequestIdentifier value of the new element.
   // role:             The FastCGI role needed to service the new request.
   // close_connection: A flag which indicates if the connection should be
   //                   closed after the request is serviced.
@@ -804,7 +804,7 @@ class FcgiServerInterface {
   //    was added to request_map_ with a key of request_id. The number of
   //    requests associated with request_id.descriptor() in request_count_map_
   //    was incremented.
-  void AddRequest(RequestIdentifier request_id, std::uint16_t role,
+  void AddRequest(FcgiRequestIdentifier request_id, std::uint16_t role,
     bool close_connection);
 
   // Attempts to remove the descriptor given by connection from
@@ -864,7 +864,7 @@ class FcgiServerInterface {
   //
   // Parameters:
   // request_map_iter: An iterator which points to the 
-  //                   std::pair<RequestIdentifier, RequestData> object of a
+  //                   std::pair<FcgiRequestIdentifier, RequestData> object of a
   //                   request in request_map_ or to request_map_.end().
   // 
   // Preconditions:
@@ -887,7 +887,7 @@ class FcgiServerInterface {
   //    item was removed from request_map_ and 
   //    request_count_map_[request_id.descriptor()] was decremented.
   inline void RemoveRequest(
-    std::map<RequestIdentifier, RequestData>::iterator request_map_iter)
+    std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter)
   {
     RemoveRequestHelper(request_map_iter);
   }
@@ -923,10 +923,10 @@ class FcgiServerInterface {
   //    request_count_map_[request_id.descriptor()] could be decremented, the
   //    item was removed from request_map_ and 
   //    request_count_map_[request_id.descriptor()] was decremented.
-  inline void RemoveRequest(RequestIdentifier
+  inline void RemoveRequest(FcgiRequestIdentifier
     request_id)
   {
-    std::map<RequestIdentifier, RequestData>::iterator find_return 
+    std::map<FcgiRequestIdentifier, RequestData>::iterator find_return 
       {request_map_.find(request_id)};
     RemoveRequestHelper(find_return);
   }
@@ -957,7 +957,7 @@ class FcgiServerInterface {
   // 1) If request_id was a key to an item of request_map_, the item was
   //    removed from request_map_ and
   //    request_count_map_[request_id.descriptor()] was decremented.
-  void RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator 
+  void RemoveRequestHelper(std::map<FcgiRequestIdentifier, RequestData>::iterator 
     iter);
 
   // Parameters:
@@ -992,7 +992,7 @@ class FcgiServerInterface {
   // Parameters:
   // connection:      The descriptor of connection over which the
   //                  FCGI_END_REQUEST record will be sent.
-  // request_id:      A RequestIdentifier object which identifies the request
+  // request_id:      A FcgiRequestIdentifier object which identifies the request
   //                  and which will be used to indicate which request sent by
   //                  the client over connection is being ended.
   // protocol_status: The FastCGI protocol status for the final response to the
@@ -1018,7 +1018,7 @@ class FcgiServerInterface {
   // 2) If false was returned, the connection was found to be closed or
   //    corrupted. The descriptor given by connection is present in a closure
   //    set.
-  bool SendFcgiEndRequest(int connection, RequestIdentifier request_id,
+  bool SendFcgiEndRequest(int connection, FcgiRequestIdentifier request_id,
     std::uint8_t protocol_status, std::int32_t app_status);
 
   // Attempts to send an FCGI_UNKNOWN_TYPE management record. The
@@ -1224,9 +1224,9 @@ class FcgiServerInterface {
   std::map<int, int> request_count_map_ {};
 
   // A repository for incomplete request data and a marker for
-  // assigned requests. The RequestIdentifier is the pair defined by the
+  // assigned requests. The FcgiRequestIdentifier is the pair defined by the
   // connection socket descriptor value and the FCGI request number.
-  std::map<RequestIdentifier, RequestData> request_map_ {};
+  std::map<FcgiRequestIdentifier, RequestData> request_map_ {};
 
   // A flag which indicates that the interface has become corrupt. Ideally,
   // this flag would only be set due to underlying system errors and not
@@ -1243,4 +1243,4 @@ class FcgiServerInterface {
 // of some of the template state of FcgiServerInterface.
 #include "include/fcgi_request.h"
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_

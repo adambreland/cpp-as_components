@@ -8,8 +8,8 @@
 
 #include "include/fcgi_request.h"
 #include "include/fcgi_server_interface.h"
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
 
 // Class implementation notes:
 // 1) Discipline for accessing shared state:
@@ -88,13 +88,13 @@ void FcgiServerInterface::RecordStatus::ClearRecord() noexcept
   content_bytes_expected_ = 0U;
   padding_bytes_expected_ = 0U;
   type_ = static_cast<FcgiType>(0U);
-  request_id_ = RequestIdentifier {};
+  request_id_ = FcgiRequestIdentifier {};
   invalidated_by_header_ = false;
   local_record_content_buffer_.clear();
   // i_ptr_ is unchanged.
 }
 
-RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
+FcgiRequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
 {
   auto InterfaceCheck = [this]()->void
   {
@@ -107,7 +107,7 @@ RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
   try
   {
     // Null request identifier.
-    RequestIdentifier result {};
+    FcgiRequestIdentifier result {};
 
     // Check if it is a management record (every management record is valid).
     if(request_id_.Fcgi_id() == 0U)
@@ -260,7 +260,7 @@ RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
               {FcgiServerInterface::interface_state_mutex_};
             InterfaceCheck();
 
-            std::map<RequestIdentifier, RequestData>::iterator request_data_it 
+            std::map<FcgiRequestIdentifier, RequestData>::iterator request_data_it 
               {i_ptr_->request_map_.find(request_id_)};
 
             if(request_data_it == i_ptr_->request_map_.end())
@@ -316,7 +316,7 @@ RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
             "in a call to fcgi_si::RecordStatus::ProcessCompleteRecord."};
       }
     }
-    return result; // Default (null) RequestIdentifier if not assinged to.
+    return result; // Default (null) FcgiRequestIdentifier if not assinged to.
   }
   catch(...)
   {
@@ -352,7 +352,7 @@ RequestIdentifier FcgiServerInterface::RecordStatus::ProcessCompleteRecord()
 // 1) May acquire and release interface_state_mutex_.
 // 2) May implicitly acquire and release the write mutex associated with
 //    the connection of the RecordStatus object.
-std::vector<RequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
+std::vector<FcgiRequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
 {
   auto InterfaceCheck = [this]()->void
   {
@@ -367,7 +367,7 @@ std::vector<RequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
   std::uint8_t read_buffer[kBufferSize];
 
   // Return value to be modified during processing.
-  std::vector<RequestIdentifier> request_identifiers {};
+  std::vector<FcgiRequestIdentifier> request_identifiers {};
 
   // Read from the connection until it would block (no more data),
   // it is found to be disconnected, or an unrecoverable error occurs.
@@ -562,7 +562,7 @@ std::vector<RequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
                 }
                 InterfaceCheck();
 
-                std::map<RequestIdentifier, RequestData>::iterator
+                std::map<FcgiRequestIdentifier, RequestData>::iterator
                   request_map_iter {i_ptr_->request_map_.find(request_id_)};
                 if(request_map_iter == i_ptr_->request_map_.end())
                 {
@@ -634,10 +634,10 @@ std::vector<RequestIdentifier> FcgiServerInterface::RecordStatus::ReadRecords()
       {
         try
         {
-          RequestIdentifier request_id
+          FcgiRequestIdentifier request_id
             {ProcessCompleteRecord()};
           ClearRecord();
-          if(request_id != RequestIdentifier {})
+          if(request_id != FcgiRequestIdentifier {})
             request_identifiers.push_back(request_id);
         }
         catch(...)
@@ -695,7 +695,7 @@ void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion()
   std::uint16_t Fcgi_request_id = header_[kHeaderRequestIDB1Index];
   Fcgi_request_id <<= 8; // one byte
   Fcgi_request_id += header_[kHeaderRequestIDB0Index];
-  request_id_ = RequestIdentifier(connection_, Fcgi_request_id);
+  request_id_ = FcgiRequestIdentifier(connection_, Fcgi_request_id);
 
   // Determine if the record should be rejected based on header
   // information.
@@ -746,7 +746,7 @@ void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion()
   
   // Note that it is expected that find may sometimes return the past-the-end
   // iterator.
-  std::map<RequestIdentifier, RequestData>::iterator request_map_iter 
+  std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter 
     {i_ptr_->request_map_.find(request_id_)};
   switch(type_)
   {

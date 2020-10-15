@@ -23,9 +23,9 @@
 #include "external/socket_functions/include/socket_functions.h"
 
 #include "include/fcgi_request.h"
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
-#include "include/utilities.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_utilities.h"
 
 // Class implementation notes:
 // 1) Mutex acquisition patterns and related actions:
@@ -627,11 +627,11 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
     for(auto dds_iter {dummy_descriptor_set_.begin()};
         dds_iter != dummy_descriptor_set_.end(); /*no-op*/)
     {
-      std::map<RequestIdentifier, RequestData>::iterator request_map_iter
-        {request_map_.lower_bound(RequestIdentifier {*dds_iter, 0U})};
+      std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter
+        {request_map_.lower_bound(FcgiRequestIdentifier {*dds_iter, 0U})};
 
       // The absence of requests allows closure of the descriptor.
-      // Remember that RequestIdentifier is lexically ordered and that a
+      // Remember that FcgiRequestIdentifier is lexically ordered and that a
       // request with an Fcgi_id of zero is never added to request_map_.
       if(request_map_iter == request_map_.end() 
           || request_map_iter->first.descriptor() > *dds_iter)
@@ -811,7 +811,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
       if(FD_ISSET(current_connection, &read_set))
       {
         connections_read++;
-        std::vector<RequestIdentifier> request_identifiers
+        std::vector<FcgiRequestIdentifier> request_identifiers
           {it->second.ReadRecords()};
         if(request_identifiers.size())
         {
@@ -836,9 +836,9 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 
           // For each request_id, find the associated RequestData object, extract
           // a pointer to it, and create an FcgiRequest object from it.
-          for(RequestIdentifier request_id : request_identifiers)
+          for(FcgiRequestIdentifier request_id : request_identifiers)
           {
-            std::map<RequestIdentifier, RequestData>::iterator request_data_iter
+            std::map<FcgiRequestIdentifier, RequestData>::iterator request_data_iter
               {request_map_.find(request_id)};
             if(request_data_iter == request_map_.end())
             {
@@ -937,11 +937,11 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void FcgiServerInterface::AddRequest(RequestIdentifier request_id, 
+void FcgiServerInterface::AddRequest(FcgiRequestIdentifier request_id, 
   std::uint16_t role, bool close_connection)
 {
   std::map<int, int>::iterator request_count_iter {};
-  std::map<RequestIdentifier, RequestData>::iterator request_map_iter {};
+  std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter {};
 
   try
   { 
@@ -1090,7 +1090,7 @@ bool FcgiServerInterface::RemoveConnection(int connection)
 }
 
 void FcgiServerInterface::
-RemoveRequestHelper(std::map<RequestIdentifier, RequestData>::iterator iter)
+RemoveRequestHelper(std::map<FcgiRequestIdentifier, RequestData>::iterator iter)
 {
   try
   {
@@ -1124,7 +1124,7 @@ bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
   {
     bool assigned_requests_present {false};
     for(auto request_map_iter =
-          request_map_.lower_bound(RequestIdentifier {connection, 0U});
+          request_map_.lower_bound(FcgiRequestIdentifier {connection, 0U});
         !(request_map_iter == request_map_.end()
           || request_map_iter->first.descriptor() > connection);
         /*no-op*/)
@@ -1139,7 +1139,7 @@ bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
       else
       {
         // Safely erase the request.
-        std::map<RequestIdentifier, RequestData>::iterator request_map_erase_iter 
+        std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_erase_iter 
           {request_map_iter};
         ++request_map_iter;
         RemoveRequest(request_map_erase_iter);
@@ -1155,7 +1155,7 @@ bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
 }
 
 bool FcgiServerInterface::
-SendFcgiEndRequest(int connection, RequestIdentifier request_id,
+SendFcgiEndRequest(int connection, FcgiRequestIdentifier request_id,
   uint8_t protocol_status, int32_t app_status)
 {
   std::vector<uint8_t> result(16, 0U); // Allocate space for two bytes.

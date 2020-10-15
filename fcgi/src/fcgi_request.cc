@@ -20,9 +20,9 @@
 
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/protocol_constants.h"
-#include "include/request_identifier.h"
-#include "include/utilities.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_utilities.h"
 
 // Class implementation notes:
 // 1) Updating interface state:
@@ -237,7 +237,7 @@ namespace fcgi {
 FcgiRequest::FcgiRequest()
 : associated_interface_id_         {0U},
   interface_ptr_                   {nullptr},
-  request_identifier_              {RequestIdentifier {}},
+  request_identifier_              {FcgiRequestIdentifier {}},
   request_data_ptr_                {nullptr},
   write_mutex_ptr_                 {nullptr},
   bad_connection_state_ptr_        {nullptr},
@@ -257,7 +257,7 @@ FcgiRequest::FcgiRequest()
 // Synchronization:
 // 1) It is assumed that interface_state_mutex_ is held prior to a call.
 FcgiRequest::FcgiRequest(
-  RequestIdentifier request_id,
+  FcgiRequestIdentifier request_id,
   unsigned long interface_id,
   FcgiServerInterface* interface_ptr,
   FcgiServerInterface::RequestData* request_data_ptr,
@@ -346,7 +346,7 @@ FcgiRequest::FcgiRequest(FcgiRequest&& request) noexcept
 {
   request.associated_interface_id_ = 0U;
   request.interface_ptr_ = nullptr;
-  request.request_identifier_ = RequestIdentifier {};
+  request.request_identifier_ = FcgiRequestIdentifier {};
   request.request_data_ptr_ = nullptr;
   request.write_mutex_ptr_ = nullptr;
   request.bad_connection_state_ptr_ = nullptr;
@@ -385,7 +385,7 @@ FcgiRequest& FcgiRequest::operator=(FcgiRequest&& request)
 
     request.associated_interface_id_ = 0U;
     request.interface_ptr_ = nullptr;
-    request.request_identifier_ = RequestIdentifier {};
+    request.request_identifier_ = FcgiRequestIdentifier {};
     request.request_data_ptr_ = nullptr;
     request.write_mutex_ptr_ = nullptr;
     request.bad_connection_state_ptr_ = nullptr;

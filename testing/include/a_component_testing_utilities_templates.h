@@ -1,15 +1,14 @@
-#ifndef FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_TEMPLATES_H_
-#define FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_TEMPLATES_H_
+#ifndef A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_
+#define A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_
 
-#include "test/include/fcgi_si_testing_utilities.h"
+#include "include/a_component_testing_utilities.h"
 
 #include <algorithm>
 #include <utility>
 #include <vector>
 
 namespace a_component {
-namespace fcgi {
-namespace test {
+namespace testing {
 
 template<typename It>
 std::pair<FileDescriptorLeakChecker::const_iterator, 
@@ -48,8 +47,7 @@ Check(It removed_begin, It removed_end, It added_begin, It added_end)
   return CheckHelper(expected_list);
 }
 
-} // namsepace test
-} // namespace fcgi
+} // namespace testing
 } // namespace a_component
 
-#endif // FCGI_SI_TEST_TEST_FCGI_SI_TESTING_UTILITIES_TEMPLATES_H_
+#endif // A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_

@@ -1,32 +1,32 @@
 exports_files([
-    "include/protocol_constants.h",
-    "include/request_identifier.h"
+    "include/fcgi_protocol_constants.h",
+    "include/fcgi_request_identifier.h"
 ])
 
 cc_library(
-    name       = "utilities",
+    name       = "fcgi_utilities",
     srcs       = [
-        "include/utilities_templates.h",
-        "src/utilities.cc"
+        "include/fcgi_utilities_templates.h",
+        "src/fcgi_utilities.cc"
     ],
     hdrs       = [
-        "include/protocol_constants.h",
-        "include/utilities.h"
+        "include/fcgi_protocol_constants.h",
+        "include/fcgi_utilities.h"
     ],
     copts      = [
         "-std=c++17",
         "-g",
         "-O2",
         "-Wextra",
-        "-iquote .",
+        "-iquote ."
     ],
     visibility = ["//visibility:public"]
 )
 
 cc_library(
-    name       = "server_interface",
+    name       = "server_interface_combined",
     deps       = [
-        "//:utilities",
+        "//:fcgi_utilities",
         "@socket_functions//:socket_functions",
     ],
     srcs       = [
@@ -37,11 +37,11 @@ cc_library(
         "src/request_data.cc"
     ],
     hdrs       = [
-        "include/protocol_constants.h",
+        "include/fcgi_protocol_constants.h",
         "include/fcgi_request.h",
         "include/fcgi_server_interface.h",
-        "include/request_identifier.h",
-        "server_interface.h"
+        "include/fcgi_request_identifier.h",
+        "server_interface_combined.h"
     ],
     copts      = [
         "-std=c++17",

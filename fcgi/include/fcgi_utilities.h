@@ -1,5 +1,5 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_
 
 #include <sys/uio.h>
 #include <unistd.h>
@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/protocol_constants.h"
+#include "include/fcgi_protocol_constants.h"
 
 namespace a_component {
 namespace fcgi {
@@ -363,6 +363,6 @@ std::size_t NeededLocalData(std::size_t m);
 } // namespace fcgi
 } // namespace a_component
 
-#include "include/utilities_templates.h"
+#include "include/fcgi_utilities_templates.h"
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_

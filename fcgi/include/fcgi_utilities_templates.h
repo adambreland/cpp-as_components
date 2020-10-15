@@ -1,7 +1,7 @@
-#ifndef FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_
-#define FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_
+#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
+#define A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
 
-#include "include/utilities.h"
+#include "include/fcgi_utilities.h"
 
 #include <sys/select.h>
 #include <sys/uio.h>
@@ -15,7 +15,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/protocol_constants.h"
+#include "include/fcgi_protocol_constants.h"
 
 namespace a_component {
 namespace fcgi {
@@ -516,4 +516,4 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
 } // namespace fcgi
 } // namespace a_component
 
-#endif // FCGI_SERVER_INTERFACE_INCLUDE_UTILITY_TEMPLATES_H_
+#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_

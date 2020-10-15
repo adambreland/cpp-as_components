@@ -3,6 +3,8 @@ cc_test(
     deps       = [
         "//test:test_fcgi_client_interface",
         "//test:fcgi_si_testing_utilities",
+        "@a_component_testing//:a_component_testing_utilities",
+        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
 ],
@@ -10,16 +12,16 @@ cc_test(
     copts      = [
         "-std=c++17",
         "-g",
-        "-Wextra",
-        "-iquote ."
+        "-Wextra"
     ]
 )
 
 cc_test(
     name       = "fcgi_si_testing_utilities_test",
     deps       = [
-        "//:utilities",
+        "//:fcgi_utilities",
         "//test:fcgi_si_testing_utilities",
+        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
@@ -28,6 +30,5 @@ cc_test(
         "-std=c++17",
         "-g",
         "-Wextra",
-        "-iquote ."
     ]
 )

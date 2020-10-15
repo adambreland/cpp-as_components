@@ -4,7 +4,7 @@
 #include <vector>
 
 #include "include/fcgi_server_interface.h"
-#include "include/utilities.h"
+#include "include/fcgi_utilities.h"
 
 namespace a_component {
 namespace fcgi {
