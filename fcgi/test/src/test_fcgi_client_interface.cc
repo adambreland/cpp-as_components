@@ -477,7 +477,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
         // to save searches over pending_request_map_ in the likely event
         // that multiple record parts are received in one read. Partitioning
         // of received data by the below buffer size is irrelevant to this
-        // optimization and, as such, pending_iter is declared here instead
+        // optimization. As such, pending_iter is declared here instead
         // of inside the next loop.
         //
         // Note that, whenever pending_iter takes on a non-end value,
@@ -502,6 +502,10 @@ void TestFcgiClientInterface::ExamineSelectReturn()
           int saved_errno {errno};
           unsigned int remaining_data {read_return};
           std::uint8_t* current_byte {buffer};
+          // The entire below loop is currently equivalent to a
+          // noexcept-equivalent block. Calls either no not throw (i.e., are
+          // noexcept or have C semantics) or are wrapped in a try block which
+          // causes program termination upon a throw.
           while(remaining_data > 0U)
           {
             // Header
@@ -521,7 +525,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               state_ptr->record_state.header_bytes_received  = received_header;
               if(received_header == FCGI_HEADER_LEN)
               {
-                try
+                try // noexcept-equivalent block.
                 {
                   pending_iter = UpdateOnHeaderCompletion(next_connection_,
                     pending_iter);
@@ -587,7 +591,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                  (record_type != FcgiType::kFCGI_END_REQUEST))
               {
                 // Type is either FCGI_STDOUT or FCGI_STDERR.
-                try
+                try // noexcept-equivalent block.
                 {
                   PendingIterCheckAndUpdate();
                 }
@@ -601,7 +605,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                 std::vector<std::uint8_t>::iterator content_end_iter {(is_out) ?
                   pending_iter->second.fcgi_stdout.end() :
                   pending_iter->second.fcgi_stderr.end()};
-                try
+                try // noexcept-equivalent block.
                 {
                   (is_out) ?
                     pending_iter->second.fcgi_stdout.insert(content_end_iter,
@@ -620,7 +624,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               {
                 if(record_type == FcgiType::kFCGI_END_REQUEST)
                 {
-                  try
+                  try // noexcept-equivalent block.
                   {
                     PendingIterCheckAndUpdate();
                   }
@@ -635,7 +639,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                   {&(state_ptr->record_state.local_buffer)};
                 std::vector<std::uint8_t>::iterator local_buffer_end
                   {local_buffer_ptr->end()};
-                try
+                try // noexcept-equivalent block.
                 {
                   local_buffer_ptr->insert(local_buffer_end, current_byte,
                     current_byte + copy_size);
@@ -655,7 +659,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               if((received_content == expected_content) &&
                  (state_ptr->record_state.padding_bytes_expected == 0U))
               {
-                try
+                try // noexcept-equivalent block.
                 {
                   // Note that PendingIterCheckAndUpdate was called in the
                   // three cases in which this is required, i.e. record_type is
@@ -696,7 +700,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               // Check if the record is complete.
               if(received_padding == expected_padding)
               {
-                try
+                try // noexcept-equivalent block.
                 {
                   // Ensure that pending_iter refers to the appropriate pending
                   // request.
@@ -734,7 +738,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               //
               // All of these cases require that the select return tracking
               // variables be updated.
-              try
+              try // noexcept-equivalent block.
               {
                 --remaining_ready_;
                 if(remaining_ready_ == 0)
@@ -816,7 +820,8 @@ void TestFcgiClientInterface::FailedWrite(
   // 3) If something was written or the server did close the connection,
   //    then the entry for connection must be removed from connection_map_.
   //    CloseConnection should be called.
-  try
+
+  try // noexcept-equivalent block
   {
     if(pop_management_queue)
     {
@@ -1214,6 +1219,9 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
   //    descriptors are exhausted.
   // 4) If the ready descriptors are exhausted, a call to select is made. When
   //    the call returns, 2 is performed (as if the queue was empty).
+  //
+  // The loop below may be viewed as an iterative implementation of a recursive
+  // definition of RetrieveServerEvent.
   while(true)
   {
     if(micro_event_queue_.size())
@@ -1455,6 +1463,9 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   return true;
 }
 
+// TODO Make sure that blocking is handled when writing.
+// TODO Refactor to remove the possibility of double recovery. All errors
+// should cause an exception to be thrown. std::system_error can be thrown.
 FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   const FcgiRequestDataReference& request)
 {
@@ -1477,7 +1488,8 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   {
     // Note that the order of stream transmission is important. FCGI_PARAMS
     // is sent last to ensure that a request is not prematurely completed as
-    // may occur for Responder and Authorizer roles.
+    // may occur for Responder and Authorizer roles. (FCGI_PARAMS is required
+    // for all current roles.)
     do
     {
       auto SocketWriteHelper = [&]
@@ -1625,10 +1637,12 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
       }
       FailedWrite(connection_iter, saved_errno, nothing_written, false,
         "write");
+      errno = saved_errno;
       return FcgiRequestIdentifier {};
     }
     // Insert a new RequestData instance to pending_request_map_.
-    pending_request_map_.insert({
+    pending_request_map_.insert(
+    {
       {connection, new_id},
       {request, {}, false, {}, false}
     });
@@ -1640,9 +1654,25 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     // been written.
     try // noexcept-equivalent block.
     {
-      CloseConnection(connection);
-      micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
-        {new ConnectionClosure {connection}});
+      // A throw from FailedWrite may have caused this block to be entered.
+      // This is a problem as FailedWrite performs similar cleanup to the
+      // actions below. One solution, which is adopted here, is to inspect
+      // the ready event queue for an appropriate ConnectionClosure instance.
+      // If one is present, then cleanup may be skipped.
+      ConnectionClosure* cc_ptr {nullptr};
+      if(micro_event_queue_.size()                         && 
+         ((cc_ptr = dynamic_cast<ConnectionClosure*>(
+            micro_event_queue_.back().get())) != nullptr)  && 
+         (cc_ptr->RequestId().descriptor() == connection))
+      {
+        // no-op
+      }
+      else
+      {
+        CloseConnection(connection);
+        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
+          {new ConnectionClosure {connection}});
+      }
     }
     catch(...)
     {

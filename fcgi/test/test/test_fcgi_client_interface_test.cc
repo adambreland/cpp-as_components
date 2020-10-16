@@ -465,6 +465,11 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   ASSERT_NO_THROW(management_count =
     client_inter.ManagementRequestCount(local_socket));
+  // All management requests should have been processed by the server interface
+  // when AcceptRequests was called in the loop above. All data sent by the
+  // server interface should have been processed by the above call to
+  // RetrieveServerEvent. As a result, no management requests should be
+  // regarded as pending for local_socket.
   EXPECT_EQ(management_count, 0U);
   EXPECT_EQ(client_inter.ReadyEventCount(), 1U);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());

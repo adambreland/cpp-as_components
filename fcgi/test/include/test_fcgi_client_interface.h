@@ -265,10 +265,10 @@ class GetValuesResult : public ServerEvent
   ~GetValuesResult() override = default;
 
  private:
-  bool                       corrupt_response_;
+  bool                  corrupt_response_;
   FcgiRequestIdentifier request_id_;
-  ParamsMap                  request_params_map_;
-  ParamsMap                  response_params_map_;
+  ParamsMap             request_params_map_;
+  ParamsMap             response_params_map_;
 };
 
 //    This class represents a FastCGI record which was deemed invalid. All of
@@ -446,60 +446,91 @@ class UnknownType : public ServerEvent
 
                     ////// TestFcgiClientInterface //////
 
+// Introduction:
 //    TestFcgiClientInterface provides an implementation of the FastCGI
 // protocol for programs which make requests of FastCGI application servers.
 // Such programs may be called clients or client servers from the perspective
 // of FastCGI.
-//    The interface allows connections to be made to distinct FastCGI
-// application servers. Different socket domains may be used; all connections
+//    The interface allows simultaneous connections to be made to distinct
+// FastCGI application servers. Simultaneous connections to the same server
+// are also allowed. Different socket domains may be used; all connections
 // are stream-based as FastCGI requires stream-based sockets.
-//    Each interface instance has a management request queue for each
-// connection. As all management requests on a given connection share the same
-// request identifier (connection, 0), management request order is preserved
-// by the queue. Responses to management requests are associated with
-// management requests according to request order.
-//    A user can manually close a connection through a call to CloseConnection.
-// When this is done, all pending application requests and pending management
-// requests are lost. The interface informs a user that an application server
-// closed a connection by returning an appropriate ConnectionClosure instance
-// from a call to RetrieveServerEvent. As for manual closure, all pending
-// application and management requests are lost when this occurs.
-//    The interface uses the notion of allocated and released request
+//
+// Management requests:
+//    The interface has a management request queue for each connection. As all
+// management requests on a given connection c share the same request
+// identifier (c, 0), management request order is preserved by the queue.
+// Responses to management requests are associated with management requests
+// according to request order.
+//    The interface assumes that FCGI_GET_VALUES is the only defined type of
+// management request. No facilities exist to handle management responses
+// which are not of type FCGI_GET_VALUES_RESULT or FCGI_UNKNOWN_TYPE other than
+// through the generation of an InvalidRecord instance.
+//
+// Request identifiers, identifier allocation and release, and pending and
+// completed request statuses:
+//    The interface uses the notions of allocated and released request
 // identifiers. All request identifiers are initially unallocated. This is
-// equivalent to being released. When a request is made, a FastCGI identifier
-// is chosen by the interface. Let this identifier be ID. The pair
-// (connection, ID) is used to construct an FcgiRequestIdentifier instance.
-// This value within FcgiRequestIdentifier identifies the request. Once the
-// request is made, this value transitions from being released to being
-// allocated. Only released values are used for new requests. Once a response
-// has been received for a request identified by value v = (connection, ID),
-// value is not released until a call to ReleaseId(v) or ReleaseId(connection)
-// is made. This is true regardless of intervening closure of connection by an
-// application server or through calls of CloseConnection(connection).
-//    Note that the handling of allocated and released request identifiers for
-// requests which received a response (completed requests) prevents the reuse
-// of a request identifier before it is explicitly released by the user of
-// the interface. This allows processing of the responses to requests to be
-// deferred while preventing ambiguous request identifier values.
-//    TestFcgiServerEvent uses instances of types derived from the abstract
+// equivalent to being released. When a request is made over a connection with
+// descriptor value c, a FastCGI identifier is chosen by the interface. Let
+// this identifier be ID. The pair (c, ID) is used to construct an
+// FcgiRequestIdentifier instance. This value within FcgiRequestIdentifier
+// identifies the request. Once the request is made, this value transitions
+// from being released to being allocated. Only released values are used for
+// new requests. Once a response has been received for a request identified by
+// value v = (c, ID), v is not released until a call to ReleaseId(v)
+// or ReleaseId(c) is made. This is true regardless of intervening closure of
+// connection by an application server or through calls of
+// CloseConnection(c).
+//    A request, which is identified with an allocated request identifier, is
+// regarded as pending until the response to the request is received in-full.
+// Once the response to a request is complete, the request is regarded as
+// completed. The notions of pending and completed responses relate to the
+// handling of request identifiers as described above. These notions are also
+// used in the specifications of the methods of TestFcgiClientInterface.
+//    Note that the behavior of the interface relative to allocated and
+// released request identifiers for requests which received a response
+// (completed requests) prevents the reuse of a request identifier before it is
+// explicitly released by the user of the interface. This property allows
+// processing of the responses to requests to be deferred while preventing
+// ambiguous request identifier values.
+//    Management requests are also described as either pending or completed.
+// However, management requests are not subject to request identifier
+// allocation and release.
+//
+// Server responses:
+//    TestFcgiClientInterface uses instances of types derived from the abstract
 // type ServerEvent to represent information which was received from
 // application servers. ServerEvent was defined for this purpose. An internal
-// queue is used to store events.
+// ready event queue is used to store ready events.
 //    The event queue is also used by SendAbortRequest,
 // SendBinaryManagementRequest, and SendGetValuesRequest to report the
 // detection during their invocation of the closure of a connection by its
 // peer.
 //
+// Connection closure:
+//    A user can manually close a connection through a call to CloseConnection.
+// When this is done, all pending application requests and pending management
+// requests are lost.
+//    The interface informs a user that an application server closed a
+// connection by returning an appropriate ConnectionClosure instance from a
+// call to RetrieveServerEvent. As for manual closure, all pending application
+// and management requests are lost when this occurs.
+//
+// The interface as a component for testing:
 //    Several features of the interface make it suited for programs which
-// test implementations of the FastCGI protocol for application servers or
-// which test application servers.
+// either test implementations of the FastCGI protocol for application servers
+// or which test application servers.
 // 1) The interface is not concurrent (though I/O multiplexing on connections
 //    is performed).
 //    a) Interface methods may not be safely called from multiple threads.
-//    b) A single server event may be retrieved at a time. Calls to
+//    b) Only a single server event may be retrieved at a time. Calls to
 //       RetrieveServerEvent block until an event is ready.
 //    c) Methods which do not read incoming data may add events to the common
 //       event queue.
+//    d) Data processing and internal state transitions only occur through
+//       user invocations of type methods. Interface state update does not
+//       occur asynchronously.
 // 2) InvalidRecord is used to expose invalid records received from application
 //    servers. This behavior is performed instead of dropping the record.
 // 3) Encoding errors in the content of FCGI_GET_VALUES_RESULT records are
@@ -520,6 +551,9 @@ class UnknownType : public ServerEvent
 //    b) Though methods have clearly defined exception specifications,
 //       exceptions are propagated with little expectation of or support for
 //       recovery.
+// 7) I/O multiplexing may not be performed with a mechanism which efficiently
+//    handles a large number of connections such as the epoll system call of
+//    Linux.
 class TestFcgiClientInterface
 {
  public:
@@ -533,7 +567,9 @@ class TestFcgiClientInterface
   //
   // Exceptions:
   // 1) A call may throw exceptions derived from std::exception.
-  // 2) In the event of a throw, one of the following holds:
+  // 2) In the event of a throw, one of the following cases holds. These cases
+  //    make a throw transactional relative to descriptor closure and related
+  //    state update.
   //    a) The strong exception guarantee.
   //    b) Internal state was updated to reflect connection closure, the
   //       file descriptor was closed, and the system reported an error
@@ -614,7 +650,9 @@ class TestFcgiClientInterface
   // requests on connection are present.
   bool IsConnected(int connection) const;
 
-  // Returns the number of pending management requests for connection.
+  // Returns the number of pending management requests for connection. When
+  // a response to a management request has been received and processed, the
+  // response is no longer regarded as pending.
   std::size_t ManagementRequestCount(int connection) const;
 
   inline std::size_t ReadyEventCount() const noexcept
@@ -675,6 +713,99 @@ class TestFcgiClientInterface
   //    were associated with connection were released.
   bool ReleaseId(int connection);
 
+  // RetrieveServerEvent performs I/O multiplexing on server connections and
+  // converts FastCGI record information into appropriate instances of classes
+  // derived from ServerEvent. A call to RetrieveServerEvent blocks if no
+  // connections are ready for reading. When RetrieveServerEvent returns, the
+  // returned std::unique_ptr<ServerEvent> instance is non-null.
+  //
+  // Parameters: none.
+  //
+  // Preconditions: none.
+  //
+  // Exceptions:
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) Locally-unrecoverable errors from calls which set errno are represented
+  //    by std::system_error instances with the corresponding errno value.
+  // 3)    std::logic_error is thrown when a call is made and an immediately
+  //    preceding call to ConnectionCount would have returned zero. In other
+  //    words, an exception is thrown when the interface has transitioned to a
+  //    state in which it is known by the interface that no connections are
+  //    connected.
+  //       The strong exception guarantee is satisfied in this case.
+  //
+  // Termination:
+  // 1) If an error or exception would cause RetrieveServerEvent to return or
+  //    throw when an invariant of TestFcgiClientInterface is potentially
+  //    violated, the program is terminated.
+  //
+  // Effects:
+  // 1) If the ready event queue was non-empty, the next ready event was
+  //    removed and returned.
+  // 2) If the ready event queue was empty, the interface blocked until a
+  //    connection was ready for reading. When a connection became ready for
+  //    reading, it was read until it would block. This process was repeated
+  //    until read data caused the ready event queue to be non-empty. The
+  //    next ready event was then removed and returned.
+  // 3) ServerEvent instance generation:
+  //    ConnectionClosure
+  //    a) The construction of a ConnectionClosure instance c indicates that
+  //       the interface detected the closure of c.RequestId().descriptor().
+  //       The connection was closed as if a call to CloseConnection had been
+  //       performed.
+  //    b) Note that connection closure can be detected after data was read
+  //       from the connection and appropriate ServerEvent instances were added
+  //       to the ready event queue. This implies that IsConnected may return
+  //       false for the connection after a call of RetrieveServerEvent while
+  //       server events sent over the connection remain in the ready event
+  //       queue.
+  //    FcgiResponse
+  //    a) The construction of an FcgiResponse instance r indicates that a
+  //       complete response to the request represented by r.RequestId() was
+  //       received by the interface.
+  //    b) After the construction of an FcgiResponse instance, the request is
+  //       regarded as completed by the interface. A call of
+  //       ReleaseId(r.RequestId()) may be made when processing of the response
+  //       is complete.
+  //    GetValuesResult
+  //    a) The construction of a GetValueResult instance r indicates that a
+  //       complete FCGI_GET_VALUES_RESULT record was received over
+  //       r.RequestId().descriptor() and that the record corresponded to a
+  //       previously made FCGI_GET_VALUES request.
+  //    b) When a GetValuesResult instance is constructed, the appropriate
+  //       management request data item is removed from the management request
+  //       queue.
+  //    c) Two cases cause an empty result map to be returned and the
+  //       corruption flag of the GetValuesResult instance to be set.
+  //       1) A call to ::a_component::fcgi::ExtractBinaryNameValuePairs
+  //          indicated that an encoding error was present.
+  //       2) A duplicate name was detected among the name-value pairs.
+  //    InvalidRecord
+  //    a) The construction of an InvalidRecord instance r indicates that an
+  //       invalid valid record was received over the connection and with the
+  //       FastCGI request identifier given by r.RequestId(). The conditions
+  //       which cause records to be deemed invalid are described in the
+  //       description of InvalidRecord.
+  //    b)    Note that the receipt of an invalid record likely indicates that
+  //       the application server is corrupt or has a bug. If so, the
+  //       connection between the client interface and the application server
+  //       has likely been corrupted.
+  //          For example, if an invalid management record was sent by an
+  //       application server, then the management queue was not popped as
+  //       required when the invalid record was received. If the application
+  //       server is unaware of its error, all future management responses are
+  //       will be out of order. This state may not be detected by the client
+  //       interface as evidenced by the generation of an InvalidRecord
+  //       instance.
+  //    UnknownType
+  //    a) The construction of an UnknownType instance r indicates that a
+  //       complete FCGI_UNKNOWN_TYPE record was received over
+  //       r.RequestId().descriptor() and that a corresponding management
+  //       request whose type was not FCGI_GET_VALUES was present in the
+  //       management request queue.
+  //    b) When an UnknownType instance is constructed, the appropriate
+  //       management request data item is removed from the management request
+  //       queue.
   std::unique_ptr<ServerEvent> RetrieveServerEvent();
 
   // Attempts to send a FastCGI request abort record for id.Fcgi_id() on
@@ -735,9 +866,9 @@ class TestFcgiClientInterface
   //       micro server event queue.
   //
   // Termination:
-  // 1) If an error or exception would cause SendAbortRequest to return or
-  //    throw when an invariant of TestFcgiClientInterface is potentially
-  //    violated, the program is terminated.
+  // 1) If an error or exception would cause SendBinaryManagementRequest to
+  //    return or throw when an invariant of TestFcgiClientInterface is
+  //    potentially violated, the program is terminated.
   //
   // Effects:
   // 1) If false was returned, then one of the following occurred:
@@ -782,12 +913,12 @@ class TestFcgiClientInterface
   //       micro server event queue.
   //
   // Termination:
-  // 1) If an error or exception would cause SendAbortRequest to return or
+  // 1) If an error or exception would cause SendGetValuesRequest to return or
   //    throw when an invariant of TestFcgiClientInterface is potentially
   //    violated, the program is terminated.
   //
   // Effects:
-  // 1) If false was returned, then one of the following occured:
+  // 1) If false was returned, then one of the following occurred:
   //    a) connection was not a connected socket descriptor which was opened by
   //       the interface.
   //    b) The names of params_map and empty values required more than one
@@ -806,7 +937,66 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
+  // Sends a request whose data is described by the FcgiRequestDataReference
+  // argument to the FastCGI application server connected to the client
+  // interface by connection.
   //
+  // Parameters:
+  // connection: The local socket descriptor of a connection to a FastCGI
+  //             application server.
+  // request:    A FcgiRequestDataReference instance which describes the
+  //             request to be sent over connection. Note that:
+  //             1) params_map_ptr may be null. In that case, an empty
+  //                FCGI_PARAMS stream is indicated.
+  //             2) The stdin and data ranges may be empty.
+  //
+  // Preconditions:
+  // 1) [request.stdin_begin, request.stdin_end) and
+  //    [request.data_begin, request.data end) are valid ranges.
+  // 
+  // Caller responsibilities:
+  // 1) A copy of request is made and stored within the interface. The user
+  //    is responsible for the ensuring that the pointers of the copy remain
+  //    valid.
+  //
+  // Exceptions:
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) In the event of a throw, one of the following holds:
+  //    a) Nothing was written to connection and connection closure by the
+  //       peer was not detected. In this case, the strong exception guarantee
+  //       holds.
+  //    b) Something was written to the connection or connection closure by the
+  //       peer was detected. In this case, the connection was closed by a
+  //       call to CloseConnection. An appropriate ConnectionClosure instance
+  //       was added to the end of the ready event queue.
+  //
+  // Termination:
+  // 1) If an error or exception would cause the function to return or throw
+  //    when an invariant of TestFcgiClientInterface is potentially violated,
+  //    the program is terminated.
+  //
+  // Effects:
+  // 1) If a default-constructed FcgiRequestIdentifier instance was returned,
+  //    one of the following was true:
+  //    a) connection did not refer to a connected socket descriptor which was
+  //       managed by the interface.
+  //    b) An error occurred while writing and the interface could recover from
+  //       the error in a way that allowed it to be exposed to the user for
+  //       possible recovery. errno holds the value set by the failed call.
+  //       1) If data was written to connection, it was closed.
+  //       2) If the connection was found to have been closed by the
+  //          application, then it was closed.
+  //       3) If connection was closed, an appropriate ConnectionClosure
+  //          instance was added to the ready event queue.
+  // 2) If a non-default-constructed FcgiRequestIdentifier id was returned:
+  //    a) id.descriptor() == connection.
+  //    b) id.Fcgi_id() was selected so that id was a released identifier.
+  //    c) The FastCGI application request represented by request was sent
+  //       over connection.
+  //    d) id is allocated and the request is pending.
+  //    e) A copy of request was made and stored internally for later use
+  //       in the construction of a FcgiResponse instance upon the receipt of
+  //       the response to the request.
   FcgiRequestIdentifier SendRequest(int connection,
     const FcgiRequestDataReference& request);
 
@@ -933,18 +1123,61 @@ class TestFcgiClientInterface
   //    connection_map_ which is associated with connection otherwise.
   std::map<int, ConnectionState>::iterator ConnectedCheck(int connection);
 
-  // A helper function which is intended to only be used within
-  // RetrieveServerEvent.
+  // The main implementation function of RetrieveServerEvent. The select
+  // return tracking state (remaining_ready_, next_connection_, and
+  // select_set_) and the connected status of a connection are used to
+  // determine the next connection to read from. The connection is read until
+  // it would block or EOF was reached. Processing occurs when the header of a
+  // record was completed and when a record was completed.
   //
   // Preconditions: 
   // 1) remaining_ready_ > 0
   //
   // Exceptions:
-  // 1)
-  // 2)
+  // 1) A call may throw exceptions derived from std::exception.
+  // 2) A std::logic_error instance is thrown if no connections were found
+  //    which were connected and which were ready for reading as determined
+  //    by a prior call to select. This will occur if the precondition on
+  //    remaining_ready_ is violated. A call satisfies the strong exception
+  //    guarantee in this case.
+  // 3) A std::system_error instance is thrown if a call to read failed
+  //    with errno not equal to EINTR, EAGAIN, or EWOULDBLOCK. In this case,
+  //    all data which had previously been read was processed. The values of
+  //    remaining_ready_, next_connection_, and select_set_ were not changed
+  //    from the values they had acquired during the execution of the function.
+  //    Other state was updated as appropriate given the read data. The value
+  //    of errno is stored in the std::system_error instance. If the error was
+  //    resolved, a subsequent call to ExamineSelectReturn should be possible.
+  // 4) Any other internal throw causes program termination.
+  //
+  // Termination:
+  // 1) If an error or exception would cause the function to return or throw
+  //    when an invariant of TestFcgiClientInterface is potentially violated,
+  //    the program is terminated.
   //
   // Effects:
-  //
+  // 1) ExamineSelectReturn started at next_connection_ and iterated over
+  //    connections until one was found which was connected and which was ready
+  //    per select_set_. The connection was then read from as described below.
+  //    next_connection_ was updated to refer to the ready connection.
+  // 2) Once reading from a connection starts, the function either returns,
+  //    throws, or causes program termination.
+  // 3) A connection was read until it would block or EOF was reached.
+  //    a) Upon record header completion, the record was validated. If the
+  //       record was deemed invalid, an InvalidRecord instance will be
+  //       generated when the record is completed. See UpdateOnHeaderCompletion
+  //       and InvalidRecord.
+  //    b) Upon record completion, ProcessCompleteRecord was invoked.
+  //    c) FCGI_STDOUT and FCGI_STDERR stream data were copied to the
+  //       appropriate RequestData instance of pending_request_map_ as data
+  //       was read.
+  // 4) If connection closure was detected by the indication of EOF from a call
+  //    to read, then the connection was closed by a call to CloseConnection
+  //    and an appropriate ConnectionClosure instance was added to the end of
+  //    the ready event queue.
+  // 5) Select return tracking state was updated. next_connection_ refers to
+  //    the next connection or to connection_map_.end() as appropriate.
+  //    remaining_ready_ was decremented.
   void ExamineSelectReturn();
 
   // Performs recovery after a write to a connection failed.
@@ -979,7 +1212,7 @@ class TestFcgiClientInterface
   //       error_code == EPIPE. If pop_management_queue == true, then the
   //       item which was most recently added to the management queue of
   //       connection_iter->first was removed.
-  //    b) A throw occurs if error_code != EPIPE.
+  //    b) A throw occurs if and only if error_code != EPIPE.
   //    c) Termination occurs if an invariant of the interface could not be
   //       maintained.
   //    d) The function returns otherwise.
@@ -1023,7 +1256,15 @@ class TestFcgiClientInterface
   //    FCGI_UNKNOWN_TYPE (i.e. the record was a management record) and the
   //    record was valid, then the management queue referred to by
   //    connection_iter was popped.
-  // 3) 
+  // 3)    If the type of the record was FCGI_GET_VALUES_RESULT and the record
+  //    was valid, then the name-value pair content of the response was
+  //    processed to construct the ParamsMap instance of the GetValuesResult
+  //    instance which was added to the ready event queue.
+  //       Two cases cause an empty map to be returned and the corruption flag
+  //    of the GetValuesResult instance to be set.
+  //    a) A call to ::a_component::fcgi::ExtractBinaryNameValuePairs indicated
+  //       that an encoding error was present.
+  //    b) A duplicate name was detected among the name-value pairs.
   // 4) If the type of the record was FCGI_END_REQUEST and the record was valid,
   //    then the entry for the request was removed from pending_request_map_
   //    and the FcgiRequestIdentifier of the request was added to
@@ -1102,27 +1343,28 @@ class TestFcgiClientInterface
   //          FCGI_GET_VALUES requests).
   //       4) The content length of the record was not 8 bytes.
   //    g) The record was not of one the above types.
-  // 3) The information contained in the header was used to update the
+  // 2) The information contained in the header was used to update the
   //    following fields of the RecordState instance referred to by
   //    connection_iter: type, fcgi_id, content_bytes_expected, and
   //    padding_bytes_expected.
-  // 4) A valid iterator of pending_request_map_ was returned.
+  // 3) A valid iterator of pending_request_map_ was returned.
   std::map<FcgiRequestIdentifier, RequestData>::iterator
   UpdateOnHeaderCompletion(
     std::map<int, ConnectionState>::iterator connection_iter,
     std::map<FcgiRequestIdentifier, RequestData>::iterator pending_iter);
 
   std::set<FcgiRequestIdentifier>              completed_request_set_;
-  std::map<int, ConnectionState>                    connection_map_;
+  std::map<int, ConnectionState>               connection_map_;
   std::map<FcgiRequestIdentifier, RequestData> pending_request_map_;
-  std::list<std::unique_ptr<ServerEvent>>           micro_event_queue_;
-  int                                               number_connected_;
+  std::list<std::unique_ptr<ServerEvent>>      micro_event_queue_;
+  int                                          number_connected_;
   // I/O multiplexing tracking state
-  int                                               remaining_ready_;
-  std::map<int, ConnectionState>::iterator          next_connection_;
-  fd_set                                            select_set_;
+  int                                          remaining_ready_;
+  std::map<int, ConnectionState>::iterator     next_connection_;
+  fd_set                                       select_set_;
 
-  static constexpr const char* write_or_select_ {"write or select"};
+  static constexpr const char*                 write_or_select_
+    {"write or select"};
 };
 
 } // namespace test
