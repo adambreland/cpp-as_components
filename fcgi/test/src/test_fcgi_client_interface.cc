@@ -1463,9 +1463,18 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   return true;
 }
 
-// TODO Make sure that blocking is handled when writing.
-// TODO Refactor to remove the possibility of double recovery. All errors
-// should cause an exception to be thrown. std::system_error can be thrown.
+// Implementation discussion:
+// Error handling:
+//    Errors are divided into two categories:
+// 1) Errors reported by an error code or a std::system_error exception.
+// 2) Errors reported by exceptions which are not of type std::system_error.
+//
+//    Once a change in state has been made, errors of the first category are
+// handled by a call to FailedWrite. Errors of the second category are handled
+// by the terminal catch-all catch block.
+//    This division allows the important error case of connection closure by
+// the peer, which is reported through errno == EPIPE, to be handled without
+// any exceptions being thrown.
 FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   const FcgiRequestDataReference& request)
 {
@@ -1476,48 +1485,27 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     return FcgiRequestIdentifier {};
   }
   ConnectionState* state_ptr       {&(connection_iter->second)};
+  // The call to GetId acquires an id that must be released if an error occurs
+  // and connection closure need not occur.
   std::uint16_t    new_id          {state_ptr->id_manager.GetId()};
-  bool             write_error     {false};
-  bool             nothing_written {true};
-  int              saved_errno     {0};
   std::uint16_t    role            {request.role};
 
-  auto ThrowSystemError = []
+  auto NonWriteStdSystemErrorRecoverer = [&]
   (
-    int         error_value,
-    const char* message
+    const std::system_error& se
   )->void
   {
-    std::error_code ec {error_value, std::system_category()};
-    throw std::system_error {ec, message};
+    FailedWrite(connection_iter, se.code().value(), false, false,
+      se.what());
+    throw se;
   };
 
-  auto SocketWriteHelper = [&]
-  (
-    std::uint8_t* byte_ptr,
-    std::size_t   write_length
-  )->void
-  {
-    std::size_t write_return {socket_functions::WriteOnSelect(connection,
-      byte_ptr, write_length, nullptr)};
-    if(write_return)
-    {
-      nothing_written = false;
-    }
-    if(write_return < write_length)
-    {
-      write_error = true;
-      saved_errno = errno;
-      ThrowSystemError(saved_errno, write_);
-    }
-  };
-
-  // Note: nothing_written is not updated as this lambda should only be
-  // invoked after the FCGI_BEGIN_REQUEST record has been written.
+  // This lambda should only be invoked after the FCGI_BEGIN_REQUEST record has
+  // been written.
   auto DataAndStdinWriter = [&]
   (
     FcgiType type
-  )->void
+  )->bool
   {
     bool is_data {type == FcgiType::kFCGI_DATA};
     // PartitionByteSequence will produce ending stream records if
@@ -1534,7 +1522,17 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     {
       std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
         std::size_t, const std::uint8_t*> 
-      partition  {PartitionByteSequence(start_iter, end_iter, type, new_id)};
+      partition  {};
+      try
+      {
+        partition = PartitionByteSequence(start_iter, end_iter, type, new_id);
+      }
+      catch(const std::system_error& se)
+      {
+        NonWriteStdSystemErrorRecoverer(se);
+      }
+      // Other exception types are allowed to propagate freely.
+
       std::tuple<struct iovec*, int, std::size_t>
       partition_write {socket_functions::ScatterGatherSocketWrite(
         connection,
@@ -1545,13 +1543,12 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         nullptr)};
       if(std::get<2>(partition_write))
       {
-        // A non-zero value means in the conditional means that data remains
-        // to be written.
-        //
-        // nothing_written must be true here.
-        write_error = true;
-        saved_errno = errno;
-        ThrowSystemError(saved_errno, write_or_select_);
+        // 1) A non-zero value in the conditional means that data remains
+        //    to be written.
+        // 2) As data has been written, release of new_id is not needed as
+        //    connection closure must occur.
+        FailedWrite(connection_iter, errno, false, false, writev_or_select_);
+        return false;
       }
       start_iter = std::get<3>(partition);
       if(!terminated && (start_iter == end_iter))
@@ -1560,6 +1557,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         continue;
       }
     } while(start_iter != end_iter);
+    return true;
   };
 
   try
@@ -1573,19 +1571,45 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     std::uint8_t begin_record[begin_length] = {};
     PopulateBeginRequestRecord(begin_record, new_id, role,
       request.keep_conn);
-    SocketWriteHelper(begin_record, begin_length);
+    std::size_t begin_write_return {socket_functions::WriteOnSelect(connection,
+      begin_record, begin_length, nullptr)};
+    if(begin_write_return < begin_length)
+    {
+      bool nothing_written {bool(begin_write_return)};
+      int saved_errno = errno;
+      if(nothing_written && (errno != EPIPE))
+      {
+        try // noexcept-equivalent block
+        {
+          state_ptr->id_manager.ReleaseId(new_id);
+        }
+        catch(...)
+        {
+          std::terminate();
+        }
+      }
+      FailedWrite(connection_iter, saved_errno, nothing_written, false,
+        write_or_select_);
+      return FcgiRequestIdentifier {};
+    }
 
     if(!(((role == FCGI_RESPONDER) ||
           (role == FCGI_AUTHORIZER))  && 
         (request.data_begin == request.data_end)))
     {
-      DataAndStdinWriter(FcgiType::kFCGI_DATA);
+      if(!DataAndStdinWriter(FcgiType::kFCGI_DATA))
+      {
+        return FcgiRequestIdentifier {};
+      }
     }
 
     if(!((role == FCGI_AUTHORIZER) && 
          (request.stdin_begin == request.stdin_end)))
     {
-      DataAndStdinWriter(FcgiType::kFCGI_STDIN);
+      if(!DataAndStdinWriter(FcgiType::kFCGI_STDIN))
+      {
+        return FcgiRequestIdentifier {};
+      }
     }
 
     if((request.params_map_ptr != nullptr) &&
@@ -1598,14 +1622,28 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
       {
         std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
           std::vector<std::uint8_t>, std::size_t, ParamsMap::const_iterator>
-        params_encoding {EncodeNameValuePairs(start_iter, end_iter,
-          FcgiType::kFCGI_PARAMS, new_id, offset)};
+        params_encoding {};
+        try
+        {
+          params_encoding = EncodeNameValuePairs(start_iter, end_iter,
+            FcgiType::kFCGI_PARAMS, new_id, offset);
+        }
+        catch(const std::system_error& se)
+        {
+          NonWriteStdSystemErrorRecoverer(se);
+        }
+        // Other exception types are allowed to propagate freely.
+
         if(!std::get<0>(params_encoding))
         {
-          saved_errno = EINVAL;
-          write_error = true;
-          ThrowSystemError(saved_errno,
+          // Something has been written overall. id release is not required.
+          //
+          // The false boolean error code value of EncodeNameValuePairs is
+          // converted to EINVAL. This conversion is consistent with the
+          // semantics of a false value for std::get<0>(params_encoding).
+          FailedWrite(connection_iter, EINVAL, false, false,
             "::a_component::fcgi::EncodeNameValuePairs");
+          return FcgiRequestIdentifier {};
         }
         std::tuple<struct iovec*, int, std::size_t> params_write
           {socket_functions::ScatterGatherSocketWrite(connection,
@@ -1613,9 +1651,10 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
             std::get<2>(params_encoding).size(), false, nullptr)};
         if(std::get<2>(params_write))
         {
-          write_error = true;
-          saved_errno = errno;
-          ThrowSystemError(saved_errno, write_or_select_);
+          // Something has been written overall. id release is not required.
+          FailedWrite(connection_iter, errno, false, false,
+            writev_or_select_);
+          return FcgiRequestIdentifier {};
         }
         offset     = std::get<5>(params_encoding);
         start_iter = std::get<6>(params_encoding);
@@ -1625,27 +1664,45 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     std::uint8_t params_record[FCGI_HEADER_LEN] = {};
     PopulateHeader(params_record, FcgiType::kFCGI_PARAMS,
       new_id, 0U, 0U);
-    SocketWriteHelper(params_record, FCGI_HEADER_LEN);
-    // Insert a new RequestData instance to pending_request_map_.
-    pending_request_map_.insert(
+    std::size_t terminal_params_return {socket_functions::WriteOnSelect(
+      connection, params_record, FCGI_HEADER_LEN, nullptr)};
+    if(terminal_params_return < FCGI_HEADER_LEN)
     {
-      {connection, new_id},
-      {request, {}, false, {}, false}
-    });
+      // Something has been written overall. id release is not required.
+      FailedWrite(connection_iter, errno, false, false,
+        write_or_select_);
+      return FcgiRequestIdentifier {};
+    }
+    // Insert a new RequestData instance to pending_request_map_.
+    try
+    {
+      pending_request_map_.insert(
+      {
+        {connection, new_id},
+        {request, {}, false, {}, false}
+      });
+    }
+    catch(const std::system_error& se)
+    {
+      NonWriteStdSystemErrorRecoverer(se);
+    }
+    // Other exception types are allowed to propagate freely.
+
     return FcgiRequestIdentifier {connection, new_id};
   }
   catch(const std::system_error& se)
   {
-    FailedWrite(connection_iter, se.code().value(), nothing_written, false,
-      se.what());
-    return FcgiRequestIdentifier {};
+    throw se;
   }
   catch(...)
   {
     // If an exception is caught here, then something must have been written.
     try // noexcept-equivalent block.
     {
-      // These operations must be an atomic unit.
+      // These operations must be an atomic unit. Note that release of the
+      // acquired id is not needed as the connection is about to be closed.
+      // Connection closure implies destruction of the IdManager associated
+      // with the connection.
       CloseConnection(connection);
       micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
         {new ConnectionClosure {connection}});

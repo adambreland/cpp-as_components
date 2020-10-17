@@ -965,10 +965,10 @@ class TestFcgiClientInterface
   //    a) Nothing was written to connection and connection closure by the
   //       peer was not detected. In this case, the strong exception guarantee
   //       holds.
-  //    b) Something was written to the connection or connection closure by the
-  //       peer was detected. In this case, the connection was closed by a
-  //       call to CloseConnection. An appropriate ConnectionClosure instance
-  //       was added to the end of the ready event queue.
+  //    b) Something was written to the connection and an error occurred. In
+  //       this case, the connection was closed by a call to CloseConnection.
+  //       An appropriate ConnectionClosure instance was added to the end of
+  //       the ready event queue.
   //
   // Termination:
   // 1) If an error or exception would cause the function to return or throw
@@ -980,14 +980,10 @@ class TestFcgiClientInterface
   //    one of the following was true:
   //    a) connection did not refer to a connected socket descriptor which was
   //       managed by the interface.
-  //    b) An error occurred while writing and the interface could recover from
-  //       the error in a way that allowed it to be exposed to the user for
-  //       possible recovery. errno holds the value set by the failed call.
-  //       1) If data was written to connection, it was closed.
-  //       2) If the connection was found to have been closed by the
-  //          application, then it was closed.
-  //       3) If connection was closed, an appropriate ConnectionClosure
-  //          instance was added to the ready event queue.
+  //    b) It was discovered that the connection had been closed by the peer.
+  //       The local socket descriptor was closed by a call to CloseConnection.
+  //       An appropriate ConnectionClosure instance was added to the end of
+  //       the ready event queue.
   // 2) If a non-default-constructed FcgiRequestIdentifier id was returned:
   //    a) id.descriptor() == connection.
   //    b) id.Fcgi_id() was selected so that id was a released identifier.
@@ -1367,6 +1363,8 @@ class TestFcgiClientInterface
     {"write"};
   static constexpr const char*                 write_or_select_
     {"write or select"};
+  static constexpr const char*                 writev_or_select_
+    {"writev or select"};
 };
 
 } // namespace test
