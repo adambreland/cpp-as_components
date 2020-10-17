@@ -1363,6 +1363,8 @@ class TestFcgiClientInterface
   std::map<int, ConnectionState>::iterator     next_connection_;
   fd_set                                       select_set_;
 
+  static constexpr const char*                 write_
+    {"write"};
   static constexpr const char*                 write_or_select_
     {"write or select"};
 };

@@ -53,9 +53,10 @@ std::size_t SocketWrite(int fd, const std::uint8_t* buffer_ptr,
 //                  cause a call to select to be made. When true, a call to
 //                  select is made when these errors occur. This flag is
 //                  intended to be used with non-blocking sockets.
-// timeout_ptr:     When wait_on_select == true, this flag allows a pinter
-//                  to a struct timeval pointer to be passed to select calls
-//                  if some are made. A null value denotes no timeout limit.
+// timeout_ptr:     When wait_on_select == true, this flag allows a
+//                  struct timeval pointer to be passed to select calls if
+//                  such calls are needed. A null value denotes no timeout
+//                  limit.
 //
 // Preconditions: none.
 //
@@ -142,7 +143,7 @@ std::pair<struct iovec*, int> ScatterGatherHelper(ssize_t count,
 // count:       The number of bytes of the buffer pointed to by buffer_ptr to
 //              write.
 // timeout_ptr: A pointer to a struct timeval instance to be used in
-//              internal calls to select. (A nullptr value implies no limit.)
+//              internal calls to select. A nullptr value implies no limit.
 //
 // Preconditions: none
 //

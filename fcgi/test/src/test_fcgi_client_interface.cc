@@ -1481,198 +1481,174 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   bool             nothing_written {true};
   int              saved_errno     {0};
   std::uint16_t    role            {request.role};
-  // Two kinds of errors are handled below:
-  // 1) Errors from writes to the server which cannot throw exceptions.
-  // 2) Errors which are represented as exceptions.
+
+  auto ThrowSystemError = []
+  (
+    int         error_value,
+    const char* message
+  )->void
+  {
+    std::error_code ec {error_value, std::system_category()};
+    throw std::system_error {ec, message};
+  };
+
+  auto SocketWriteHelper = [&]
+  (
+    std::uint8_t* byte_ptr,
+    std::size_t   write_length
+  )->void
+  {
+    std::size_t write_return {socket_functions::WriteOnSelect(connection,
+      byte_ptr, write_length, nullptr)};
+    if(write_return)
+    {
+      nothing_written = false;
+    }
+    if(write_return < write_length)
+    {
+      write_error = true;
+      saved_errno = errno;
+      ThrowSystemError(saved_errno, write_);
+    }
+  };
+
+  // Note: nothing_written is not updated as this lambda should only be
+  // invoked after the FCGI_BEGIN_REQUEST record has been written.
+  auto DataAndStdinWriter = [&]
+  (
+    FcgiType type
+  )->void
+  {
+    bool is_data {type == FcgiType::kFCGI_DATA};
+    // PartitionByteSequence will produce ending stream records if
+    // begin_iter == end_iter. terminated is used to ensure that one
+    // ending record is always produced.
+    bool terminated
+      {(is_data) ? request.data_begin  == request.data_end :
+                    request.stdin_begin == request.stdin_end};
+    const std::uint8_t* start_iter
+      {(is_data) ? request.data_begin : request.stdin_begin};
+    const std::uint8_t* end_iter 
+      {(is_data) ? request.data_end : request.stdin_end};
+    do
+    {
+      std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
+        std::size_t, const std::uint8_t*> 
+      partition  {PartitionByteSequence(start_iter, end_iter, type, new_id)};
+      std::tuple<struct iovec*, int, std::size_t>
+      partition_write {socket_functions::ScatterGatherSocketWrite(
+        connection,
+        std::get<1>(partition).data(),
+        std::get<1>(partition).size(),
+        std::get<2>(partition),
+        true,
+        nullptr)};
+      if(std::get<2>(partition_write))
+      {
+        // A non-zero value means in the conditional means that data remains
+        // to be written.
+        //
+        // nothing_written must be true here.
+        write_error = true;
+        saved_errno = errno;
+        ThrowSystemError(saved_errno, write_or_select_);
+      }
+      start_iter = std::get<3>(partition);
+      if(!terminated && (start_iter == end_iter))
+      {
+        terminated = true;
+        continue;
+      }
+    } while(start_iter != end_iter);
+  };
+
   try
   {
     // Note that the order of stream transmission is important. FCGI_PARAMS
     // is sent last to ensure that a request is not prematurely completed as
     // may occur for Responder and Authorizer roles. (FCGI_PARAMS is required
     // for all current roles.)
-    do
+
+    constexpr int_fast32_t begin_length {2U * FCGI_HEADER_LEN};
+    std::uint8_t begin_record[begin_length] = {};
+    PopulateBeginRequestRecord(begin_record, new_id, role,
+      request.keep_conn);
+    SocketWriteHelper(begin_record, begin_length);
+
+    if(!(((role == FCGI_RESPONDER) ||
+          (role == FCGI_AUTHORIZER))  && 
+        (request.data_begin == request.data_end)))
     {
-      auto SocketWriteHelper = [&]
-      (
-        std::uint8_t* byte_ptr,
-        std::size_t   write_length
-      )->bool
+      DataAndStdinWriter(FcgiType::kFCGI_DATA);
+    }
+
+    if(!((role == FCGI_AUTHORIZER) && 
+         (request.stdin_begin == request.stdin_end)))
+    {
+      DataAndStdinWriter(FcgiType::kFCGI_STDIN);
+    }
+
+    if((request.params_map_ptr != nullptr) &&
+        !(request.params_map_ptr->empty()))
+    {
+      ParamsMap::const_iterator start_iter {request.params_map_ptr->begin()};
+      ParamsMap::const_iterator end_iter   {request.params_map_ptr->end()};
+      std::size_t offset {0U};
+      do
       {
-        std::size_t write_return {socket_functions::SocketWrite(connection,
-          byte_ptr, write_length)};
-        if(write_return < write_length)
+        std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+          std::vector<std::uint8_t>, std::size_t, ParamsMap::const_iterator>
+        params_encoding {EncodeNameValuePairs(start_iter, end_iter,
+          FcgiType::kFCGI_PARAMS, new_id, offset)};
+        if(!std::get<0>(params_encoding))
+        {
+          saved_errno = EINVAL;
+          write_error = true;
+          ThrowSystemError(saved_errno,
+            "::a_component::fcgi::EncodeNameValuePairs");
+        }
+        std::tuple<struct iovec*, int, std::size_t> params_write
+          {socket_functions::ScatterGatherSocketWrite(connection,
+            std::get<2>(params_encoding).data(),
+            std::get<2>(params_encoding).size(), false, nullptr)};
+        if(std::get<2>(params_write))
         {
           write_error = true;
-          if(write_return)
-          {
-            nothing_written = false;
-          }
           saved_errno = errno;
-          return false;
+          ThrowSystemError(saved_errno, write_or_select_);
         }
-        return true;
-      };
-
-      constexpr int_fast32_t begin_length {2U * FCGI_HEADER_LEN};
-      std::uint8_t begin_record[begin_length] = {};
-      PopulateBeginRequestRecord(begin_record, new_id, role,
-        request.keep_conn);
-      if(!SocketWriteHelper(begin_record, begin_length))
-      {
-        break;
-      }
-      nothing_written = false;
-
-      // Capturing all variables up to this point by reference is simpler than
-      // specifying a parameter list.
-      auto DataAndStdinWriter = [&](FcgiType type)->bool
-      {
-        bool is_data {type == FcgiType::kFCGI_DATA};
-        // PartitionByteSequence will produce ending stream records if
-        // begin_iter == end_iter. terminated is used to ensure that one
-        // ending record is always produced.
-        bool terminated
-          {(is_data) ? request.data_begin  == request.data_end :
-                       request.stdin_begin == request.stdin_end};
-        const std::uint8_t* start_iter
-          {(is_data) ? request.data_begin : request.stdin_begin};
-        const std::uint8_t* end_iter 
-          {(is_data) ? request.data_end : request.stdin_end};
-        do
-        {
-          std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>,
-            std::size_t, const std::uint8_t*> partition 
-            {PartitionByteSequence(start_iter, end_iter,
-              type, new_id)};
-          std::tuple<struct iovec*, int, std::size_t> partition_write
-            {socket_functions::ScatterGatherSocketWrite(connection,
-              std::get<1>(partition).data(),
-              std::get<1>(partition).size(), std::get<2>(partition),
-              false, nullptr)};
-          if(std::get<2>(partition_write))
-          {
-            write_error = true;
-            saved_errno = errno;
-            return false;
-          }
-          start_iter = std::get<3>(partition);
-          if(!terminated && (start_iter == end_iter))
-          {
-            terminated = true;
-            continue;
-          }
-        } while(start_iter != end_iter);
-        return true;
-      };
-
-      if(!(((role == FCGI_RESPONDER) ||
-            (role == FCGI_AUTHORIZER))  && 
-          (request.data_begin == request.data_end)))
-      {
-        if(!DataAndStdinWriter(FcgiType::kFCGI_DATA))
-        {
-          break;
-        }
-      }
-
-      if(!((role == FCGI_AUTHORIZER) && 
-           (request.stdin_begin == request.stdin_end)))
-      {
-        if(!DataAndStdinWriter(FcgiType::kFCGI_STDIN))
-        {
-          break;
-        }
-      }
-
-      if((request.params_map_ptr != nullptr) &&
-         !(request.params_map_ptr->empty()))
-      {
-        ParamsMap::const_iterator start_iter {request.params_map_ptr->begin()};
-        ParamsMap::const_iterator end_iter   {request.params_map_ptr->end()};
-        std::size_t offset {0U};
-        do
-        {
-          std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
-            std::vector<std::uint8_t>, std::size_t, ParamsMap::const_iterator>
-          params_encoding {EncodeNameValuePairs(start_iter, end_iter,
-            FcgiType::kFCGI_PARAMS, new_id, offset)};
-          if(!std::get<0>(params_encoding))
-          {
-            saved_errno = EINVAL;
-            write_error = true;
-            break;
-          }
-          std::tuple<struct iovec*, int, std::size_t> params_write
-            {socket_functions::ScatterGatherSocketWrite(connection,
-              std::get<2>(params_encoding).data(),
-              std::get<2>(params_encoding).size(), false, nullptr)};
-          if(std::get<2>(params_write))
-          {
-            write_error = true;
-            saved_errno = errno;
-            break;
-          }
-          offset     = std::get<5>(params_encoding);
-          start_iter = std::get<6>(params_encoding);
-        } while(start_iter != end_iter);
-      }
-      if(!write_error)
-      {
-        // A terminal FCGI_PARAMS record must be sent in all cases.
-        std::uint8_t params_record[FCGI_HEADER_LEN] = {};
-        PopulateHeader(params_record, FcgiType::kFCGI_PARAMS,
-          new_id, 0U, 0U);
-        SocketWriteHelper(params_record, FCGI_HEADER_LEN);
-      }
-    } while(false);
-    if(write_error)
-    {
-      try // noexcept-equivalent block.
-      {
-        state_ptr->id_manager.ReleaseId(new_id);
-      }
-      catch(...)
-      {
-        std::terminate();
-      }
-      FailedWrite(connection_iter, saved_errno, nothing_written, false,
-        "write");
-      errno = saved_errno;
-      return FcgiRequestIdentifier {};
+        offset     = std::get<5>(params_encoding);
+        start_iter = std::get<6>(params_encoding);
+      } while(start_iter != end_iter);
     }
+    // A terminal FCGI_PARAMS record must be sent in all cases.
+    std::uint8_t params_record[FCGI_HEADER_LEN] = {};
+    PopulateHeader(params_record, FcgiType::kFCGI_PARAMS,
+      new_id, 0U, 0U);
+    SocketWriteHelper(params_record, FCGI_HEADER_LEN);
     // Insert a new RequestData instance to pending_request_map_.
     pending_request_map_.insert(
     {
       {connection, new_id},
       {request, {}, false, {}, false}
     });
+    return FcgiRequestIdentifier {connection, new_id};
+  }
+  catch(const std::system_error& se)
+  {
+    FailedWrite(connection_iter, se.code().value(), nothing_written, false,
+      se.what());
+    return FcgiRequestIdentifier {};
   }
   catch(...)
   {
-    // The first write happens to use operations which cannot throw.
-    // Accordingly, if this catch block is reached, then some data will have
-    // been written.
+    // If an exception is caught here, then something must have been written.
     try // noexcept-equivalent block.
     {
-      // A throw from FailedWrite may have caused this block to be entered.
-      // This is a problem as FailedWrite performs similar cleanup to the
-      // actions below. One solution, which is adopted here, is to inspect
-      // the ready event queue for an appropriate ConnectionClosure instance.
-      // If one is present, then cleanup may be skipped.
-      ConnectionClosure* cc_ptr {nullptr};
-      if(micro_event_queue_.size()                         && 
-         ((cc_ptr = dynamic_cast<ConnectionClosure*>(
-            micro_event_queue_.back().get())) != nullptr)  && 
-         (cc_ptr->RequestId().descriptor() == connection))
-      {
-        // no-op
-      }
-      else
-      {
-        CloseConnection(connection);
-        micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
-          {new ConnectionClosure {connection}});
-      }
+      // These operations must be an atomic unit.
+      CloseConnection(connection);
+      micro_event_queue_.push_back(std::unique_ptr<ServerEvent>
+        {new ConnectionClosure {connection}});
     }
     catch(...)
     {
@@ -1680,7 +1656,6 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     }
     throw;
   }
-  return FcgiRequestIdentifier {connection, new_id};
 }
 
 std::map<FcgiRequestIdentifier, 
