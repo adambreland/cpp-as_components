@@ -28,8 +28,6 @@ namespace fcgi {
 namespace test {
 namespace test {
 
-// A signal handler and an associated atomic boolean for testing
-// fcgi_si_test::TestFcgiClientInterface::SendGetValuesRequest.
 namespace {
   std::atomic<bool> test_fcgi_client_interface_fcgi_server_accept_timeout
     {false};
@@ -337,7 +335,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NE(inter_uptr.get(), nullptr);
   resource_list_.push_back({std::get<1>(inter_return), unix_path_1});
 
-  // Create an interface and check initial state.
+  // Create a client interface and check its initial state.
   TestFcgiClientInterface client_inter {};
   EXPECT_EQ(client_inter.ConnectionCount(), 0);
   EXPECT_EQ(client_inter.ReadyEventCount(), 0U);

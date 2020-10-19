@@ -38,9 +38,9 @@ namespace test {
 
 // Invariants and properties of completed_request_set_, connection_map_, and
 // pending_request_map_.
-// 1) If a FcgiRequestIdentifier instance ri is present in completed_request_set_
-//    or pending_request_map_, then an entry for ri.descriptor() must be
-//    present in connection_map_.
+// 1) If a FcgiRequestIdentifier instance ri is present in
+//    completed_request_set_ or pending_request_map_, then an entry for
+//    ri.descriptor() must be present in connection_map_.
 // 2) If a connection as represented by a ConnectionState instance c of
 //    connection_map_ is not connected (c.connected == false), then no requests
 //    which are associated with the connection may be present in
@@ -1808,9 +1808,9 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         break;
       }
       case FcgiType::kFCGI_UNKNOWN_TYPE : {
-        if((fcgi_id != 0U)                              ||
-           (expected_content != 8U)                     ||
-           !(state_ptr->management_queue.size())        ||
+        if((fcgi_id != 0U)                               ||
+           (expected_content != 8U)                      ||
+           !(state_ptr->management_queue.size())         ||
            (FcgiType::kFCGI_GET_VALUES == state_ptr->
               management_queue.front().type))
         {

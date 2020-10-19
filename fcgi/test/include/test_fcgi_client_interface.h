@@ -655,11 +655,6 @@ class TestFcgiClientInterface
   // response is no longer regarded as pending.
   std::size_t ManagementRequestCount(int connection) const;
 
-  inline std::size_t ReadyEventCount() const noexcept
-  {
-    return micro_event_queue_.size();
-  }
-
   // Returns the total number of pending requests.
   inline std::size_t PendingRequestCount() const noexcept
   {
@@ -668,6 +663,11 @@ class TestFcgiClientInterface
 
   // Returns the number of pending requests for connection.
   std::size_t PendingRequestCount(int connection) const;
+
+  inline std::size_t ReadyEventCount() const noexcept
+  {
+    return micro_event_queue_.size();
+  }
 
   // Attempts to release the FastCGI request identifier of id when id refers
   // to a request which is completed and unreleased.
