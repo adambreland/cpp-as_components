@@ -31,9 +31,50 @@ namespace test {
 namespace {
   std::atomic<bool> test_fcgi_client_interface_fcgi_server_accept_timeout
     {false};
+
   extern "C" void SigAlrmHandler(int sig)
   {
     test_fcgi_client_interface_fcgi_server_accept_timeout.store(true);
+  }
+
+  struct ClientInterfaceConnectionObserverTestValues
+  {
+    int         connection;
+    std::size_t completed_request_count;
+    int         connection_count;
+    bool        is_connected;
+    std::size_t management_request_count;
+    std::size_t pending_request_count;
+    std::size_t ready_event_count;
+  };
+
+  void GTestFatalClientInterfaceConnectionObserverCheck(
+    const TestFcgiClientInterface& client_inter,
+    const struct ClientInterfaceConnectionObserverTestValues& values)
+  {
+    std::size_t completed_request_count_return {};
+    ASSERT_NO_THROW(completed_request_count_return =
+      client_inter.CompletedRequestCount(values.connection));
+    EXPECT_EQ(completed_request_count_return, values.completed_request_count);
+
+    EXPECT_EQ(client_inter.ConnectionCount(), values.connection_count);
+
+    bool is_connected_return {};
+    ASSERT_NO_THROW(is_connected_return =
+      client_inter.IsConnected(values.connection));
+    EXPECT_EQ(is_connected_return, values.is_connected);
+
+    std::size_t management_request_count_return {};
+    ASSERT_NO_THROW(management_request_count_return =
+      client_inter.ManagementRequestCount(values.connection));
+    EXPECT_EQ(management_request_count_return, values.management_request_count);
+
+    std::size_t pending_request_count_return {};
+    ASSERT_NO_THROW(pending_request_count_return =
+      client_inter.PendingRequestCount(values.connection));
+    EXPECT_EQ(pending_request_count_return, values.pending_request_count);
+
+    EXPECT_EQ(client_inter.ReadyEventCount(), values.ready_event_count);
   }
 } // namespace
 
@@ -335,11 +376,11 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NE(inter_uptr.get(), nullptr);
   resource_list_.push_back({std::get<1>(inter_return), unix_path_1});
 
-  // Create a client interface and check its initial state.
+  // Create a client interface and check its initial observable state.
   TestFcgiClientInterface client_inter {};
-  EXPECT_EQ(client_inter.ConnectionCount(), 0);
-  EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
-  int local_socket {};
+  EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
+  EXPECT_EQ(client_inter.ConnectionCount(),       0);
+  EXPECT_EQ(client_inter.ReadyEventCount(),       0U);
 
   // Create maps for testing.
   ParamsMap name_only_map
@@ -355,21 +396,27 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
 
   // TEST CASE 1
   // Test the copy overload first.
+  int local_socket {};
   ASSERT_NO_THROW(local_socket =
     client_inter.Connect(unix_path_1, std::get<2>(inter_return)));
   ASSERT_NE(local_socket, -1) << std::strerror(errno);
-  EXPECT_EQ(client_inter.ConnectionCount(), 1);
-  std::size_t management_count {0U};
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
+  struct ClientInterfaceConnectionObserverTestValues observer_values {};
+  observer_values.connection               = local_socket;
+  observer_values.completed_request_count  = 0U;
+  observer_values.connection_count         = 1;
+  observer_values.is_connected             = true;
+  observer_values.management_request_count = 0U;
+  observer_values.pending_request_count    = 0U;
+  observer_values.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, map_with_values));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 1U);
+  observer_values.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   std::vector<FcgiRequest> accept_result {};
   struct itimerval timeout
   {
@@ -393,9 +440,10 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   }
   std::unique_ptr<ServerEvent> result_uptr {};
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
+  observer_values.management_request_count = 0U;
+  observer_values.ready_event_count        = 0U; // 1-1 (the returned req) = 0
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   GetValuesResult* gvr_ptr
     {dynamic_cast<GetValuesResult*>(result_uptr.get())};
   ASSERT_NE(gvr_ptr, nullptr);
@@ -408,9 +456,9 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, std::move(value_map_copy)));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 1U);
+  observer_values.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   // Clear the timeout flag.
   test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
   ASSERT_NE(setitimer(ITIMER_REAL, &timeout, nullptr), -1) <<
@@ -421,9 +469,10 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     EXPECT_EQ(accept_result.size(), 0U);
   }
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
+  observer_values.management_request_count = 0U;
+  observer_values.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(name_only_map, gvr_ptr->RequestMap());
@@ -440,15 +489,12 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, mpxs_map_with_value));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 1U);
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, map_with_values));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 2U);
+  observer_values.management_request_count = 2U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   // Allow the interface to process the requests.
   // Clear the timeout flag.
   test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
@@ -460,25 +506,24 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     EXPECT_EQ(accept_result.size(), 0U);
   }
   // Retrieve the responses and check for proper response ordering.
-  ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
   // All management requests should have been processed by the server interface
   // when AcceptRequests was called in the loop above. All data sent by the
   // server interface should have been processed by the above call to
   // RetrieveServerEvent. As a result, no management requests should be
   // regarded as pending for local_socket.
-  EXPECT_EQ(management_count, 0U);
-  EXPECT_EQ(client_inter.ReadyEventCount(), 1U);
+  ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
+  observer_values.management_request_count = 0U;
+  observer_values.ready_event_count        = 1U;  
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(mpxs_name_map, gvr_ptr->RequestMap());
   EXPECT_EQ(mpxs_map_with_value, gvr_ptr->ResponseMap());
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
-  EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
+  observer_values.ready_event_count        = 0U;  
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
   ASSERT_NE(gvr_ptr, nullptr);
   EXPECT_EQ(name_only_map, gvr_ptr->RequestMap());
@@ -490,31 +535,15 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   // TEST CASE 5
   // Check for a return of false when a call is made for a non-existent
   // connection.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(1000,
     name_only_map));
   EXPECT_FALSE(send_gvr);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
+  // Check for constancy.
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
 
   // TEST CASE 6
   // Check for a return of false when a call is made with a map that cannot
@@ -526,9 +555,9 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
     std::move(large_name_map)));
   EXPECT_FALSE(send_gvr);
-  ASSERT_NO_THROW(management_count =
-    client_inter.ManagementRequestCount(local_socket));
-  EXPECT_EQ(management_count, 0U);
+  // Check for constancy.
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
 
   // TEST CASE 7
   //    Check for a return of false when a call is made and it is detected that
@@ -536,19 +565,25 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   //    Destroy the FcgiServerInterface instance to cause the peer connection
   // to be closed.
   delete(inter_uptr.release());
-  EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
+  // Check for constancy.
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
     name_only_map));
   EXPECT_FALSE(send_gvr);
-  EXPECT_EQ(client_inter.ManagementRequestCount(local_socket), 0U);
-  EXPECT_EQ(client_inter.ConnectionCount(), 0);
-  ASSERT_EQ(client_inter.ReadyEventCount(), 1U);
+  observer_values.connection_count  = 0;
+  observer_values.is_connected      = false;
+  observer_values.ready_event_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   ConnectionClosure* closure_ptr
     {dynamic_cast<ConnectionClosure*>(result_uptr.get())};
   ASSERT_NE(closure_ptr, nullptr);
   EXPECT_EQ(closure_ptr->RequestId().descriptor(), local_socket);
-  EXPECT_EQ(client_inter.ReadyEventCount(), 0U);
+  observer_values.ready_event_count = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values);
 }
 
 // SendGetValuesRequest: Test case set 2
