@@ -1313,7 +1313,7 @@ bool TestFcgiClientInterface::SendAbortRequest(FcgiRequestIdentifier id)
 }
 
 bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
-    FcgiType type, const std::uint8_t* byte_ptr, std::size_t length)
+    FcgiType type, const std::uint8_t* start, const std::uint8_t* end)
 {
   std::map<int, ConnectionState>::iterator connection_iter
     {ConnectedCheck(connection)};
@@ -1321,7 +1321,8 @@ bool TestFcgiClientInterface::SendBinaryManagementRequest(int connection,
   {
     return false;
   }
-  std::vector<std::uint8_t> local_data(byte_ptr, byte_ptr + length);
+  // Create a local copy to store in the client interface instance.
+  std::vector<std::uint8_t> local_data(start, end);
   ManagementRequestData queue_item {type, {}, std::move(local_data)};
   return SendBinaryManagementRequestHelper(connection_iter, type,
     std::move(queue_item));

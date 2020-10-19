@@ -146,7 +146,6 @@ class FcgiRequestIdManager
 // 2) If creation was not successful, the unique_ptr accessed by 
 //    std::get<0> holds nullptr. If a socket was created, its descriptor
 //    was closed. If a socket file was created, it was removed.
-//
 struct InterfaceCreationArguments
 {
   int domain;

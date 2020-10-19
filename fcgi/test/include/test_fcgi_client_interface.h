@@ -464,8 +464,9 @@ class UnknownType : public ServerEvent
 // according to request order.
 //    The interface assumes that FCGI_GET_VALUES is the only defined type of
 // management request. No facilities exist to handle management responses
-// which are not of type FCGI_GET_VALUES_RESULT or FCGI_UNKNOWN_TYPE other than
-// through the generation of an InvalidRecord instance.
+// which are not of type FCGI_GET_VALUES_RESULT or FCGI_UNKNOWN_TYPE. In the
+// case that a management request of another type is received, an InvalidRecord
+// instance is generated.
 //
 // Request identifiers, identifier allocation and release, and pending and
 // completed request statuses:
@@ -479,7 +480,7 @@ class UnknownType : public ServerEvent
 // from being released to being allocated. Only released values are used for
 // new requests. Once a response has been received for a request identified by
 // value v = (c, ID), v is not released until a call to ReleaseId(v)
-// or ReleaseId(c) is made. This is true regardless of intervening closure of
+// or ReleaseId(c) is made. This is true regardless of intervening closures of
 // connection by an application server or through calls of
 // CloseConnection(c).
 //    A request, which is identified with an allocated request identifier, is
@@ -492,8 +493,9 @@ class UnknownType : public ServerEvent
 // released request identifiers for requests which received a response
 // (completed requests) prevents the reuse of a request identifier before it is
 // explicitly released by the user of the interface. This property allows
-// processing of the responses to requests to be deferred while preventing
-// ambiguous request identifier values.
+// processing of responses to requests to be deferred while preventing
+// request identifier value reuse in situations which could result in request
+// identity ambiguity.
 //    Management requests are also described as either pending or completed.
 // However, management requests are not subject to request identifier
 // allocation and release.
@@ -502,11 +504,9 @@ class UnknownType : public ServerEvent
 //    TestFcgiClientInterface uses instances of types derived from the abstract
 // type ServerEvent to represent information which was received from
 // application servers. ServerEvent was defined for this purpose. An internal
-// ready event queue is used to store ready events.
-//    The event queue is also used by SendAbortRequest,
-// SendBinaryManagementRequest, and SendGetValuesRequest to report the
-// detection during their invocation of the closure of a connection by its
-// peer.
+// ready event queue is used to store ready events. RetrieveServerEvent is used
+// to retrieve a server event. dynamic_cast may be used to cast the contained
+// ServerEvent* to a pointer to one of the derived server event types.
 //
 // Connection closure:
 //    A user can manually close a connection through a call to CloseConnection.
@@ -516,6 +516,10 @@ class UnknownType : public ServerEvent
 // connection by returning an appropriate ConnectionClosure instance from a
 // call to RetrieveServerEvent. As for manual closure, all pending application
 // and management requests are lost when this occurs.
+//    The event queue is also used by SendAbortRequest,
+// SendBinaryManagementRequest, SendGetValuesRequest, and SendRequest to report
+// the detection during their invocation of the closure of a connection by its
+// peer.
 //
 // The interface as a component for testing:
 //    Several features of the interface make it suited for programs which
@@ -847,14 +851,15 @@ class TestFcgiClientInterface
   // type:       The type of the management request. A type defined by the
   //             FastCGI protocol is not required.
   // (Copy overload)
-  // byte_ptr:   A pointer to the first byte in the byte sequence which will
+  // start:      A pointer to the first byte in the byte sequence which will
   //             form the content of the management request.
-  // length:     The length of the content byte sequence.
+  // end:        A pointer to one past the last byte of the content sequence.
   // (Move overload)
   // data:       The data to be moved internally and sent to the server over
   //             connection.
   // 
-  // Preconditions: none
+  // Preconditions:
+  // 1) The byte range given by [start, end) must be valid.
   //
   // Exceptions:
   // 1) A call may throw exceptions derived from std::exception.
@@ -874,20 +879,20 @@ class TestFcgiClientInterface
   // 1) If false was returned, then one of the following occurred:
   //    a) connection was not a connected socket descriptor which was opened by
   //       the interface.
-  //    b) Length was larger than fcgi_si::kMaxRecordContentByteLength.
+  //    b) std::distance(start, end) was larger than
+  //       ::a_component::fcgi::kMaxRecordContentByteLength.
   //    c) It was discovered that the server closed the connection. When
   //       connection closure was discovered, a ConnectionClosure instance was
   //       added to the micro server event queue.
   // 2) If true was returned:
   //    a) The management request was sent.
-  //    b) Data was stored to allow an appropriate response object to be
-  //       initialized upon receipt of a response. The response object will
-  //       contain a reference to a byte sequence equal the specified content
-  //       byte sequence.
+  //    b) For the copy overload: A copy of the sequence formed by [begin, end)
+  //       was stored to allow an appropriate response object to be
+  //       initialized upon receipt of a response.
   //    c) For the move overload: No copy of data was made. data is in a
   //       moved from state.
   bool SendBinaryManagementRequest(int connection,
-    FcgiType type, const std::uint8_t* byte_ptr, std::size_t length);
+    FcgiType type, const std::uint8_t* begin, const std::uint8_t* end);
   bool SendBinaryManagementRequest(int connection,
     FcgiType type, std::vector<std::uint8_t>&& data);
 
@@ -923,15 +928,16 @@ class TestFcgiClientInterface
   //       the interface.
   //    b) The names of params_map and empty values required more than one
   //       FastCGI record when they were encoded with a call to
-  //       fcgi_si::EncodeNameValuePairs.
+  //       ::a_component::fcgi::EncodeNameValuePairs.
   //    c) It was discovered that the server closed the connection. When
   //       connection closure was discovered, a ConnectionClosure instance was
   //       added to the micro server event queue.
   // 2) If true was returned:
   //    a) The management request was sent.
-  //    b) The data of the request, with name-value pair values ignored, was
-  //       stored to allow appropriate initialization of a GetValuesResult
-  //       object upon receipt of a response.
+  //    b) For the copy overload: The data of the request, with name-value pair
+  //       values ignored, was stored to allow appropriate initialization of a
+  //       GetValuesResult object upon receipt of a response. In other words,
+  //       an appropriate copy operation was performed.
   //    c) For the move overload: No copy of params_map was made. params_map
   //       is in a moved-from state.
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
