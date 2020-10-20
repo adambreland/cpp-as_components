@@ -20,6 +20,7 @@
 #include "external/a_component_testing/include/a_component_testing_utilities.h"
 #include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
+#include "external/socket_functions/include/socket_functions.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"
@@ -61,36 +62,36 @@ void GTestFatalClientInterfaceConnectionObserverCheck(
   std::size_t completed_request_count_return {};
   ASSERT_NO_THROW(completed_request_count_return =
     client_inter.CompletedRequestCount(values.connection)) << 
-    error_prefix << std::to_string(source_line);
+    error_prefix << source_line;
   EXPECT_EQ(completed_request_count_return, values.completed_request_count)
-    << error_prefix << std::to_string(source_line);
+    << error_prefix << source_line;
 
   EXPECT_EQ(client_inter.ConnectionCount(), values.connection_count) <<
-    error_prefix << std::to_string(source_line);
+    error_prefix << source_line;
 
   bool is_connected_return {};
   ASSERT_NO_THROW(is_connected_return =
     client_inter.IsConnected(values.connection)) << error_prefix <<
-    std::to_string(source_line);
+    source_line;
   EXPECT_EQ(is_connected_return, values.is_connected) << error_prefix <<
-    std::to_string(source_line);
+    source_line;
 
   std::size_t management_request_count_return {};
   ASSERT_NO_THROW(management_request_count_return =
     client_inter.ManagementRequestCount(values.connection)) << error_prefix
-    << std::to_string(source_line);
+    << source_line;
   EXPECT_EQ(management_request_count_return, values.management_request_count)
-    << error_prefix << std::to_string(source_line);
+    << error_prefix << source_line;
 
   std::size_t pending_request_count_return {};
   ASSERT_NO_THROW(pending_request_count_return =
     client_inter.PendingRequestCount(values.connection)) << error_prefix <<
-    std::to_string(source_line);
+    source_line;
   EXPECT_EQ(pending_request_count_return, values.pending_request_count) <<
-    error_prefix << std::to_string(source_line);
+    error_prefix << source_line;
 
   EXPECT_EQ(client_inter.ReadyEventCount(), values.ready_event_count) <<
-    error_prefix << std::to_string(source_line);
+    error_prefix << source_line;
 }
 
 } // namespace
@@ -246,20 +247,19 @@ namespace {
 namespace {
 
 void GTestFatalCheckGetValuesResult(const GetValuesResult* gvr_ptr,
-  int connection, const ParamsMap& request_map, const ParamsMap& response_map,
-  int source_line)
+  bool corrupt, int connection, const ParamsMap& request_map,
+  const ParamsMap& response_map, int source_line)
 {
   constexpr const char* error_prefix
     {"GTestFatalCheckGetValuesResult, source line : "};
-  ASSERT_NE(gvr_ptr, nullptr) << error_prefix << std::to_string(source_line);
-  ASSERT_FALSE(gvr_ptr->IsCorrupt()) << error_prefix <<
-    std::to_string(source_line);
+  ASSERT_NE(gvr_ptr, nullptr) << error_prefix << source_line;
+  ASSERT_EQ(gvr_ptr->IsCorrupt(), corrupt) << error_prefix << source_line;
   EXPECT_EQ((FcgiRequestIdentifier {connection, 0U}), gvr_ptr->RequestId()) <<
-    error_prefix << std::to_string(source_line);
+    error_prefix << source_line;
   EXPECT_EQ(request_map, gvr_ptr->RequestMap()) << error_prefix <<
-    std::to_string(source_line);
+    source_line;
   EXPECT_EQ(response_map, gvr_ptr->ResponseMap()) << error_prefix <<
-    std::to_string(source_line);
+    source_line;
 }
 
 constexpr const struct itimerval timeout
@@ -285,13 +285,13 @@ void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
   std::vector<FcgiRequest> accept_buffer {};
   test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
   ASSERT_NE(setitimer(ITIMER_REAL, &timeout, nullptr), -1) <<
-    std::strerror(errno) << '\n' << error_prefix << std::to_string(source_line);
+    std::strerror(errno) << '\n' << error_prefix << source_line;
   while(!(test_fcgi_client_interface_fcgi_server_accept_timeout.load()))
   {
     ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests()) <<
-      error_prefix << std::to_string(source_line);
+      error_prefix << source_line;
     EXPECT_EQ(accept_buffer.size(), 0U) <<
-      error_prefix << std::to_string(source_line);
+      error_prefix << source_line;
     accept_buffer.clear();
   }
 }
@@ -446,7 +446,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     observer_values, __LINE__);
   GetValuesResult* gvr_ptr
     {dynamic_cast<GetValuesResult*>(result_uptr.get())};
-  GTestFatalCheckGetValuesResult(gvr_ptr, local_socket, name_only_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
     map_with_values, __LINE__);
 
   // TEST CASE 2
@@ -465,7 +465,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, local_socket, name_only_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
     map_with_values, __LINE__);
 
   // TEST CASE 3
@@ -493,14 +493,14 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, local_socket, mpxs_name_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, mpxs_name_map,
     mpxs_map_with_value, __LINE__);
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   observer_values.ready_event_count        = 0U;  
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, local_socket, name_only_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
     map_with_values, __LINE__);
 
   // TEST CASE 4
@@ -552,7 +552,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
       observer_ptr->management_request_count = 0U;
       GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
         *observer_ptr, line);
-      GTestFatalCheckGetValuesResult(gvr_ptr, connection, name_only_map,
+      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, name_only_map,
         map_with_values, line);
     }
     else
@@ -560,7 +560,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
       observer_ptr->management_request_count = 0U;
       GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
         *observer_ptr, line);
-      GTestFatalCheckGetValuesResult(gvr_ptr, connection, mpxs_name_map,
+      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, mpxs_name_map,
         mpxs_map_with_value, line);
     }
   };
@@ -940,7 +940,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   new_observer.management_request_count = 0U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
     __LINE__);
-  GTestFatalCheckGetValuesResult(gvr_ptr, new_connection, mpxs_name_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map,
     mpxs_map_with_value, __LINE__);
 
   // TEST CASE 11
@@ -988,7 +988,6 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NE(new_inter_uptr.get(), nullptr);
   ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(new_inter_return),
     unix_path_2}));
-  // Close the duplicated descriptor.
   // Connect to the server.
   int third_connection {};
   ASSERT_NO_THROW(third_connection = client_inter.Connect(unix_path_2, 0U));
@@ -1019,7 +1018,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   third_observer.management_request_count = 0U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
     __LINE__);
-  GTestFatalCheckGetValuesResult(gvr_ptr, new_connection, mpxs_name_map,
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map,
     mpxs_map_with_value, __LINE__);
   // Release the completed request.
   bool release_return {false};
@@ -1031,7 +1030,89 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
 TEST_F(TestFcgiClientInterfaceManagementRequests,
   SendGetValuesRequestTestCaseSet3)
 {
-
+  // TEST CASE 12
+  // The connected descriptor of the interface is used to allow an erroneous
+  // response to be sent to the client interface.
+  struct InterfaceCreationArguments inter_args {};
+  inter_args.domain          = AF_UNIX;
+  inter_args.backlog         = 5;
+  inter_args.max_connections = 10;
+  inter_args.max_requests    = 100;
+  inter_args.app_status      = EXIT_FAILURE;
+  inter_args.unix_path       = unix_path_1;
+  // Create the server interface.
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    unix_path_1}));
+  // Create a client interface and check its initial observable state.
+  TestFcgiClientInterface client_inter {};
+  ParamsMap name_only_map
+  {
+    {FCGI_MAX_CONNS, {}},
+    {FCGI_MAX_REQS, {}},
+    {FCGI_MPXS_CONNS, {}}
+  };
+  ParamsMap map_with_values {name_only_map};
+  map_with_values[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1','0'};
+  map_with_values[FCGI_MAX_REQS]   = std::vector<std::uint8_t> {'1', '0', '0'};
+  map_with_values[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  int local_connection {};
+  ASSERT_NO_THROW(local_connection = client_inter.Connect(unix_path_1, 0U));
+  ASSERT_NE(local_connection, -1) << std::strerror(errno);
+  struct ClientInterfaceConnectionObserverTestValues observer {};
+  observer.connection               = local_connection;
+  observer.completed_request_count  = 0U;
+  observer.connection_count         = 1;
+  observer.is_connected             = true;
+  observer.management_request_count = 0U;
+  observer.pending_request_count    = 0U;
+  observer.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Allow the server to process the connection before sending a management
+  // request.
+  GTestFatalAcceptRequestsExpectNone(inter_uptr.get(), __LINE__);
+  bool send_gvr {false};
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
+    local_connection, map_with_values));
+  ASSERT_TRUE(send_gvr);
+  observer.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Construct and write an erroneous response.
+  // A header, 2 bytes for name and value lenths, and 14 bytes for the
+  // name FCGI_MAX_CONNS. This gives 24 bytes. No padding is required.
+  constexpr std::size_t buffer_length {static_cast<std::size_t>(
+    FCGI_HEADER_LEN + 2 + 14)};
+  std::uint8_t response_buffer[buffer_length] = {};
+  PopulateHeader(response_buffer, FcgiType::kFCGI_GET_VALUES_RESULT, 0U,
+    16U, 0U);
+  response_buffer[FCGI_HEADER_LEN]      = FCGI_MAX_CONNS.size();
+  response_buffer[FCGI_HEADER_LEN + 1U] = 100U; // erroneous value length
+  std::memcpy(response_buffer + FCGI_HEADER_LEN + 2U, FCGI_MAX_CONNS.data(),
+    14);
+  // Access the descriptor which must be used for the connected socket which
+  // is managed by the server.
+  ASSERT_EQ(socket_functions::SocketWrite(local_connection + 1,
+    response_buffer, buffer_length), buffer_length);
+  // Allow the client to process the response.
+  std::unique_ptr<ServerEvent> response_uptr {};
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  GetValuesResult* gvr_ptr {dynamic_cast<GetValuesResult*>(
+    response_uptr.get())};
+  ASSERT_NE(gvr_ptr, nullptr);
+  observer.management_request_count = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, true, local_connection,
+    name_only_map, ParamsMap {}, __LINE__);
 }
 
 } // namespace test
