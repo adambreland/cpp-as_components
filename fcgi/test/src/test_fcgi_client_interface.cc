@@ -730,8 +730,8 @@ void TestFcgiClientInterface::ExamineSelectReturn()
           {
             // Note that saved_errno == EINTR is not possible per the semantics
             // of SockedRead.
-            if((saved_errno == 0) || (saved_errno == EAGAIN) ||
-               (saved_errno == EWOULDBLOCK))
+            if((saved_errno == 0)      || (saved_errno == ECONNRESET)   ||
+               (saved_errno == EAGAIN) || (saved_errno == EWOULDBLOCK))
             {
               // saved_errno == 0 implies that the peer closed the connection.
               // The other cases imply that no more data can be read.
@@ -762,7 +762,8 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                     next_connection_ = local_iter;
                   }
                 }
-                if(saved_errno == 0)
+                if((saved_errno == 0) /* EOF */ || (saved_errno == ECONNRESET)
+                    /* Unexpected closure (data was sent but not read?) */)
                 {
                   // Close the connection.
                   CloseConnection(descriptor);

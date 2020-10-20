@@ -211,17 +211,18 @@ namespace {
 //
 // Test case set 2:
 // 10) To ensure that the client interface correctly handles connection
-//     closure by the client interface user in the case that FastCGI
-//     identifier values are allocated for a connection, an FCGI_GET_VALUES
-//     request is made when a pending application request is present. Then
-//     the connection is closed by the user. A new connection with the same
-//     descriptor value is made. Then a management request is made which
-//     should have a response which is distinct from the response that would
-//     have been returned for the previous request. It is verified that the
-//     correct response it returned.
+//     closure by the client interface user in the case completed and
+//     unreleased requests are present, an FCGI_GET_VALUES request is made when
+//     such an application request is present. Then the connection is closed by
+//     the user. A new connection with the same descriptor value is made. Then
+//     a management request is made which should have a response which is
+//     distinct from the response that would have been returned for the
+//     previous request. It is verified that the correct response it returned.
+// 11) As 10, but connection closure is performed by the server and detected
+//     by the client interface.
 //
 // Test case set 3:
-// 11) An FCGI_GET_VALUES request is made and a response with a FastCGI
+// 12) An FCGI_GET_VALUES request is made and a response with a FastCGI
 //     name-value pair encoding error is sent. The detection of this error and
 //     the specified behavior of the GetValuesResult instance are verified.
 //     In particular, for GetValuesResult instance gvr, gvr.IsCorrupt() == true
@@ -261,6 +262,12 @@ void GTestFatalCheckGetValuesResult(const GetValuesResult* gvr_ptr,
     std::to_string(source_line);
 }
 
+constexpr const struct itimerval timeout
+{
+  {0, 0},   // it_interval (don't repeat)
+  {0, 2000} // it_value (wait 2 ms)
+};
+
 //    The loop until AcceptRequests blocks was found to be needed as a single
 // call to AcceptRequests does not necessarily read all of the information
 // of a management request. The timer set above and its associated
@@ -272,15 +279,10 @@ void GTestFatalCheckGetValuesResult(const GetValuesResult* gvr_ptr,
 void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
   int source_line)
 {
-  constexpr const struct itimerval timeout
-  {
-    {0, 0},   // it_interval (don't repeat)
-    {0, 2000} // it_value (wait 2 ms)
-  };
   constexpr const char* error_prefix
     {"GTestFatalAcceptRequestsExpectNone, source line: "};
-  std::vector<FcgiRequest> accept_buffer {};
 
+  std::vector<FcgiRequest> accept_buffer {};
   test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
   ASSERT_NE(setitimer(ITIMER_REAL, &timeout, nullptr), -1) <<
     std::strerror(errno) << '\n' << error_prefix << std::to_string(source_line);
@@ -294,47 +296,43 @@ void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
   }
 }
 
-std::atomic<bool> hangup_received_from_parent_for_get_values_requests {false};
-
-extern "C" void SigChildHangUp(int sig)
-{
-  hangup_received_from_parent_for_get_values_requests.store(true);
-}
-
 } // namespace
 
-class SendGetValuesRequestTestCaseSet1 : public
-  TestFcgiClientInterfaceManagementRequests
-{
- protected:
-  void SetUp() override
-  {
-    TestFcgiClientInterfaceManagementRequests::SetUp();
-    testing::gtest::GTestFatalSetSignalDisposition(SIGHUP, &SigChildHangUp);
-  }
-
-  void TearDown() override
-  {
-    TestFcgiClientInterfaceManagementRequests::TearDown();
-    testing::gtest::GTestFatalRestoreSignal(SIGHUP);
-  }
-};
-
 // SendGetValuesRequest: Test case set 1.
-TEST_F(SendGetValuesRequestTestCaseSet1,
+TEST_F(TestFcgiClientInterfaceManagementRequests,
   SendGetValuesRequestTestCaseSet1)
 {
   //    Create server interfaces to respond to FCGI_GET_VALUES requests sent
   // by a client interface.
-  //    Forking seems to prevent the normal TearDown process from working.
-  // The AF_UNIX file descriptor is scheduled for release in the parent process
-  // as a result. A dummy file descriptor is used (-1).
-  resource_list_.push_back({-1, unix_path_2});
+  //    The child process is forked to house the second interface. The child
+  // is killed when the second interface is no longer needed. SIGKILL is sent
+  // by the parent. This behavior does not allow the cleanup mechanism of
+  // Google Test test fixtures to be performed. The AF_UNIX file descriptor
+  // of the child server interface is scheduled for release in the parent
+  // process as a result. A dummy file descriptor is used (-1) as the listening
+  // socket descriptor of the second server interface is closed when the child
+  // process is killed.
   pid_t fork_return {fork()};
   if(fork_return == 0) // child
   {
-    // Create a second server interface in a separate process before the
-    // "first" interface is created.
+    // Restore the default behavior for reception of SIGALRM.
+    sigset_t sigset {};
+    if(sigemptyset(&sigset) == -1)
+    {
+      _exit(EXIT_FAILURE);
+    }
+    struct sigaction sa {};
+    sa.sa_handler = SIG_DFL;
+    sa.sa_mask    = sigset;
+    sa.sa_flags   = 0;
+    if(sigaction(SIGALRM, &sa, nullptr) == -1)
+    {
+      _exit(EXIT_FAILURE);
+    }
+    // Establish a self-kill timer to ensure process termination regardless of
+    // potential errors in the parent.
+    alarm(3U);
+
     struct InterfaceCreationArguments second_inter_args {};
     second_inter_args.domain          = AF_UNIX;
     second_inter_args.backlog         = 5;
@@ -362,19 +360,17 @@ TEST_F(SendGetValuesRequestTestCaseSet1,
     std::vector<FcgiRequest> request_buffer {};
     while(true)
     {
+      // The child will block in a call to AcceptRequests before it is killed
+      // by the parent.
       request_buffer = remote_inter_uptr->AcceptRequests();
-      if(hangup_received_from_parent_for_get_values_requests.load())
-      {
-        break;
-      }
     }
-    _exit(EXIT_SUCCESS);
   }
   else if(fork_return == -1)
   {
     FAIL() << std::strerror(errno); // Can't be in the child here.
   }
   // else parent.
+  ASSERT_NO_THROW(resource_list_.push_back({-1, unix_path_2}));
 
   struct InterfaceCreationArguments inter_args {};
   inter_args.domain          = AF_UNIX;
@@ -391,7 +387,8 @@ TEST_F(SendGetValuesRequestTestCaseSet1,
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  resource_list_.push_back({std::get<1>(inter_return), unix_path_1});
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    unix_path_1}));
 
   // Create a client interface and check its initial observable state.
   TestFcgiClientInterface client_inter {};
@@ -675,19 +672,27 @@ TEST_F(SendGetValuesRequestTestCaseSet1,
     observer_values, __LINE__);
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     new_observer, __LINE__);
+  int status {0};
   int waitpid_return {waitpid(fork_return, nullptr, WNOHANG)};
-  if((waitpid_return != -1))
+  if(waitpid_return != -1)
   {
-    if(waitpid_return == 0)
+    if(waitpid_return != 0)
     {
-      if(kill(fork_return, SIGHUP) == -1)
+      ADD_FAILURE() << "The child changed state unexpectedly.";
+    }
+    // If the child hasn't changed state or has changed state but hasn't
+    // terminated, then kill the child.
+    if((waitpid_return == 0) || (!WIFEXITED(status) && !WIFSIGNALED(status)))
+    {
+      if(kill(fork_return, SIGKILL) == -1)
       {
         FAIL() << std::strerror(errno);
       }
-    }
-    else
-    {
-      ADD_FAILURE() << "The child aborted unexpectedly.";
+      // Reap the child once it terminates.
+      while(((waitpid_return = waitpid(fork_return, nullptr, 0)) == -1) &&
+            (errno == EINTR))
+        continue;
+      ASSERT_NE(waitpid_return, -1) << std::strerror(errno);
     }
   }
   else
@@ -759,7 +764,267 @@ TEST_F(SendGetValuesRequestTestCaseSet1,
 TEST_F(TestFcgiClientInterfaceManagementRequests,
   SendGetValuesRequestTestCaseSet2)
 {
+  // TEST CASE 10
+  struct InterfaceCreationArguments inter_args {};
+  inter_args.domain          = AF_UNIX;
+  inter_args.backlog         = 5;
+  inter_args.max_connections = 10;
+  inter_args.max_requests    = 100;
+  inter_args.app_status      = EXIT_FAILURE;
+  inter_args.unix_path       = unix_path_1;
+  // Create the server interface.
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    unix_path_1}));
+  // Create a client interface and check its initial observable state.
+  TestFcgiClientInterface client_inter {};
+  EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
+  EXPECT_EQ(client_inter.ConnectionCount(),       0);
+  EXPECT_EQ(client_inter.ReadyEventCount(),       0U);
+  // Create maps for testing.
+  ParamsMap name_only_map
+  {
+    {FCGI_MAX_CONNS, {}},
+    {FCGI_MAX_REQS, {}},
+    {FCGI_MPXS_CONNS, {}}
+  };
+  ParamsMap map_with_values {name_only_map};
+  map_with_values[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1', '0'};
+  map_with_values[FCGI_MAX_REQS]   = std::vector<std::uint8_t> {'1', '0', '0'};
+  map_with_values[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  ParamsMap mpxs_name_map
+  {
+    {FCGI_MPXS_CONNS, {}}
+  };
+  ParamsMap mpxs_map_with_value {mpxs_name_map};
+  mpxs_map_with_value[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  // Connect to the server.
+  int local_connection {};
+  ASSERT_NO_THROW(local_connection = client_inter.Connect(unix_path_1, 0U));
+  ASSERT_NE(local_connection, -1) << std::strerror(errno);
+  struct ClientInterfaceConnectionObserverTestValues observer {};
+  observer.connection               = local_connection;
+  observer.completed_request_count  = 0U;
+  observer.connection_count         = 1;
+  observer.is_connected             = true;
+  observer.management_request_count = 0U;
+  observer.pending_request_count    = 0U;
+  observer.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Send an application request.
+  struct FcgiRequestDataReference request_data_ref {};
+  request_data_ref.role           = FCGI_RESPONDER;
+  request_data_ref.keep_conn      = true;
+  request_data_ref.params_map_ptr = nullptr;
+  request_data_ref.stdin_begin    = nullptr;
+  request_data_ref.stdin_end      = nullptr;
+  request_data_ref.data_begin     = nullptr;
+  request_data_ref.data_end       = nullptr;
+  FcgiRequestIdentifier app_req_id {};
+  ASSERT_NO_THROW(app_req_id = client_inter.SendRequest(local_connection,
+    request_data_ref));
+  ASSERT_NE(app_req_id, FcgiRequestIdentifier {});
+  EXPECT_EQ(app_req_id.descriptor(), local_connection);
+  observer.pending_request_count  = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Allow the server to accept the request and generate an FcgiResponse object.
+  std::vector<FcgiRequest> accept_buffer {};
+  while(accept_buffer.size() == 0U)
+  {
+    ASSERT_NO_THROW(accept_buffer = inter_uptr->AcceptRequests());
+  }
+  EXPECT_EQ(accept_buffer.size(), 1U);
+  bool complete_return {false};
+  ASSERT_NO_THROW(complete_return = accept_buffer[0U].Complete(EXIT_SUCCESS));
+  ASSERT_TRUE(complete_return);
+  // Allow the client interface to process the response.
+  std::unique_ptr<ServerEvent> response_uptr {};
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  FcgiResponse* fcgi_response_ptr {dynamic_cast<FcgiResponse*>(
+      response_uptr.get())};
+  ASSERT_NE(fcgi_response_ptr, nullptr);
+  EXPECT_EQ(fcgi_response_ptr->AppStatus(), EXIT_SUCCESS);
+  EXPECT_EQ(fcgi_response_ptr->FcgiStderr().size(), 0U);
+  EXPECT_EQ(fcgi_response_ptr->FcgiStdout().size(), 0U);
+  EXPECT_EQ(fcgi_response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+  // Check each field of FcgiRequestDataReference.
+  EXPECT_EQ(fcgi_response_ptr->Request().role,
+    request_data_ref.role);
+  EXPECT_EQ(fcgi_response_ptr->Request().keep_conn,
+    request_data_ref.keep_conn);
+  EXPECT_EQ(fcgi_response_ptr->Request().params_map_ptr,
+    request_data_ref.params_map_ptr);
+  EXPECT_EQ(fcgi_response_ptr->Request().stdin_begin,
+    request_data_ref.stdin_begin);
+  EXPECT_EQ(fcgi_response_ptr->Request().stdin_end,
+    request_data_ref.stdin_end);
+  EXPECT_EQ(fcgi_response_ptr->Request().data_begin,
+    request_data_ref.data_begin);
+  EXPECT_EQ(fcgi_response_ptr->Request().data_end,
+    request_data_ref.data_end);
+  EXPECT_EQ(fcgi_response_ptr->RequestId(), app_req_id);
+  observer.completed_request_count  = 1U;
+  observer.pending_request_count    = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Send an FCGI_GET_VALUES request which will not be answered.
+  bool send_gvr {false};
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
+    local_connection, map_with_values));
+  ASSERT_TRUE(send_gvr);
+  observer.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Send an application request which will not be answered.
+  FcgiRequestIdentifier second_req_id {};
+  ASSERT_NO_THROW(second_req_id = client_inter.SendRequest(local_connection,
+    request_data_ref));
+  ASSERT_NE(second_req_id, FcgiRequestIdentifier {});
+  EXPECT_EQ(second_req_id.descriptor(), local_connection);
+  EXPECT_NE(second_req_id.Fcgi_id(), app_req_id.Fcgi_id());
+  observer.pending_request_count    = 1U;
+   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Close the connection with a completed, unreleased request.
+  bool close_return {false};
+  ASSERT_NO_THROW(close_return =
+    client_inter.CloseConnection(local_connection));
+  ASSERT_TRUE(close_return);
+  observer.connection_count         = 0U;
+  observer.is_connected             = false;
+  observer.management_request_count = 0U;
+  observer.pending_request_count    = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
+    __LINE__);
+  // Establish a new connection to the server. The same descriptor value should
+  // be reused.
+  int new_connection {};
+  ASSERT_NO_THROW(new_connection = client_inter.Connect(unix_path_1, 0U));
+  ASSERT_NE(new_connection, -1) << std::strerror(errno);
+  ASSERT_EQ(new_connection, local_connection);
+  struct ClientInterfaceConnectionObserverTestValues new_observer {};
+  new_observer.connection               = new_connection;
+  new_observer.completed_request_count  = 1U;
+  new_observer.connection_count         = 1;
+  new_observer.is_connected             = true;
+  new_observer.management_request_count = 0U;
+  new_observer.pending_request_count    = 0U;
+  new_observer.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
+    __LINE__);
+  // Send a management request which is distinct from the last one.
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(new_connection,
+    mpxs_map_with_value));
+  ASSERT_TRUE(send_gvr);
+  new_observer.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
+    __LINE__);
+  // Allow the server to process requests. An FcgiRequest object should not be
+  // generated this time.
+  GTestFatalAcceptRequestsExpectNone(inter_uptr.get(), __LINE__);
+  // Allow the client to process the response.
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  GetValuesResult* gvr_ptr
+    {dynamic_cast<GetValuesResult*>(response_uptr.get())};
+  ASSERT_NE(gvr_ptr, nullptr);
+  new_observer.management_request_count = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
+    __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, new_connection, mpxs_name_map,
+    mpxs_map_with_value, __LINE__);
 
+  // TEST CASE 11
+  // Send another application request and FCGI_GET_VALUES request which will
+  // not be answered.
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
+    new_connection, map_with_values));
+  ASSERT_TRUE(send_gvr);
+  new_observer.management_request_count = 1U;
+  FcgiRequestIdentifier third_req_id {};
+  ASSERT_NO_THROW(third_req_id = client_inter.SendRequest(new_connection,
+    request_data_ref));
+  ASSERT_NE(third_req_id, FcgiRequestIdentifier {});
+  EXPECT_EQ(third_req_id.descriptor(), new_connection);
+  EXPECT_NE(third_req_id.Fcgi_id(), app_req_id.Fcgi_id());
+  new_observer.pending_request_count    = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
+    __LINE__);
+  // Destroy the server.
+  ASSERT_NO_THROW(delete(inter_uptr.release()));
+  // Allow the client to process server destruction.
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  ConnectionClosure* connection_closure_ptr {dynamic_cast<ConnectionClosure*>(
+    response_uptr.get())};
+  ASSERT_NE(connection_closure_ptr, nullptr);
+  new_observer.connection_count         = 0U;
+  new_observer.is_connected             = false;
+  new_observer.management_request_count = 0U;
+  new_observer.pending_request_count    = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
+    __LINE__);
+  EXPECT_EQ(connection_closure_ptr->RequestId().descriptor(), new_connection);
+  // Create a new server interface.
+  // Close the listening socket descriptor of the first server.
+  close(resource_list_[0].first);
+  resource_list_[0].first = -1;
+  inter_args.unix_path = unix_path_2;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  new_inter_return {};
+  ASSERT_NO_THROW(new_inter_return =
+    GTestNonFatalCreateInterface(inter_args));
+  std::unique_ptr<FcgiServerInterface>& new_inter_uptr
+    {std::get<0>(new_inter_return)};
+  ASSERT_NE(new_inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(new_inter_return),
+    unix_path_2}));
+  // Close the duplicated descriptor.
+  // Connect to the server.
+  int third_connection {};
+  ASSERT_NO_THROW(third_connection = client_inter.Connect(unix_path_2, 0U));
+  ASSERT_NE(third_connection, -1) << std::strerror(errno);
+  ASSERT_EQ(third_connection, local_connection);
+  struct ClientInterfaceConnectionObserverTestValues third_observer {};
+  third_observer.connection               = third_connection;
+  third_observer.completed_request_count  = 1U;
+  third_observer.connection_count         = 1U;
+  third_observer.is_connected             = true;
+  third_observer.management_request_count = 0U;
+  third_observer.pending_request_count    = 0U;
+  third_observer.ready_event_count        = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
+    __LINE__);
+  // Send a new management request and allow the interfaces to act.
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(third_connection,
+    mpxs_map_with_value));
+  ASSERT_TRUE(send_gvr);
+  third_observer.management_request_count = 1U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
+    __LINE__);
+  GTestFatalAcceptRequestsExpectNone(new_inter_uptr.get(), __LINE__);
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  gvr_ptr = dynamic_cast<GetValuesResult*>(response_uptr.get());
+  ASSERT_NE(gvr_ptr, nullptr);
+  third_observer.management_request_count = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
+    __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, new_connection, mpxs_name_map,
+    mpxs_map_with_value, __LINE__);
+  // Release the completed request.
+  bool release_return {false};
+  ASSERT_NO_THROW(release_return = client_inter.ReleaseId(app_req_id));
+  EXPECT_TRUE(release_return);
 }
 
 // SendGetValuesRequest: Test case set 3

@@ -711,6 +711,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
           throw std::logic_error {"A connection could not be removed because "
             "a write mutex was erroneously held."};
       }
+      application_closure_request_set_.clear();
     }
     catch(...)
     {
