@@ -206,7 +206,7 @@ class FcgiRequest {
   // Effects:
   // 1) If true was returned.
   //    a) The byte sequence given by [begin_iter, end_iter) was sent to the 
-  //       client.
+  //       client. (No FastCGI records are sent if begin_iter == end_iter.)
   // 2) If false was returned.
   //    a) If the request had not been previously completed:
   //       1) The connection was found to be closed or the connection was found

@@ -301,10 +301,10 @@ class GetValuesResult : public ServerEvent
 //       was sent.
 //    c) The content length is not equal to its specified length, eight bytes.
 //    d) The management request at the beginning of the management request
-//       queue does is an FCGI_GET_VALUES request. All FastCGI application
-//       servers must accept FCGI_GET_VALUES requests, and FCGI_GET_VALUES
-//       is the only management request type specified in the first version of
-//       the FastCGI protocol.
+//       queue is an FCGI_GET_VALUES request. All FastCGI application servers
+//       must accept FCGI_GET_VALUES requests. (FCGI_GET_VALUES is the only
+//       management request type specified in the first version of the FastCGI
+//       protocol.)
 //    Any other record type:
 //    a) All other types are rejected as they should not be sent to a FastCGI
 //       client server.
@@ -606,9 +606,9 @@ class TestFcgiClientInterface
   // connection and v identifies a completed and unreleased request.
   std::size_t CompletedRequestCount(int connection) const;
 
-  // Attempts to connect to an IPv4, IPv6, or UNIX domain stream socket as
+  // Attempts to connect to an IPv4, IPv6, or UNIX domain listening socket as
   // determined by the format of address. For UNIX domain addresses, port is
-  // disregarded and the current working directory is used to interpret
+  // disregarded, and the current working directory is used to interpret
   // relative file paths. If connection succeeded, the file descriptor of the
   // local connected socket is returned. If connection failed, -1 is returned
   // and errno is set appropriately.
@@ -617,7 +617,7 @@ class TestFcgiClientInterface
   // address: A pointer to a null-terminated string. This string is interpreted
   //          as either an IPv4 address or an IPv6 address. If neither format
   //          applies, a UNIX domain address is assumed. A character string
-  //          length limit including the terminating null byte of 92 bytes is
+  //          length limit, including the terminating null byte, of 92 bytes is
   //          enforced.
   // port:    The port to be used with an IPv4 or IPv6 address.
   //          The port value must be in NETWORK byte order.
@@ -958,7 +958,7 @@ class TestFcgiClientInterface
   //
   // Preconditions:
   // 1) [request.stdin_begin, request.stdin_end) and
-  //    [request.data_begin, request.data end) are valid ranges.
+  //    [request.data_begin, request.data_end) are valid ranges.
   // 
   // Caller responsibilities:
   // 1) A copy of request is made and stored within the interface. The user
@@ -997,7 +997,7 @@ class TestFcgiClientInterface
   //       over connection.
   //    d) id is allocated and the request is pending.
   //    e) A copy of request was made and stored internally for later use
-  //       in the construction of a FcgiResponse instance upon the receipt of
+  //       in the construction of an FcgiResponse instance upon the receipt of
   //       the response to the request.
   FcgiRequestIdentifier SendRequest(int connection,
     const FcgiRequestDataReference& request);

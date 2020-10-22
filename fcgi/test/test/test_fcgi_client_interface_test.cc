@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <map>
@@ -31,14 +32,6 @@ namespace test {
 namespace test {
 
 namespace {
-
-std::atomic<bool> test_fcgi_client_interface_fcgi_server_accept_timeout
-  {false};
-
-extern "C" void SigAlrmHandler(int sig)
-{
-  test_fcgi_client_interface_fcgi_server_accept_timeout.store(true);
-}
 
 struct ClientInterfaceConnectionObserverTestValues
 {
@@ -94,10 +87,16 @@ void GTestFatalClientInterfaceConnectionObserverCheck(
     error_prefix << source_line;
 }
 
-} // namespace
+std::atomic<bool> test_fcgi_client_interface_fcgi_server_accept_timeout
+  {false};
+
+extern "C" void SigAlrmHandler(int sig)
+{
+  test_fcgi_client_interface_fcgi_server_accept_timeout.store(true);
+}
 
 // A Google Test test fixture.
-class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
+class TestFcgiClientInterfaceTestFixture : public ::testing::Test
 {
  protected:
   void SetUp() override
@@ -130,14 +129,294 @@ class TestFcgiClientInterfaceManagementRequests : public ::testing::Test
   testing::FileDescriptorLeakChecker fdlc_ {};
 };
 
-namespace {
-  // AF_UNIX files cannot be created in the Bazel temporary file directory
-  // because its name is too long.
-  const char* unix_path_1 {"/tmp/TestFcgiClientInterfaceManagementRequests1"};
-  const char* unix_path_2 {"/tmp/TestFcgiClientInterfaceManagementRequests2"};
+class TestFcgiClientInterfaceTestFixtureWithMaps : public
+  TestFcgiClientInterfaceTestFixture
+{
+ protected:
+  void SetUp() override
+  {
+    TestFcgiClientInterfaceTestFixture::SetUp();
+    // Add values to the name-only map copies.
+    map_with_values_[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1', '0'};
+    map_with_values_[FCGI_MAX_REQS]   = std::vector<std::uint8_t>
+      {'1', '0', '0'};
+    map_with_values_[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+    mpxs_map_with_value_[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
+  }
+
+  // Create maps for testing.
+  ParamsMap name_only_map_
+  {
+    {FCGI_MAX_CONNS, {}},
+    {FCGI_MAX_REQS, {}},
+    {FCGI_MPXS_CONNS, {}}
+  };
+  ParamsMap map_with_values_ {name_only_map_};
+
+  ParamsMap mpxs_name_map_
+  {
+    {FCGI_MPXS_CONNS, {}}
+  };
+  ParamsMap mpxs_map_with_value_ {mpxs_name_map_};
+};
+
+// AF_UNIX files cannot be created in the Bazel temporary file directory
+// because its name is too long.
+const char* unix_path_1 {"/tmp/TestFcgiClientInterfaceManagementRequests1"};
+const char* unix_path_2 {"/tmp/TestFcgiClientInterfaceManagementRequests2"};
+
+void GTestFatalCheckGetValuesResult(const GetValuesResult* gvr_ptr,
+  bool corrupt, int connection, const ParamsMap& request_map,
+  const ParamsMap& response_map, int source_line)
+{
+  constexpr const char* error_prefix
+    {"GTestFatalCheckGetValuesResult, source line : "};
+  ASSERT_NE(gvr_ptr, nullptr) << error_prefix << source_line;
+  ASSERT_EQ(gvr_ptr->IsCorrupt(), corrupt) << error_prefix << source_line;
+  EXPECT_EQ((FcgiRequestIdentifier {connection, 0U}), gvr_ptr->RequestId()) <<
+    error_prefix << source_line;
+  EXPECT_EQ(request_map, gvr_ptr->RequestMap()) << error_prefix <<
+    source_line;
+  EXPECT_EQ(response_map, gvr_ptr->ResponseMap()) << error_prefix <<
+    source_line;
+}
+
+constexpr const struct itimerval timeout
+{
+  {0, 0},   // it_interval (don't repeat)
+  {0, 2000} // it_value (wait 2 ms)
+};
+
+//    The loop until AcceptRequests blocks was found to be needed as a single
+// call to AcceptRequests does not necessarily read all of the information
+// of a management request. The timer set above and its associated
+// SIGALRM signal are used to break out of the blocked AcceptRequests call
+// and the loop.
+//    Note that this implementation also tests the specified behavior of
+// AcceptRequests when it has blocked in an I/O multiplexing call and the
+// call fails with errno == EINTR.
+void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
+  int source_line)
+{
+  constexpr const char* error_prefix
+    {"GTestFatalAcceptRequestsExpectNone, source line: "};
+
+  std::vector<FcgiRequest> accept_buffer {};
+  test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
+  ASSERT_NE(setitimer(ITIMER_REAL, &timeout, nullptr), -1) <<
+    std::strerror(errno) << '\n' << error_prefix << source_line;
+  while(!(test_fcgi_client_interface_fcgi_server_accept_timeout.load()))
+  {
+    ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests()) <<
+      error_prefix << source_line;
+    EXPECT_EQ(accept_buffer.size(), 0U) <<
+      error_prefix << source_line;
+    accept_buffer.clear();
+  }
+}
+
+void ChildServerAlrmRestoreAndSelfKillSet()
+{
+  // Restore the default behavior for reception of SIGALRM for the self-kill
+  // timer below.
+  sigset_t sigset {};
+  if(sigemptyset(&sigset) == -1)
+  {
+    _exit(EXIT_FAILURE);
+  }
+  struct sigaction sa {};
+  sa.sa_handler = SIG_DFL;
+  sa.sa_mask    = sigset;
+  sa.sa_flags   = 0;
+  if(sigaction(SIGALRM, &sa, nullptr) == -1)
+  {
+    _exit(EXIT_FAILURE);
+  }
+  // Establish a self-kill timer to ensure process termination regardless of
+  // potential errors in the parent.
+  alarm(3U);
+}
+
 } // namespace
 
-// Management request tests
+// Connect
+// Examined properties:
+// 1) Appropriate updates to observable state.
+// 2) Proper functioning of the interface for each of AF_INET, AF_INET6, and
+//    AF_UNIX. A test for proper functioning for a given domain will examine:
+//    a) The ability to connect to the domain.
+//    b) The ability to connect more than once to a given server on the domain.
+//    c) The ability to perform each of the other major interface actions:
+//       1) Transmission of an FCGI_GET_VALUES request through invocation of
+//          SendGetValuesRequest.
+//       2) Transmission of an unknown management request through invocation of
+//          SendBinaryManagementRequest.
+//       3) Transmission of several non-empty application requests through
+//          invocation of SendRequest.
+//       4) Closure of the connection through invocation of CloseConnection.
+// 3) The ability to have multiple, simultaneous connections and simultaneous
+//    connections to different domains. The properties described above can be
+//    tested on a sigle interface with simultaneous connections to each domain
+//    to test these abilities.
+// 4) The ability to connect correctly when a previous connection to a server
+//    has been made.
+// 5) The detection of connection closure by a server for each domain.
+// 6) Non-blocking status of returned file descriptors.
+// 7) For internet sockets, proper handling of connection interruption by
+//    signal receipt (situations which cause blocking system calls to fail with
+//    errno == EINTR).
+// 8) Failure cases: an attempt to connect to an address for which there is no
+//    listening server.
+//    a) For AF_UNIX, a special case is the existence of a file with the
+//       connection file path which is not associated with a listening server.
+//
+// Test cases:
+// 1) A server for each of the three supported domains is created in a separate
+//    process. These servers call AcceptRequests in a loop. Connections are
+//    made to these servers from a single client interface. Properties 1 to 6
+//    are tested.
+// 2) For each of AF_INET and AF_INET6, a server is created in a separate
+//    process. The servers wait to begin processing requests until they receive
+//    a signal to do so. A process which holds a client interface sets a timer
+//    to interrupt a call to Connect with a signal. It also sets a timer to
+//    allow a server to begin processing requests. Proper behavior of the
+//    Connect call regarding signal receipt is checked.
+// 3) Failure as described above for each of the three domains is checked.
+//    For AF_UNIX, failure is checked when the connection path is present and
+//    absent in the file system.
+
+TEST_F(TestFcgiClientInterfaceTestFixtureWithMaps, ConnectCase1)
+{
+  // All application requests will have shared FCGI_PARAMS values.
+  ParamsMap shared_params
+  {
+    {
+      {'A'}, {'1'}
+    },
+    {
+      {'B'}, {'2'}
+    },
+    {
+      {'C'}, {'3'}
+    }
+  };
+  constexpr int domain_count {3};
+  constexpr int internet_domain_count {domain_count - 1};
+  constexpr int domain_array[domain_count] = {AF_INET, AF_INET6, AF_UNIX};
+  int pipes[internet_domain_count][2] = {}; // AF_UNIX doesn't need a pipe.
+  for(int i {0}; i != internet_domain_count; ++i)
+  {
+    ASSERT_NE(pipe(pipes[i]), -1) << std::strerror(errno);
+  }
+  pid_t child_id_array[domain_count] = {};
+  int server_index {0};
+  for(/*no-op*/; server_index != domain_count; ++server_index)
+  {
+    child_id_array[server_index] = fork();
+    if(-1 == child_id_array[server_index])
+    {
+      // In parent and an error occurred.
+      FAIL() << std::strerror(errno);
+    }
+    else if(0 == child_id_array[server_index])
+    {
+      // In child. Break to child server logic.
+      break;
+    }
+    // else, in parent. Loop.
+  }
+  if(server_index < domain_count) // A child.
+  {
+    try
+    {
+      ChildServerAlrmRestoreAndSelfKillSet();
+
+      struct InterfaceCreationArguments inter_args {};
+      inter_args.domain          = domain_array[server_index];
+      inter_args.backlog         = 5;
+      inter_args.max_connections = 10;
+      inter_args.max_requests    = 100;
+      inter_args.app_status      = EXIT_FAILURE;
+      inter_args.unix_path       = unix_path_1; // Ignored for internet servers.
+      std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+      inter_return {GTestNonFatalCreateInterface(inter_args)};
+      std::unique_ptr<FcgiServerInterface> inter_uptr
+        {std::move(std::get<0>(inter_return))};
+      if(inter_uptr.get() == nullptr)
+      {
+        _exit(EXIT_FAILURE);
+      }
+
+      // Internet servers should write the ephemeral port back to the parent
+      // process.
+      if(server_index < internet_domain_count)
+      {
+        // The port is in network byte order. We can byte-serialize it directly.
+        std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
+          &std::get<2>(inter_return)))};
+        if(socket_functions::SocketWrite(pipes[server_index][1], port_ptr,
+          sizeof(in_port_t)) < sizeof(in_port_t))
+        {
+          _exit(EXIT_FAILURE);
+        }
+      }
+      // Close all of the pipes.
+      for(int i {0}; i != internet_domain_count; ++i)
+      {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+      }
+      std::vector<FcgiRequest> requests {};
+      while(true)
+      {
+        // A server will block in a call to AcceptRequests before it is killed.
+        requests = inter_uptr->AcceptRequests();
+        for(std::vector<FcgiRequest>::iterator iter {requests.begin()};
+          iter != requests.end(); ++iter)
+        {
+          if(iter->get_environment_map() != shared_params)
+          {
+            _exit(EXIT_FAILURE);
+          }
+          const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
+          const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
+          int write_count {0};
+          write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
+          write_count += iter->WriteError(data_ref.begin(), data_ref.end());
+          write_count += iter->Complete(EXIT_SUCCESS);
+          if(write_count < 3)
+          {
+            _exit(EXIT_FAILURE);
+          }
+        }
+      }
+    }
+    catch(...)
+    {
+      _exit(EXIT_FAILURE);
+    }
+  }
+  // else, in parent.
+  ASSERT_NO_THROW(resource_list_.push_back({-1, unix_path_1}));
+  // Wait to receive port values from the internet servers.
+  in_port_t ports[internet_domain_count] = {};
+  for(int i {0}; i < internet_domain_count; ++i)
+  {
+    close(pipes[i][1]);
+    ASSERT_EQ(
+      socket_functions::SocketRead(
+        pipes[i][0],
+        static_cast<std::uint8_t*>(static_cast<void*>(&ports[i])),
+        sizeof(in_port_t)
+      ),
+      sizeof(in_port_t)
+    ) << std::strerror(errno);
+    close(pipes[i][0]);
+  }
+  // Connect to all of the servers twice.
+}
+
+// Management request testing discussion:
 //  1) Management requests and responses each use a single FastCGI record.
 //     Because of this, tests which examine correct interface behavior when
 //     a response is received over multiple records are not relevant.
@@ -174,7 +453,38 @@ namespace {
 
 // SendBinaryManagementRequest
 // Test cases:
-//
+// 1) A request of each of the following kinds is made with the copy overload:
+//    a) An FCGI_GET_VALUES request.
+//    b) A request with a type which is not FCGI_GET_VALUES.
+//    The FCGI_GET_VALUES request should be recognized as such even though it
+//    was not made with SendGetValuesRequest. The unknown request should cause
+//    an FCGI_UNKNOWN_TYPE request to be sent.
+// 2) As 1, but the move overload is used.
+// 3)    An FCGI_UNKNOWN_TYPE record is received in response to a management
+//    request with an unknown type sent by SendBinaryManagementRequest. The
+//    record is malformed. It is recognized as such and an InvalidRecord
+//    instance is generated upon its receipt.
+//       Two kinds of malformations may be distinguished which are specific to
+//    FCGI_UNKNOWN_TYPE records:
+//    a) The FCGI_UNKNOWN_TYPE record has no content (content length is zero).
+//    b) The FCGI_UNKNOWN_TYPE record has a content length which is non-zero
+//       and not equal to 8.
+// 4) (Failure case) A call is made with a value for connection which does not
+//    refer to a connection which is managed by the interface.
+// 5) (Failure case) A call is made with a binary sequence length which is too
+//    long to be sent in a single FastCGI record.
+// 6) (Failure case) A call is made when the server has closed the connection.
+//    Detection of closure and enqueuement of an appropriate ConnectionClosure
+//    instance is verified.
+// Note: Tests which are related to general management request handling, such
+// as correct management queue use and correct management request queue update
+// upon connection closure, are not tested here. Such tests are present for
+// SendGetValuesResult. Similar tests for SendBinaryManagementRequest may be
+// implemented at a later time if it is deemed worthwhile.
+TEST_F(TestFcgiClientInterfaceTestFixture, SendBinaryManagementRequest)
+{
+  
+}
 
 // SendGetValuesRequest
 // Test cases:
@@ -229,77 +539,27 @@ namespace {
 //     In particular, for GetValuesResult instance gvr, gvr.IsCorrupt() == true
 //     and gvr.ResponseMap() == ParamsMap {}.
 //
-// Modules which testing depends on:
-//  1) Receipt of and response to FCGI_GET_VALUES requests by
-//     fcgi_si::FcgiServerInterface.
-//  2) The immediate detection of peer closure by the implementation of
-//     local (AF_UNIX) sockets. (The Linux internet socket implementations do
-//     not currently (October 2020) possess this property.)
-//  3) The immediate success or failure of connection to a listening socket
+// Modules and features which testing depends on:
+//  1) The immediate detection of peer closure by the implementation of
+//     local (AF_UNIX) sockets.
+//  2) The immediate success or failure of connection to a listening socket
 //     by the implementation of local (AF_UNIX) sockets. In particular, that a
 //     call to accept in the server process is not required for the call of
 //     connect by the client to return. This allows testing to be performed in
 //     a single process without (inappropriately) forcing the implementation
 //     of Connect to make the would-be connected socket non-blocking before the
 //     connection is attempted.
+//  Server interface behavior:
+//  3) Receipt of and response to FCGI_GET_VALUES requests by
+//     ::a_component::fcgi::FcgiServerInterface.
+//  4) FcgiRequest object production through calls to
+//     a_component::fcgi::FcgiServerInterface::AcceptRequests
+//     and correct transmission of terminal stream records and an
+//     FCGI_END_REQUEST record by a_component::fcgi::FcgiRequest::Complete.
 // Other modules whose testing depends on this module: none.
 
-namespace {
-
-void GTestFatalCheckGetValuesResult(const GetValuesResult* gvr_ptr,
-  bool corrupt, int connection, const ParamsMap& request_map,
-  const ParamsMap& response_map, int source_line)
-{
-  constexpr const char* error_prefix
-    {"GTestFatalCheckGetValuesResult, source line : "};
-  ASSERT_NE(gvr_ptr, nullptr) << error_prefix << source_line;
-  ASSERT_EQ(gvr_ptr->IsCorrupt(), corrupt) << error_prefix << source_line;
-  EXPECT_EQ((FcgiRequestIdentifier {connection, 0U}), gvr_ptr->RequestId()) <<
-    error_prefix << source_line;
-  EXPECT_EQ(request_map, gvr_ptr->RequestMap()) << error_prefix <<
-    source_line;
-  EXPECT_EQ(response_map, gvr_ptr->ResponseMap()) << error_prefix <<
-    source_line;
-}
-
-constexpr const struct itimerval timeout
-{
-  {0, 0},   // it_interval (don't repeat)
-  {0, 2000} // it_value (wait 2 ms)
-};
-
-//    The loop until AcceptRequests blocks was found to be needed as a single
-// call to AcceptRequests does not necessarily read all of the information
-// of a management request. The timer set above and its associated
-// SIGALRM signal are used to break out of the blocked AcceptRequests call
-// and the loop.
-//    Note that this implementation also tests the specified behavior of
-// AcceptRequests when it has blocked in an I/O multiplexing call and the
-// call fails with errno == EINTR.
-void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
-  int source_line)
-{
-  constexpr const char* error_prefix
-    {"GTestFatalAcceptRequestsExpectNone, source line: "};
-
-  std::vector<FcgiRequest> accept_buffer {};
-  test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
-  ASSERT_NE(setitimer(ITIMER_REAL, &timeout, nullptr), -1) <<
-    std::strerror(errno) << '\n' << error_prefix << source_line;
-  while(!(test_fcgi_client_interface_fcgi_server_accept_timeout.load()))
-  {
-    ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests()) <<
-      error_prefix << source_line;
-    EXPECT_EQ(accept_buffer.size(), 0U) <<
-      error_prefix << source_line;
-    accept_buffer.clear();
-  }
-}
-
-} // namespace
-
 // SendGetValuesRequest: Test case set 1.
-TEST_F(TestFcgiClientInterfaceManagementRequests,
+TEST_F(TestFcgiClientInterfaceTestFixtureWithMaps,
   SendGetValuesRequestTestCaseSet1)
 {
   //    Create server interfaces to respond to FCGI_GET_VALUES requests sent
@@ -315,23 +575,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   pid_t fork_return {fork()};
   if(fork_return == 0) // child
   {
-    // Restore the default behavior for reception of SIGALRM.
-    sigset_t sigset {};
-    if(sigemptyset(&sigset) == -1)
-    {
-      _exit(EXIT_FAILURE);
-    }
-    struct sigaction sa {};
-    sa.sa_handler = SIG_DFL;
-    sa.sa_mask    = sigset;
-    sa.sa_flags   = 0;
-    if(sigaction(SIGALRM, &sa, nullptr) == -1)
-    {
-      _exit(EXIT_FAILURE);
-    }
-    // Establish a self-kill timer to ensure process termination regardless of
-    // potential errors in the parent.
-    alarm(3U);
+    ChildServerAlrmRestoreAndSelfKillSet();
 
     struct InterfaceCreationArguments second_inter_args {};
     second_inter_args.domain          = AF_UNIX;
@@ -365,9 +609,9 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
       request_buffer = remote_inter_uptr->AcceptRequests();
     }
   }
-  else if(fork_return == -1)
+  else if(fork_return == -1) // Can't be in the child here.
   {
-    FAIL() << std::strerror(errno); // Can't be in the child here.
+    FAIL() << std::strerror(errno);
   }
   // else parent.
   ASSERT_NO_THROW(resource_list_.push_back({-1, unix_path_2}));
@@ -396,24 +640,6 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   EXPECT_EQ(client_inter.ConnectionCount(),       0);
   EXPECT_EQ(client_inter.ReadyEventCount(),       0U);
 
-  // Create maps for testing.
-  ParamsMap name_only_map
-  {
-    {FCGI_MAX_CONNS, {}},
-    {FCGI_MAX_REQS, {}},
-    {FCGI_MPXS_CONNS, {}}
-  };
-  ParamsMap map_with_values {name_only_map};
-  map_with_values[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1', '0'};
-  map_with_values[FCGI_MAX_REQS]   = std::vector<std::uint8_t> {'1', '0', '0'};
-  map_with_values[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
-  ParamsMap mpxs_name_map
-  {
-    {FCGI_MPXS_CONNS, {}}
-  };
-  ParamsMap mpxs_map_with_value {mpxs_name_map};
-  mpxs_map_with_value[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
-
   // TEST CASE 1
   // Test the copy overload first.
   int local_socket {};
@@ -432,7 +658,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     observer_values, __LINE__);
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr =
-    client_inter.SendGetValuesRequest(local_socket, map_with_values));
+    client_inter.SendGetValuesRequest(local_socket, map_with_values_));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
   observer_values.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -446,12 +672,12 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     observer_values, __LINE__);
   GetValuesResult* gvr_ptr
     {dynamic_cast<GetValuesResult*>(result_uptr.get())};
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
-    map_with_values, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map_,
+    map_with_values_, __LINE__);
 
   // TEST CASE 2
   // Start testing the move overload.
-  ParamsMap value_map_copy {map_with_values};
+  ParamsMap value_map_copy {map_with_values_};
   ASSERT_NO_THROW(send_gvr =
     client_inter.SendGetValuesRequest(local_socket, std::move(value_map_copy)));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
@@ -465,16 +691,16 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
-    map_with_values, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map_,
+    map_with_values_, __LINE__);
 
   // TEST CASE 3
   // Send two requests.
   ASSERT_NO_THROW(send_gvr =
-    client_inter.SendGetValuesRequest(local_socket, mpxs_map_with_value));
+    client_inter.SendGetValuesRequest(local_socket, mpxs_map_with_value_));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
   ASSERT_NO_THROW(send_gvr =
-    client_inter.SendGetValuesRequest(local_socket, map_with_values));
+    client_inter.SendGetValuesRequest(local_socket, map_with_values_));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
   observer_values.management_request_count = 2U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -493,15 +719,15 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, mpxs_name_map,
-    mpxs_map_with_value, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, mpxs_name_map_,
+    mpxs_map_with_value_, __LINE__);
   ASSERT_NO_THROW(result_uptr = client_inter.RetrieveServerEvent());
   observer_values.ready_event_count        = 0U;  
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   gvr_ptr = dynamic_cast<GetValuesResult*>(result_uptr.get());
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map,
-    map_with_values, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, local_socket, name_only_map_,
+    map_with_values_, __LINE__);
 
   // TEST CASE 4
   int second_local_socket {};
@@ -521,13 +747,13 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     second_observer, __LINE__);
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
-    map_with_values));
+    map_with_values_));
   ASSERT_TRUE(send_gvr);
   observer_values.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
-    second_local_socket, mpxs_map_with_value));
+    second_local_socket, mpxs_map_with_value_));
   ASSERT_TRUE(send_gvr);
   second_observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -552,16 +778,16 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
       observer_ptr->management_request_count = 0U;
       GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
         *observer_ptr, line);
-      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, name_only_map,
-        map_with_values, line);
+      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, name_only_map_,
+        map_with_values_, line);
     }
     else
     {
       observer_ptr->management_request_count = 0U;
       GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
         *observer_ptr, line);
-      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, mpxs_name_map,
-        mpxs_map_with_value, line);
+      GTestFatalCheckGetValuesResult(gvr_ptr, false, connection, mpxs_name_map_,
+        mpxs_map_with_value_, line);
     }
   };
   if(first_is_first_local)
@@ -587,7 +813,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   
   // TEST CASE 5
   ASSERT_NO_THROW(send_gvr =
-    client_inter.SendGetValuesRequest(second_local_socket, map_with_values));
+    client_inter.SendGetValuesRequest(second_local_socket, map_with_values_));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
   second_observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -621,13 +847,13 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   new_observer.pending_request_count    = 0U;
   new_observer.ready_event_count        = 0U;
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
-    map_with_values));
+    map_with_values_));
   ASSERT_TRUE(send_gvr);
   observer_values.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(new_connection,
-    mpxs_map_with_value));
+    mpxs_map_with_value_));
   ASSERT_TRUE(send_gvr);
   new_observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -704,7 +930,15 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   // Check for a return of false when a call is made for a non-existent
   // connection.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(1000,
-    name_only_map));
+    name_only_map_));
+  EXPECT_FALSE(send_gvr);
+  // Check for constancy.
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values, __LINE__);
+  // Test the move overload.
+  ParamsMap name_only_copy {name_only_map_};
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(1000,
+    std::move(name_only_copy)));
   EXPECT_FALSE(send_gvr);
   // Check for constancy.
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -717,6 +951,13 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     large_name(kMaxRecordContentByteLength + 1, 1U);
   std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
     large_name_map {{std::move(large_name), {1U}}};
+  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
+    large_name_map));
+  EXPECT_FALSE(send_gvr);
+  // Check for constancy.
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
+    observer_values, __LINE__);
+  // Test the move overload.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
     std::move(large_name_map)));
   EXPECT_FALSE(send_gvr);
@@ -732,7 +973,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   //    Before destroying the interface, make a request to allow a check that
   // the count is cleared upon the detection of destruction to be performed.
   ASSERT_NO_THROW(send_gvr =
-    client_inter.SendGetValuesRequest(local_socket, map_with_values));
+    client_inter.SendGetValuesRequest(local_socket, map_with_values_));
   ASSERT_TRUE(send_gvr) << std::strerror(errno);
   observer_values.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
@@ -742,7 +983,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter,
     observer_values, __LINE__);
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(local_socket,
-    name_only_map));
+    name_only_map_));
   EXPECT_FALSE(send_gvr);
   observer_values.connection_count         = 0;
   observer_values.is_connected             = false;
@@ -761,7 +1002,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
 }
 
 // SendGetValuesRequest: Test case set 2
-TEST_F(TestFcgiClientInterfaceManagementRequests,
+TEST_F(TestFcgiClientInterfaceTestFixtureWithMaps,
   SendGetValuesRequestTestCaseSet2)
 {
   // TEST CASE 10
@@ -787,23 +1028,6 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
   EXPECT_EQ(client_inter.ConnectionCount(),       0);
   EXPECT_EQ(client_inter.ReadyEventCount(),       0U);
-  // Create maps for testing.
-  ParamsMap name_only_map
-  {
-    {FCGI_MAX_CONNS, {}},
-    {FCGI_MAX_REQS, {}},
-    {FCGI_MPXS_CONNS, {}}
-  };
-  ParamsMap map_with_values {name_only_map};
-  map_with_values[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1', '0'};
-  map_with_values[FCGI_MAX_REQS]   = std::vector<std::uint8_t> {'1', '0', '0'};
-  map_with_values[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
-  ParamsMap mpxs_name_map
-  {
-    {FCGI_MPXS_CONNS, {}}
-  };
-  ParamsMap mpxs_map_with_value {mpxs_name_map};
-  mpxs_map_with_value[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
   // Connect to the server.
   int local_connection {};
   ASSERT_NO_THROW(local_connection = client_inter.Connect(unix_path_1, 0U));
@@ -879,7 +1103,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   // Send an FCGI_GET_VALUES request which will not be answered.
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
-    local_connection, map_with_values));
+    local_connection, map_with_values_));
   ASSERT_TRUE(send_gvr);
   observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
@@ -923,7 +1147,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     __LINE__);
   // Send a management request which is distinct from the last one.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(new_connection,
-    mpxs_map_with_value));
+    mpxs_map_with_value_));
   ASSERT_TRUE(send_gvr);
   new_observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
@@ -940,14 +1164,14 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   new_observer.management_request_count = 0U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, new_observer,
     __LINE__);
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map,
-    mpxs_map_with_value, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map_,
+    mpxs_map_with_value_, __LINE__);
 
   // TEST CASE 11
   // Send another application request and FCGI_GET_VALUES request which will
   // not be answered.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
-    new_connection, map_with_values));
+    new_connection, map_with_values_));
   ASSERT_TRUE(send_gvr);
   new_observer.management_request_count = 1U;
   FcgiRequestIdentifier third_req_id {};
@@ -1005,7 +1229,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
     __LINE__);
   // Send a new management request and allow the interfaces to act.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(third_connection,
-    mpxs_map_with_value));
+    mpxs_map_with_value_));
   ASSERT_TRUE(send_gvr);
   third_observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
@@ -1018,16 +1242,19 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   third_observer.management_request_count = 0U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
     __LINE__);
-  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map,
-    mpxs_map_with_value, __LINE__);
+  GTestFatalCheckGetValuesResult(gvr_ptr, false, new_connection, mpxs_name_map_,
+    mpxs_map_with_value_, __LINE__);
   // Release the completed request.
   bool release_return {false};
   ASSERT_NO_THROW(release_return = client_inter.ReleaseId(app_req_id));
   EXPECT_TRUE(release_return);
+  third_observer.completed_request_count  = 0U;
+  GTestFatalClientInterfaceConnectionObserverCheck(client_inter, third_observer,
+    __LINE__);
 }
 
 // SendGetValuesRequest: Test case set 3
-TEST_F(TestFcgiClientInterfaceManagementRequests,
+TEST_F(TestFcgiClientInterfaceTestFixtureWithMaps,
   SendGetValuesRequestTestCaseSet3)
 {
   // TEST CASE 12
@@ -1050,18 +1277,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   ASSERT_NE(inter_uptr.get(), nullptr);
   ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
     unix_path_1}));
-  // Create a client interface and check its initial observable state.
   TestFcgiClientInterface client_inter {};
-  ParamsMap name_only_map
-  {
-    {FCGI_MAX_CONNS, {}},
-    {FCGI_MAX_REQS, {}},
-    {FCGI_MPXS_CONNS, {}}
-  };
-  ParamsMap map_with_values {name_only_map};
-  map_with_values[FCGI_MAX_CONNS]  = std::vector<std::uint8_t> {'1','0'};
-  map_with_values[FCGI_MAX_REQS]   = std::vector<std::uint8_t> {'1', '0', '0'};
-  map_with_values[FCGI_MPXS_CONNS] = std::vector<std::uint8_t> {'1'};
   int local_connection {};
   ASSERT_NO_THROW(local_connection = client_inter.Connect(unix_path_1, 0U));
   ASSERT_NE(local_connection, -1) << std::strerror(errno);
@@ -1080,7 +1296,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalAcceptRequestsExpectNone(inter_uptr.get(), __LINE__);
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
-    local_connection, map_with_values));
+    local_connection, map_with_values_));
   ASSERT_TRUE(send_gvr);
   observer.management_request_count = 1U;
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
@@ -1112,7 +1328,7 @@ TEST_F(TestFcgiClientInterfaceManagementRequests,
   GTestFatalClientInterfaceConnectionObserverCheck(client_inter, observer,
     __LINE__);
   GTestFatalCheckGetValuesResult(gvr_ptr, true, local_connection,
-    name_only_map, ParamsMap {}, __LINE__);
+    name_only_map_, ParamsMap {}, __LINE__);
 }
 
 } // namespace test
