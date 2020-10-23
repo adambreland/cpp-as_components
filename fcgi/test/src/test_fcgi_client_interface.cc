@@ -211,10 +211,10 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     );
     state_ptr->management_queue.swap(empty_queue);
     state_ptr->connected = false;
-    // The erasure of pending requests requires releasing the FcgiRequestIdentifier
-    // values which are associated with these requests from id_manager.
-    //
-    // It is assumed that ReleaseId will not throw as the check above
+    //    The erasure of pending requests requires releasing the
+    // FcgiRequestIdentifier values which are associated with these requests
+    // from id_manager.
+    //    It is assumed that ReleaseId will not throw as the check above
     // succeeded.
     while(pending_start != pending_end)
     {

@@ -211,8 +211,13 @@ TEST(IdManager, NewInstanceUseAndEmpty)
   IdTracker id_tracker {};
   a_component::IdManager<int> id_manager {};
 
-  auto GetCheckRecord = [&get_returns, &id_tracker, &id_manager]()->void
+  auto GTestFatalGetCheckRecord = [&get_returns, &id_tracker, &id_manager]
+  (
+    int invocation_line
+  )->void
   {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalGetCheckRecord"};
     int new_id {id_manager.GetId()};
     bool valid_id {id_tracker.RegisterAndCheckNewID(new_id)};
     EXPECT_TRUE(id_manager.IsUsed(new_id));
@@ -221,11 +226,14 @@ TEST(IdManager, NewInstanceUseAndEmpty)
     get_returns.push_back(new_id);
   };
 
-  auto ReleaseRecord = [&get_returns, &id_tracker, &id_manager]
+  auto GTestFatalReleaseRecord = [&get_returns, &id_tracker, &id_manager]
   (
-    std::vector<int>::size_type index
+    std::vector<int>::size_type index,
+    int invocation_line
   )->void
   {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalReleaseRecord"};
     int to_release {get_returns[index]};
     get_returns.erase(get_returns.begin() + index);
     ASSERT_NO_THROW(id_manager.ReleaseId(to_release));
@@ -236,7 +244,8 @@ TEST(IdManager, NewInstanceUseAndEmpty)
 
   for(int i {0}; i < 10; ++i)
   {
-    GetCheckRecord();
+    ASSERT_NO_FATAL_FAILURE(GTestFatalGetCheckRecord(__LINE__)) <<
+      "iteration count: " << i;
     EXPECT_EQ(get_returns.back(), i + 1);
   }
 
@@ -244,23 +253,23 @@ TEST(IdManager, NewInstanceUseAndEmpty)
   EXPECT_FALSE(id_manager.IsUsed(0));
   EXPECT_FALSE(id_manager.IsUsed(-1));
   
-                     // 10 {[1,10]}
-  // Action          // Number of items after action, list when known.
-  ReleaseRecord(2U); // 9 {[1,2],[4,10]}
-  ReleaseRecord(4U); // 8 {[1,2],[4,5],[7,10]}
-  ReleaseRecord(5U); // 7 {[1,2],[4,5],[7,7],[9,10]}
-  ReleaseRecord(0U); // 6 {[2,2],[4,5],[7,7],[9,10]}
-  GetCheckRecord();  // 7 If 1 is returned, back to the previous.
-  GetCheckRecord();  // 8 If 3 is returned, merge [1,2] and [4,5].
-  ReleaseRecord(2U); // 7 If as above, split what was just merged.
-  ReleaseRecord(3U); // 6 
-  ReleaseRecord(1U); // 5
-  ReleaseRecord(0U); // 4
-  ReleaseRecord(0U); // 3
-  ReleaseRecord(2U); // 2
-  ReleaseRecord(1U); // 1
-  ReleaseRecord(0U); // 0
-  GetCheckRecord();
+                                                                  // 10 {[1,10]}
+  // Action                                                       // Number of items after action, list when known.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(2U, __LINE__)); // 9 {[1,2],[4,10]}
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(4U, __LINE__)); // 8 {[1,2],[4,5],[7,10]}
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(5U, __LINE__)); // 7 {[1,2],[4,5],[7,7],[9,10]}
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(0U, __LINE__)); // 6 {[2,2],[4,5],[7,7],[9,10]}
+  ASSERT_NO_FATAL_FAILURE(GTestFatalGetCheckRecord(__LINE__));    // 7 If 1 is returned, back to the previous.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalGetCheckRecord(__LINE__));    // 8 If 3 is returned, merge [1,2] and [4,5].
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(2U, __LINE__)); // 7 If as above, split what was just merged.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(3U, __LINE__)); // 6
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(1U, __LINE__)); // 5
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(0U, __LINE__)); // 4
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(0U, __LINE__)); // 3
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(2U, __LINE__)); // 2
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(1U, __LINE__)); // 1
+  ASSERT_NO_FATAL_FAILURE(GTestFatalReleaseRecord(0U, __LINE__)); // 0
+  ASSERT_NO_FATAL_FAILURE(GTestFatalGetCheckRecord(__LINE__));
 }
 
 // TEST(IdManager, MaxIdException)

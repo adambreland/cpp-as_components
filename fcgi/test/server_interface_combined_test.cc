@@ -118,21 +118,24 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   // Leak checker
   testing::FileDescriptorLeakChecker fdlc {};
 
-  auto ClearFcgiWebServerAddrs = []()->void
+  auto GTestFatalClearFcgiWebServerAddrs = [](int invocation_line)->void
   {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalClearFcgiWebServerAddrs"};
     if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
       FAIL() << "setenv failed" << '\n' << std::strerror(errno);
   };
 
   // Ensure that FCGI_WEB_SERVER_ADDRS is bound and empty to establish a
   // consistent start state.
-  ClearFcgiWebServerAddrs();
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
 
   // Case 1: listening_descriptor refers to a file which is not a socket.
   // Create a temporary regular file.
   {
     int temp_fd {};
-    testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_fd);
+    ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalCreateBazelTemporaryFile(
+      &temp_fd, __LINE__));
     EXPECT_THROW(FcgiServerInterface(temp_fd, 1, 1), std::exception);
     close(temp_fd);
   }
@@ -201,8 +204,8 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
   }
 
   auto FcgiWebServerAddrsCase = 
-    [&ClearFcgiWebServerAddrs](const char* address_list_ptr, int domain, 
-      int test_case)->void
+    [&GTestFatalClearFcgiWebServerAddrs](const char* address_list_ptr,
+      int domain, int test_case)->void
   {
     std::string case_suffix {CaseSuffix(test_case)};
 
@@ -216,7 +219,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
       {
         ADD_FAILURE() << "A call to socket failed in" << case_suffix << '\n' 
           << std::strerror(errno);
-        ClearFcgiWebServerAddrs();
+        ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
       }
       else
       {
@@ -225,14 +228,14 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
           ADD_FAILURE() << "A call to listen failed in" << case_suffix << '\n'
             << std::strerror(errno);
           close(socket_fd);
-          ClearFcgiWebServerAddrs();
+          ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
         }
         else
         {
           EXPECT_THROW(FcgiServerInterface(socket_fd, 1, 1),
             std::exception);
           close(socket_fd);
-          ClearFcgiWebServerAddrs();
+          ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
         }
       }
     }
@@ -393,14 +396,14 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       ValidSocketCase(AF_INET, 1, 1, EXIT_FAILURE, 13);
-      ClearFcgiWebServerAddrs();
+      ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
     }
   }
 
   // Case 14: FCGI_WEB_SERVER_ADDRS is bound and empty. The descriptor is a
   // valid socket.
   {
-    ClearFcgiWebServerAddrs();
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
     ValidSocketCase(AF_INET, 1, 1, EXIT_FAILURE, 14);
   }
 
@@ -472,7 +475,7 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       UnixValidSocketCase(16);
-      ClearFcgiWebServerAddrs();
+      ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
     }
   }
 
@@ -485,13 +488,13 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     else
     {
       UnixValidSocketCase(17);
-      ClearFcgiWebServerAddrs();
+      ASSERT_NO_FATAL_FAILURE(GTestFatalClearFcgiWebServerAddrs(__LINE__));
     }
   }
 
   // Check for file descriptor leaks:
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc, 
-    "ConstructionExceptionsAndDirectlyObservableEffects");
+    "ConstructionExceptionsAndDirectlyObservableEffects", __LINE__);
 }
 
 TEST(FcgiServerInterface, FcgiGetValues)
@@ -550,7 +553,8 @@ TEST(FcgiServerInterface, FcgiGetValues)
   testing::FileDescriptorLeakChecker fdlc {};
 
   // Ensure that SIGALRM has its default disposition.
-  testing::gtest::GTestFatalRestoreSignal(SIGALRM);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGALRM,
+    __LINE__));
 
   // Lambda functions for test case implementations.
   struct ScatterGatherSocketWriteArgs
@@ -578,7 +582,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
     try
     {
       spiac = GTestNonFatalSingleProcessInterfaceAndClients
-        {inter_args, 1};
+        {inter_args, 1, __LINE__};
     }
     catch(const std::exception& e)
     {
@@ -870,7 +874,7 @@ TEST(FcgiServerInterface, FcgiGetValues)
   }
 
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "FcgiGetValues");
+    "FcgiGetValues", __LINE__);
 }
 
 TEST(FcgiServerInterface, UnknownManagementRequests)
@@ -916,7 +920,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     try
     {
       GTestNonFatalSingleProcessInterfaceAndClients spiac
-        {args, 1};
+        {args, 1, __LINE__};
       if(a_component::socket_functions::SocketWrite(
         spiac.client_descriptors()[0], buffer_ptr, count) < count)
       {
@@ -1086,7 +1090,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
   }
 
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "UnknownManagementRequests");
+    "UnknownManagementRequests", __LINE__);
 }
 
 namespace {
@@ -1442,7 +1446,7 @@ RunTest()
     "CreateInterface in"};
   try
   {
-    inter_tuple_ = GTestNonFatalCreateInterface(args_.inter_args);
+    inter_tuple_ = GTestNonFatalCreateInterface(args_.inter_args, __LINE__);
   }
   catch(std::system_error& error)
   {
@@ -1635,11 +1639,13 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   // of TestCaseRunner to ensure that restoration takes place.
 
   // Ensure that SIGALRM has its default disposition.
-  testing::gtest::GTestFatalRestoreSignal(SIGALRM);  
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGALRM,
+    __LINE__));
 
   // Ignore SIGPIPE. The disposition will be inherited by the child produced
   // in the test.
-  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
+    __LINE__));
 
   // Ensure that FCGI_WEB_SERVER_ADDRS has a fixed state (bound and empty).
   if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) < 0)
@@ -1650,7 +1656,7 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
 
   testing::FileDescriptorLeakChecker fdlc {};
 
-  const char* path {"/tmp/fcgi_si_test_UNIX_interface_socket"};
+  constexpr const char*const path {"/tmp/fcgi_si_test_UNIX_interface_socket"};
 
   // Case 1: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
   {
@@ -1806,10 +1812,11 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   }
   
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "ConnectionAcceptanceAndRejection");
+    "ConnectionAcceptanceAndRejection", __LINE__);
 
   // Restore the default SIGPIPE disposition.
-  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGPIPE,
+    __LINE__));
 }
 
 TEST(FcgiServerInterface, FcgiRequestGeneration)
@@ -2021,7 +2028,8 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   };
 
   testing::FileDescriptorLeakChecker fdlc {};
-  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
+    __LINE__));
 
                     // Single connection test cases.
 
@@ -2055,7 +2063,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
     std::size_t pairs_size {pairs.size()};
     if(pairs_size != request_acceptance.size())
     {
@@ -2340,7 +2348,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;   
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -2483,7 +2491,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.app_status      = EXIT_FAILURE;
     inter_args.unix_path       = nullptr;   
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -2719,7 +2727,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
    const std::string& test_case_name)->void
   {
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
 
     // Populate the FCGI_BEGIN_REQUEST record.
     std::uint8_t begin_record[2 * FCGI_HEADER_LEN] = {};
@@ -2959,7 +2967,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     do
     {
       GTestNonFatalSingleProcessInterfaceAndClients spiac
-        {inter_args, 1};
+        {inter_args, 1, __LINE__};
 
       constexpr std::size_t begin_length {2 * FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
@@ -3018,7 +3026,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     do
     {
       GTestNonFatalSingleProcessInterfaceAndClients spiac
-        {inter_args, 1};
+        {inter_args, 1, __LINE__};
 
       constexpr std::size_t begin_length {2 * FCGI_HEADER_LEN};
       std::uint8_t begin_record[begin_length] = {};
@@ -3123,7 +3131,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
 
     struct RequestData request_data {};
     request_data.Fcgi_id        = 1U;
@@ -3214,7 +3222,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
       "_set_5_multiple_request_record_interleaving";
     
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 1};
+      {inter_args, 1, __LINE__};
 
     struct RequestData responder_request {};
     responder_request.Fcgi_id        = 1U;
@@ -3681,7 +3689,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, client_number};
+      {inter_args, client_number, __LINE__};
 
     struct RequestData request_array[client_number] = {};
     std::uint8_t params_name {'1'};
@@ -3750,7 +3758,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, client_number};
+      {inter_args, client_number, __LINE__};
 
     struct RequestData request_array[client_number] = {};
     std::uint8_t params_name {'1'};
@@ -3844,7 +3852,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, client_number};
+      {inter_args, client_number, __LINE__};
 
     // Five requests for the first client and one request for other clients.
     struct RequestData request_array[request_number] = {};
@@ -3927,7 +3935,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     inter_args.unix_path       = nullptr;
 
     GTestNonFatalSingleProcessInterfaceAndClients spiac
-      {inter_args, 2};
+      {inter_args, 2, __LINE__};
 
     struct RequestData responder_request_1 {};
     responder_request_1.role = FCGI_RESPONDER;
@@ -4278,8 +4286,9 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
    } while(false);
 
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "FcgiRequestGeneration");
-  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
+    "FcgiRequestGeneration", __LINE__);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGPIPE,
+    __LINE__));
 }
 
 TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
@@ -4345,14 +4354,18 @@ TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
   //
   // Other modules whose testing depends on this module:
 
-  testing::gtest::GTestFatalIgnoreSignal(SIGPIPE);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
+    __LINE__));
 
   testing::FileDescriptorLeakChecker fdlc {};
 
 
+
+
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "RequestAcceptanceAndRejection");
-  testing::gtest::GTestFatalRestoreSignal(SIGPIPE);
+    "RequestAcceptanceAndRejection", __LINE__);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGPIPE,
+    __LINE__));
 }
 
 TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)

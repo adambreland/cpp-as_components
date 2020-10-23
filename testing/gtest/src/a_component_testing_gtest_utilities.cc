@@ -17,8 +17,11 @@ namespace a_component {
 namespace testing {
 namespace gtest {
 
-void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
+void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr,
+  int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalCreateBazelTemporaryFile"};
   if(!descriptor_ptr)
     FAIL() << "descriptor_ptr was null.";
   static const char* tmpdir_ptr {std::getenv("TEST_TMPDIR")};
@@ -45,8 +48,11 @@ void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr)
   *descriptor_ptr = temp_descriptor;
 }
 
-void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler)
+void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler,
+  int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalSetSignalDisposition"};
   sigset_t sigset {};
   if(sigemptyset(&sigset) == -1)
   {
@@ -67,8 +73,11 @@ void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler)
 
 void GTestNonFatalCheckAndReportDescriptorLeaks(
   FileDescriptorLeakChecker* fdlc_ptr, 
-  const std::string& test_name)
+  const std::string& test_name,
+  int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalCheckAndReportDescriptorLeaks"};
   std::pair<FileDescriptorLeakChecker::const_iterator, 
     FileDescriptorLeakChecker::const_iterator> iter_pair 
     {fdlc_ptr->Check()};
@@ -84,8 +93,10 @@ void GTestNonFatalCheckAndReportDescriptorLeaks(
   }
 }
 
-bool GTestNonFatalPrepareTemporaryFile(int descriptor)
+bool GTestNonFatalPrepareTemporaryFile(int descriptor, int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalPrepareTemporaryFile"};
   // Truncate the temporary file and seek to the beginning.
   if(ftruncate(descriptor, 0) < 0)
   {

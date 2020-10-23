@@ -5,6 +5,8 @@
 
 #include <string>
 
+#include "external/googletest/googletest/include/gtest/gtest.h"
+
 #include "include/a_component_testing_utilities.h"
 
 namespace a_component {
@@ -19,29 +21,36 @@ namespace gtest {
 // Test failures must return void.
 //
 // BAZEL DEPENDENCY: TEST_TMPDIR environment variable.
-void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr);
+void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr,
+  int invocation_line);
 
 extern "C" using CSignalHandlerType = void (*)(int);
 
-void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler);
+void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler,
+  int invocation_line);
 
-inline void GTestFatalIgnoreSignal(int sig)
+inline void GTestFatalIgnoreSignal(int sig, int invocation_line)
 {
-  return GTestFatalSetSignalDisposition(sig, SIG_IGN);
+  ::testing::ScopedTrace tracer {"", invocation_line,
+    "GTestFatalIgnoreSignal"};
+  ASSERT_NO_FATAL_FAILURE(GTestFatalSetSignalDisposition(sig, SIG_IGN, __LINE__));
 }
 
-inline void GTestFatalRestoreSignal(int sig)
+inline void GTestFatalRestoreSignal(int sig, int invocation_line)
 {
-  return GTestFatalSetSignalDisposition(sig, SIG_DFL);
+  ::testing::ScopedTrace tracer {"", invocation_line,
+    "GTestFatalRestoreSignal"};
+  ASSERT_NO_FATAL_FAILURE(GTestFatalSetSignalDisposition(sig, SIG_DFL, __LINE__));
 }
 
 void GTestNonFatalCheckAndReportDescriptorLeaks(
-  FileDescriptorLeakChecker* fdlc_ptr,  const std::string& test_name);
+  FileDescriptorLeakChecker* fdlc_ptr,  const std::string& test_name,
+  int invocation_line);
 
 // Truncate a file to zero length and seek to the beginning.
 //
 // Failures are reported as Google Test non-fatal failures.
-bool GTestNonFatalPrepareTemporaryFile(int descriptor);
+bool GTestNonFatalPrepareTemporaryFile(int descriptor, int invocation_line);
 
 } // namespace gtest
 } // namespace testing

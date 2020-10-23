@@ -731,7 +731,8 @@ TEST(Utility, EncodeNameValuePairs)
   using NameValuePair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
 
   int temp_fd {};
-  testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_fd);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalCreateBazelTemporaryFile(
+    &temp_fd, __LINE__));
 
   auto EncodeNameValuePairTester = [temp_fd]
   (
@@ -743,7 +744,7 @@ TEST(Utility, EncodeNameValuePairs)
     std::vector<NameValuePair>::const_iterator error_iter
   )->void
   {
-    if(!testing::gtest::GTestNonFatalPrepareTemporaryFile(temp_fd))
+    if(!testing::gtest::GTestNonFatalPrepareTemporaryFile(temp_fd, __LINE__))
     {
       ADD_FAILURE() << "A temporary file could not be prepared." << '\n'
         << message;
@@ -1244,8 +1245,13 @@ TEST(Utility, PartitionByteSequence)
 
   // BAZEL DEPENDENCY
   int temp_descriptor {};
-  testing::gtest::GTestFatalCreateBazelTemporaryFile(&temp_descriptor);
+  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalCreateBazelTemporaryFile(
+    &temp_descriptor, __LINE__));
   
+  // Note that the function call termination behavior of fatal Google Test
+  // assertions, where a subroutine is exited without terminating the calling
+  // routine, is desired here. As such, propagation of fatal failures is
+  // neither needed nor appropriate.
   auto PartitionByteSequenceTester = [temp_descriptor](
     const std::string& message,
     bool expect_terminal_empty_record,

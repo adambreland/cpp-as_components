@@ -43,8 +43,11 @@ std::string CaseSuffix(int test_case)
 }
 
 std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
-GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args)
+GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args,
+  int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalCreateInterface"};
   std::unique_ptr<FcgiServerInterface> interface_uptr {};
   if((args.domain == AF_UNIX) && !args.unix_path)
     return std::make_tuple(std::move(interface_uptr), -1, 0U);
@@ -419,9 +422,13 @@ void FcgiRequestIdManager::ReleaseId(std::uint16_t id)
 
 GTestNonFatalSingleProcessInterfaceAndClients::
 GTestNonFatalSingleProcessInterfaceAndClients(
-  struct InterfaceCreationArguments inter_args,  int client_number)
+  struct InterfaceCreationArguments inter_args,  int client_number,
+  int invocation_line)
+: inter_args_ {inter_args}
 {
-  inter_args_ = inter_args;
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalSingleProcessInterfaceAndClients::"
+    "GTestNonFatalSingleProcessInterfaceAndClients"};
 
   // Verify interface listening socket parameters.
   if(!((inter_args_.domain == AF_UNIX)    || 
@@ -444,7 +451,7 @@ GTestNonFatalSingleProcessInterfaceAndClients(
 
   try
   {
-    inter_tuple_ = GTestNonFatalCreateInterface(inter_args_);
+    inter_tuple_ = GTestNonFatalCreateInterface(inter_args_, __LINE__);
   }
   catch(const std::exception& e)
   {
@@ -583,14 +590,17 @@ GTestNonFatalSingleProcessInterfaceAndClients(
     // Cleanup state before the exception leaves the constructor.
     ADD_FAILURE() << "An exception was thrown when constructing an instance "
       "of SingleProcessInterfaceAndClients." << '\n' << e.what();
-    CleanUp();
+    CleanUp(__LINE__);
     throw e;
   }
 }
 
 void GTestNonFatalSingleProcessInterfaceAndClients::
-CleanUp()
+CleanUp(int invocation_line)
 {
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalSingleProcessInterfaceAndClients::CleanUp"};
+
   // Cleanup interface state.
   if(std::get<0>(inter_tuple_))
   {

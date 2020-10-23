@@ -18,7 +18,7 @@ namespace testing {
 // FileDescriptorLeakChecker offers:
 // 1) The ability to reinitialize the recorded set of descriptors.
 // 2) The ability to specify descriptors which were closed and which were added
-//    during execution. These descriptors will not be counted as leaks when
+//    during execution. Specified descriptors will not be counted as leaks when
 //    the appropriate call to Check is made.
 // 3) Safe use across forks. After a fork, checker instances share no state.
 //

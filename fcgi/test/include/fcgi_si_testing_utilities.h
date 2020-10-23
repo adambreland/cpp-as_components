@@ -157,7 +157,8 @@ struct InterfaceCreationArguments
 };
 
 std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
-GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args);
+GTestNonFatalCreateInterface(const struct InterfaceCreationArguments& args,
+  int invocation_line);
 
 //    This class creates an interface with the parameters provided in
 // inter_args. client_number sockets are created and connected to the
@@ -199,7 +200,8 @@ class GTestNonFatalSingleProcessInterfaceAndClients
   // No copy.
   GTestNonFatalSingleProcessInterfaceAndClients() = default;
   GTestNonFatalSingleProcessInterfaceAndClients(
-    struct InterfaceCreationArguments inter_args,  int client_number);
+    struct InterfaceCreationArguments inter_args,  int client_number,
+    int invocation_line);
   GTestNonFatalSingleProcessInterfaceAndClients(
     GTestNonFatalSingleProcessInterfaceAndClients&&) = default;
   GTestNonFatalSingleProcessInterfaceAndClients(
@@ -212,11 +214,11 @@ class GTestNonFatalSingleProcessInterfaceAndClients
 
   inline ~GTestNonFatalSingleProcessInterfaceAndClients()
   {
-    CleanUp();
+    CleanUp(__LINE__);
   }
 
  private:
-  void CleanUp();
+  void CleanUp(int invocation_line);
 
   struct InterfaceCreationArguments inter_args_;
   std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
