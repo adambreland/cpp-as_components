@@ -158,10 +158,10 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
   ConnectionState* state_ptr {&(connection_iter->second)};
 
   std::map<FcgiRequestIdentifier, RequestData>::iterator pending_start
-    {pending_request_map_.lower_bound({connection, 0U})};
+    {pending_request_map_.lower_bound({connection, FCGI_NULL_REQUEST_ID})};
   std::map<FcgiRequestIdentifier, RequestData>::iterator pending_end
     {(connection < std::numeric_limits<int>::max()) ?
-      pending_request_map_.lower_bound({connection + 1, 0U}) :
+      pending_request_map_.lower_bound({connection + 1, FCGI_NULL_REQUEST_ID}) :
       pending_request_map_.end()};
   
   bool connection_is_ready {(remaining_ready_ > 0)                     &&
@@ -173,7 +173,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
   // Determine if the item in connection_map_ should be erased. When request
   // IDs for completed requests are present, the item should not be erased.
   std::set<FcgiRequestIdentifier>::iterator completed_start
-    {completed_request_set_.lower_bound({connection, 0U})};
+    {completed_request_set_.lower_bound({connection, FCGI_NULL_REQUEST_ID})};
   // Are completed-but-unreleased requests present?
   if((completed_start != completed_request_set_.end()) &&
      (completed_start->descriptor() == connection))
@@ -269,44 +269,53 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
   // Initialize the server address appropriately for the determined domain.
   int domain {};
   struct sockaddr_storage addr_store {};
+  void* addr_ptr {&addr_store};
   socklen_t addr_size {};
-  if(inet_pton(AF_INET, address, &addr_store) > 0)
+  // inet_pton uses a return parameter to set the inner address of an internet
+  // address. Start with IPv4.
+  void* inner_addr_ptr
+    {&(static_cast<struct sockaddr_in*>(addr_ptr)->sin_addr)};
+  if(inet_pton(AF_INET, address, inner_addr_ptr) > 0)
   {
     domain = AF_INET;
     addr_size = sizeof(struct sockaddr_in);
-    static_cast<struct sockaddr_in*>(
-      static_cast<void*>(&addr_store))->sin_family = AF_INET;
-    static_cast<struct sockaddr_in*>(
-      static_cast<void*>(&addr_store))->sin_port = port;
-  }
-  else if(inet_pton(AF_INET6, address, &addr_store) > 0)
-  {
-    domain = AF_INET6;
-    addr_size = sizeof(struct sockaddr_in6);
-    static_cast<struct sockaddr_in6*>(
-      static_cast<void*>(&addr_store))->sin6_family = AF_INET6;
-    static_cast<struct sockaddr_in6*>(
-      static_cast<void*>(&addr_store))->sin6_port = port;
+    struct sockaddr_in* typed_addr_ptr
+      {static_cast<struct sockaddr_in*>(addr_ptr)};
+    typed_addr_ptr->sin_family = AF_INET;
+    typed_addr_ptr->sin_port   = port;
   }
   else
   {
-    domain = AF_UNIX;
-    // Calls to connect failed during testing with AF_UNIX and
-    // addrlen != sizeof(struct sockaddr_un).
-    addr_size = sizeof(struct sockaddr_un);
-    std::size_t address_length {std::strlen(address)};
-    // The value 91 comes from the current portable limit for UNIX address
-    // lengths (where one byte is saved for the null terminator).
-    if((address_length == 0) || (address_length > 91))
+    inner_addr_ptr =
+      &(static_cast<struct sockaddr_in6*>(addr_ptr)->sin6_addr);
+    if(inet_pton(AF_INET6, address, inner_addr_ptr) > 0)
     {
-      errno = EINVAL;
-      return -1;
+      domain = AF_INET6;
+      addr_size = sizeof(struct sockaddr_in6);
+      struct sockaddr_in6* typed_addr_ptr
+        {static_cast<struct sockaddr_in6*>(addr_ptr)};
+      typed_addr_ptr->sin6_family = AF_INET6;
+      typed_addr_ptr->sin6_port   = port;
     }
-    static_cast<struct sockaddr_un*>(static_cast<void*>(&addr_store))->
-      sun_family = AF_UNIX;
-    char* path_ptr {static_cast<struct sockaddr_un*>(static_cast<void*>(
-      &addr_store))->sun_path};
-    std::strcpy(path_ptr, address); // Include null byte.
+    else
+    {
+      domain = AF_UNIX;
+      // Calls to connect failed during testing with AF_UNIX and
+      // addrlen != sizeof(struct sockaddr_un).
+      addr_size = sizeof(struct sockaddr_un);
+      std::size_t address_length {std::strlen(address)};
+      // The value 91 comes from the current portable limit for UNIX address
+      // lengths (where one byte is saved for the null terminator).
+      if((address_length == 0) || (address_length > 91))
+      {
+        errno = EINVAL;
+        return -1;
+      }
+      struct sockaddr_un* typed_addr_ptr
+        {static_cast<struct sockaddr_un*>(addr_ptr)};
+      typed_addr_ptr->sun_family = AF_UNIX;
+      std::strcpy(typed_addr_ptr->sun_path, address); // Include null byte.
+    }
   }
 
   // Create a socket and try to connect to the server.
@@ -430,7 +439,8 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
 std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
 {
   std::set<FcgiRequestIdentifier>::const_iterator
-     least_upper_iter {completed_request_set_.lower_bound({connection, 0})};
+     least_upper_iter {completed_request_set_.lower_bound(
+       {connection, FCGI_NULL_REQUEST_ID})};
   if((least_upper_iter == completed_request_set_.cend()) ||
       (least_upper_iter->descriptor() > connection))
   {
@@ -440,7 +450,8 @@ std::size_t TestFcgiClientInterface::CompletedRequestCount(int connection) const
   {
     std::set<FcgiRequestIdentifier>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
-        completed_request_set_.lower_bound({connection + 1, 0U}) :
+        completed_request_set_.lower_bound(
+          {connection + 1, FCGI_NULL_REQUEST_ID})      :
         completed_request_set_.end()};
     return std::distance(least_upper_iter, next_iter);
   }
@@ -587,7 +598,7 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                 remaining_content : static_cast<std::uint16_t>(remaining_data)};              
               std::uint8_t* current_end {current_byte + copy_size};
               if(!(state_ptr->record_state.invalidated) &&
-                 (fcgi_id != 0U)                        &&
+                 (fcgi_id != FCGI_NULL_REQUEST_ID)      &&
                  (record_type != FcgiType::kFCGI_END_REQUEST))
               {
                 // Type is either FCGI_STDOUT or FCGI_STDERR.
@@ -868,7 +879,8 @@ std::size_t TestFcgiClientInterface::ManagementRequestCount(int connection) cons
 std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
 {
   std::map<FcgiRequestIdentifier, RequestData>::const_iterator
-     least_upper_iter {pending_request_map_.lower_bound({connection, 0U})};
+     least_upper_iter {pending_request_map_.lower_bound(
+       {connection, FCGI_NULL_REQUEST_ID})};
   if((least_upper_iter == pending_request_map_.cend()) ||
       (least_upper_iter->first.descriptor() > connection))
   {
@@ -878,7 +890,8 @@ std::size_t TestFcgiClientInterface::PendingRequestCount(int connection) const
   {
     std::map<FcgiRequestIdentifier, RequestData>::const_iterator next_iter
       {(connection != std::numeric_limits<int>::max()) ?
-        pending_request_map_.lower_bound({connection + 1, 0U}) :
+        pending_request_map_.lower_bound(
+          {connection + 1, FCGI_NULL_REQUEST_ID})      :
         pending_request_map_.end()};
     return std::distance(least_upper_iter, next_iter);
   }
@@ -1034,7 +1047,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         *new_event = GetValuesResult
         {
           (local_buffer_size) ? params_error : false,
-          {connection_iter->first, 0U},
+          {connection_iter->first, FCGI_NULL_REQUEST_ID},
           std::move(state_ptr->management_queue.front().params_map),
           std::move(params_result)
         };
@@ -1050,8 +1063,8 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         TryToAssignLastQueueItemPointer(&back_ptr);
         *new_event = UnknownType
         {
-          {connection_iter->first, 0U},
-          state_ptr->record_state.local_buffer[0],
+          {connection_iter->first, FCGI_NULL_REQUEST_ID},
+          static_cast<FcgiType>(state_ptr->record_state.local_buffer[0]),
           std::move(state_ptr->management_queue.front())
         };
         *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
@@ -1155,10 +1168,11 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
   a_component::IdManager<std::uint16_t>* id_manager_ptr
     {&(connection_iter->second.id_manager)};
   std::set<FcgiRequestIdentifier>::iterator start
-    {completed_request_set_.lower_bound({connection, 0U})};
+    {completed_request_set_.lower_bound({connection, FCGI_NULL_REQUEST_ID})};
   std::set<FcgiRequestIdentifier>::iterator end
     {(connection < std::numeric_limits<int>::max()) ?
-      completed_request_set_.lower_bound({connection + 1, 0U}) :
+      completed_request_set_.lower_bound(
+        {connection + 1, FCGI_NULL_REQUEST_ID})     :
       completed_request_set_.end()};
   // Perform actions on connection_map_ here. Actions on completed_request_set_
   // are performed below.
@@ -1365,7 +1379,7 @@ bool TestFcgiClientInterface::SendBinaryManagementRequestHelper(
   std::uint8_t padding_length {static_cast<std::uint8_t>(
     (mod_length) ? (8 - mod_length) : 0U)};
   std::uint8_t header[FCGI_HEADER_LEN] = {};
-  PopulateHeader(header, type, 0U, length, padding_length);
+  PopulateHeader(header, type, FCGI_NULL_REQUEST_ID, length, padding_length);
   constexpr int iovec_count {3};
   struct iovec iovec_array[iovec_count] = {};
   iovec_array[0].iov_base = header;
@@ -1510,12 +1524,8 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
   )->bool
   {
     bool is_data {type == FcgiType::kFCGI_DATA};
-    // PartitionByteSequence will produce ending stream records if
-    // begin_iter == end_iter. terminated is used to ensure that one
-    // ending record is always produced.
-    bool terminated
-      {(is_data) ? request.data_begin  == request.data_end :
-                    request.stdin_begin == request.stdin_end};
+    // PartitionByteSequence will produce a terminal stream record if
+    // begin_iter == end_iter.
     const std::uint8_t* start_iter
       {(is_data) ? request.data_begin : request.stdin_begin};
     const std::uint8_t* end_iter 
@@ -1552,13 +1562,15 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         FailedWrite(connection_iter, errno, false, false, writev_or_select_);
         return false;
       }
-      start_iter = std::get<3>(partition);
-      if(!terminated && (start_iter == end_iter))
+      if(start_iter == end_iter)
       {
-        terminated = true;
-        continue;
+        break; // A terminal record was just sent.
       }
-    } while(start_iter != end_iter);
+      else
+      {
+        start_iter = std::get<3>(partition); // Continue writing.
+      }
+    } while(true);
     return true;
   };
 
@@ -1800,7 +1812,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         break;
       }
       case FcgiType::kFCGI_GET_VALUES_RESULT : {
-        if((fcgi_id != 0U)                               ||
+        if((fcgi_id != FCGI_NULL_REQUEST_ID)             ||
            !(state_ptr->management_queue.size())         ||
            (FcgiType::kFCGI_GET_VALUES != state_ptr->
               management_queue.front().type))
@@ -1810,7 +1822,7 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         break;
       }
       case FcgiType::kFCGI_UNKNOWN_TYPE : {
-        if((fcgi_id != 0U)                               ||
+        if((fcgi_id != FCGI_NULL_REQUEST_ID)             ||
            (expected_content != 8U)                      ||
            !(state_ptr->management_queue.size())         ||
            (FcgiType::kFCGI_GET_VALUES == state_ptr->

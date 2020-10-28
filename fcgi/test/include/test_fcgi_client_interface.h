@@ -375,7 +375,7 @@ class InvalidRecord : public ServerEvent
  private:
   std::uint8_t               version_;
   FcgiType                   type_;
-  FcgiRequestIdentifier          request_id_;
+  FcgiRequestIdentifier      request_id_;
   std::vector<std::uint8_t>  content_;
   std::uint8_t               padding_length_;
 };
@@ -389,7 +389,7 @@ class UnknownType : public ServerEvent
   //    ManagementRequestData instance with the data of the
   //    appropriate ManagementRequestData instance which was used in a call to
   //    TestFcgiClientInterface::SendBinaryManagementRequest.
-  inline const ManagementRequestData& Request() const noexcept
+  inline const struct ManagementRequestData& Request() const noexcept
   {
     return request_;
   }
@@ -405,7 +405,7 @@ class UnknownType : public ServerEvent
     return request_id_;
   }
 
-  inline std::uint8_t Type() const noexcept
+  inline FcgiType Type() const noexcept
   {
     return unknown_type_;
   }
@@ -413,35 +413,35 @@ class UnknownType : public ServerEvent
   inline UnknownType() noexcept
   : request_id_         {-1, 0U},
     unknown_type_       {0U},
-    request_ {static_cast<FcgiType>(0U), {}, {}}
+    request_            {static_cast<FcgiType>(0U), {}, {}}
   {}
 
   inline UnknownType(FcgiRequestIdentifier request_id,
-    std::uint8_t type, const ManagementRequestData& request)
+    FcgiType type, const ManagementRequestData& request)
   : request_id_         {request_id},
     unknown_type_       {type},
-    request_ {request}
+    request_            {request}
   {}
 
   inline UnknownType(FcgiRequestIdentifier request_id,
-    std::uint8_t type, ManagementRequestData&& request) noexcept
+    FcgiType type, ManagementRequestData&& request) noexcept
   : request_id_         {request_id},
     unknown_type_       {type},
-    request_ {std::move(request)}
+    request_            {std::move(request)}
   {}
 
   UnknownType(const UnknownType&) = default;
-  UnknownType(UnknownType&&) = default;
+  UnknownType(UnknownType&&)      = default;
   
   UnknownType& operator=(const UnknownType&) = default;
-  UnknownType& operator=(UnknownType&&) = default;
+  UnknownType& operator=(UnknownType&&)      = default;
 
   ~UnknownType() override = default;
 
  private:
-  FcgiRequestIdentifier request_id_;
-  std::uint8_t               unknown_type_;
-  ManagementRequestData      request_;
+  FcgiRequestIdentifier        request_id_;
+  FcgiType                     unknown_type_;
+  struct ManagementRequestData request_;
 };
 
                     ////// TestFcgiClientInterface //////
@@ -746,11 +746,14 @@ class TestFcgiClientInterface
   // Effects:
   // 1) If the ready event queue was non-empty, the next ready event was
   //    removed and returned.
-  // 2) If the ready event queue was empty, the interface blocked until a
+  // 2)    If the ready event queue was empty, the interface blocked until a
   //    connection was ready for reading. When a connection became ready for
   //    reading, it was read until it would block. This process was repeated
   //    until read data caused the ready event queue to be non-empty. The
   //    next ready event was then removed and returned.
+  //       Note that any of the observers may return a value which differs
+  //    from a previously returned value after the return of a call to
+  //    RetrieveServerEvent.
   // 3) ServerEvent instance generation:
   //    ConnectionClosure
   //    a) The construction of a ConnectionClosure instance c indicates that
