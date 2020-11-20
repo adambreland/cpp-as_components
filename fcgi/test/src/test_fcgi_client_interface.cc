@@ -1321,7 +1321,7 @@ bool TestFcgiClientInterface::SendAbortRequest(FcgiRequestIdentifier id)
   if(write_return < FCGI_HEADER_LEN)
   {
     FailedWrite(connection_iter, errno, write_return == 0U, false,
-      write_or_select_);
+      kWriteOrSelect_);
     return false;
   }
   return true;
@@ -1473,7 +1473,7 @@ bool TestFcgiClientInterface::SendManagementRequestHelper(
   if(number_remaining != 0U)
   {
     FailedWrite(connection_iter, errno, number_remaining == number_to_write,
-      true, write_or_select_);
+      true, kWriteOrSelect_);
     return false;
   }
   return true;
@@ -1559,7 +1559,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         //    to be written.
         // 2) As data has been written, release of new_id is not needed as
         //    connection closure must occur.
-        FailedWrite(connection_iter, errno, false, false, writev_or_select_);
+        FailedWrite(connection_iter, errno, false, false, kWritevOrSelect_);
         return false;
       }
       if(start_iter == end_iter)
@@ -1603,7 +1603,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         }
       }
       FailedWrite(connection_iter, saved_errno, nothing_written, false,
-        write_or_select_);
+        kWriteOrSelect_);
       return FcgiRequestIdentifier {};
     }
 
@@ -1667,7 +1667,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         {
           // Something has been written overall. id release is not required.
           FailedWrite(connection_iter, errno, false, false,
-            writev_or_select_);
+            kWritevOrSelect_);
           return FcgiRequestIdentifier {};
         }
         offset     = std::get<5>(params_encoding);
@@ -1684,7 +1684,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     {
       // Something has been written overall. id release is not required.
       FailedWrite(connection_iter, errno, false, false,
-        write_or_select_);
+        kWriteOrSelect_);
       return FcgiRequestIdentifier {};
     }
     // Insert a new RequestData instance to pending_request_map_.

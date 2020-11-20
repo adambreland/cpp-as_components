@@ -1,0 +1,46 @@
+Use of Google Test assertions in a_component:
+   Google Test is used as the testing framework for a_component. It is often
+desirable to modularize several Google Test assertions and related logic into
+a function. Doing so presents several problems. First, assertion failure line
+numbers are reported relative to the lines of the function and not relative to
+the source which invoked the function. Information which reports both locations
+is desirable. This is problematic for both single function calls and for nested
+calls to functions which use Google Test assertions. Second, Google Test fatal
+failures do not cause an immediate halt to the execution of a test. Instead,
+they behave similarly to function return statements; only the current function
+is exited when a fatal assertion fails. It is assumed that a fatal assertion in
+a function call is equivalent in meaning to a fatal assertion in the source
+that called the function. These two problems motivate the following discipline
+when functions are defined which use Google Test assertions.
+
+Discipline for defining functions which use Google Test assertions:
+1) Any function which may be used by multiple clients must be named with a
+   prefix of either "GTestFatal" or "GTestNonFatal". The presence of a fatal
+   Google Test assertion in the definition of the function determines which
+   prefix is used.
+2)    Any function which is named with one of the preceding prefixes must
+   include a Google Test ScopedTrace instance as its first variable. In
+   addition, the last parameter of the function will be an int with the meaning
+   of invocation line number.
+      The ScopedTrace variable will be initialized with (in order):
+   a) The file path such as through use of __FILE__.
+   b) The value of the last argument of the function call. This should be the
+      invocation line of the function.
+   c) The name of the function.
+3) Any function which uses a fatal assertion must return void. As such, any
+   function which is named with the "GTestFatal" prefix must return void. The
+   requirement on returning void is not present for functions which do not use
+   fatal assertions. 
+
+Use of functions which use Google Test assertions:
+1) When using a function with a Google Test prefix, the invocation line of the
+   call will be supplied to the trailing int parameter of the function. This is
+   usually done with __LINE__.
+2) If the function uses fatal assertions, a call to the function will be
+   wrapped with a call to ASSERT_NO_FATAL_FAILURE whenever this is necessary
+   to preserve the desired semantics of an immediate halt to the execution of
+   the test upon the occurrence of a fatal failure.
+
+For example:
+ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
+  __LINE__));

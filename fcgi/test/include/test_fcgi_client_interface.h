@@ -72,7 +72,7 @@ class ServerEvent
 {
  public:
   virtual FcgiRequestIdentifier RequestId() const = 0;
-  virtual                   ~ServerEvent()    = default;
+  virtual                       ~ServerEvent()    = default;
 };
 
 class ConnectionClosure : public ServerEvent
@@ -454,7 +454,7 @@ class UnknownType : public ServerEvent
 //    The interface allows simultaneous connections to be made to distinct
 // FastCGI application servers. Simultaneous connections to the same server
 // are also allowed. Different socket domains may be used; all connections
-// are stream-based as FastCGI requires stream-based sockets.
+// are stream-based as FastCGI utilizes stream-based sockets.
 //
 // Management requests:
 //    The interface has a management request queue for each connection. As all
@@ -585,10 +585,13 @@ class TestFcgiClientInterface
   // 1) If connection was not a connected socket descriptor which was opened by
   //    the TestFcgiClientInterface instance, then false was returned.
   // 2) Otherwise, true was returned.
-  //    a) Requests on connection for which responses had been received
-  //       in-full and which were not released by the user remain active.
-  //    b) Pending requests were released: the fcgi_si::FcgiRequestIdentifier
-  //       instances which were generated for them no longer refer to requests.
+  //    a) Application requests on connection for which responses had been
+  //       received in-full and which were not released by the user remain
+  //       active.
+  //    b) Pending application requests were released: the
+  //       FcgiRequestIdentifier instances which were generated for them no
+  //       longer refer to requests.
+  //    c) The queue of pending management requests for connection was cleared.
   bool CloseConnection(int connection);
 
   // Returns the total number of completed and unreleased requests which are
@@ -668,6 +671,10 @@ class TestFcgiClientInterface
   // Returns the number of pending requests for connection.
   std::size_t PendingRequestCount(int connection) const;
 
+  // Returns the number of objects which are derived from
+  // ::a_component::fcgi::test::ServerEvent which are in the ready event queue.
+  // Note that an object which was returned by a call to RetrieveServerEvent is
+  // no longer in the ready event queue.
   inline std::size_t ReadyEventCount() const noexcept
   {
     return micro_event_queue_.size();
@@ -791,7 +798,7 @@ class TestFcgiClientInterface
   //    a) The construction of an InvalidRecord instance r indicates that an
   //       invalid valid record was received over the connection and with the
   //       FastCGI request identifier given by r.RequestId(). The conditions
-  //       which cause records to be deemed invalid are described in the
+  //       which cause records to be deemed invalid are given in the
   //       description of InvalidRecord.
   //    b)    Note that the receipt of an invalid record likely indicates that
   //       the application server is corrupt or has a bug. If so, the
@@ -1368,11 +1375,11 @@ class TestFcgiClientInterface
   std::map<int, ConnectionState>::iterator     next_connection_;
   fd_set                                       select_set_;
 
-  static constexpr const char*                 write_
+  static constexpr const char*const            kWrite_
     {"write"};
-  static constexpr const char*                 write_or_select_
+  static constexpr const char*const            kWriteOrSelect_
     {"write or select"};
-  static constexpr const char*                 writev_or_select_
+  static constexpr const char*const            kWritevOrSelect_
     {"writev or select"};
 };
 

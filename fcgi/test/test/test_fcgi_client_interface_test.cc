@@ -363,6 +363,36 @@ void GTestFatalSendExerciseRequests(
 
 } // namespace
 
+// CloseConnection
+// Examined properties:
+// 1) Presence of pending management requests in the management request queue.
+// 2) Presence of incomplete (pending) application requests.
+// 3) Presence of completed applicaton requests.
+// 4) Whether or not the connection is connected.
+// 5) For a connection which is not connected, the presence or absence of
+//    completed but unreleased application requests.
+// 6) For the server of a connection, whether or not more than one connection
+//    has been made to the server.
+// 7) Whether or not closure occurs when the client interface has registered
+//    that the connection is ready to be read and it has not been read.
+//
+//
+//
+
+// CompletedRequestCount
+// Discussion:
+//    Both overloads of CompletedRequestCount are used throughout testing code.
+// In particular, the connection overload is used in
+// GTestFatalClientInterfaceConnectionOnlyObserverCheck, and the overload which
+// takes no parameters is used in GTestFatalClientInterfaceObserverCheck.
+// Only special cases which may not be covered in other tests are treated here.
+//
+// Properties examined here:
+// 1) Correct behavior of the connection overload when it is called with a
+//    value for connection which has never been connected.
+//
+// 
+
 // Connect
 // Examined properties:
 // 1) Appropriate updates to observable state.
@@ -380,8 +410,7 @@ void GTestFatalSendExerciseRequests(
 //       4) Closure of the connection through invocation of CloseConnection.
 // 3) The ability to have multiple, simultaneous connections and simultaneous
 //    connections to different domains. The properties described above can be
-//    tested on a sigle interface with simultaneous connections to each domain
-//    to test these abilities.
+//    tested on a sigle interface with simultaneous connections to each domain.
 // 4) The ability to connect to a server when a previous connection to the
 //    server was made and has since been closed.
 // 5) The ability of the client to detect connection closure by a server for
@@ -1038,7 +1067,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
     ASSERT_NO_THROW(closed = client_inter.CloseConnection(descriptor_value));
     ASSERT_TRUE(closed);
     ++closed_count;
-    EXPECT_FALSE(client_inter.IsConnected(obs_iter->first));
+    EXPECT_FALSE(client_inter.IsConnected(descriptor_value));
     ASSERT_NO_THROW(client_inter.ReleaseId(descriptor_value));
   }
   //    Connect to the servers again and exercise the client interface as
@@ -1114,6 +1143,79 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   }
   EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
 }
+
+// Testing of:
+// ConnectionCount
+// IsConnected
+// ManagementRequestCount
+// std::size_t PendingRequestCount()
+// std::size_t PendingRequestCount(int)
+// ReadyEventCount
+//
+// Discussion:
+//    The above functions are used throughout testing and in
+// GTestFatalClientInterfaceConnectionOnlyObserverCheck and
+// GTestFatalClientInterfaceObserverCheck. The only special cases which have
+// been determined for these functions are when IsConnected and
+// PendingRequestCount are called with a connection which has never been
+// connected.
+//
+//
+
+
+// ReleaseId
+// ReleaseId(FcgiRequestIdentifier)
+//    This overload is used throughout testing. The following test cases were
+// determined to potentially not be exercised in other testing code.
+//
+// Test cases for ReleaseId(FcgiRequestIdentifier):
+// 1) ReleaseId(i) is called when i has not been used by the interface. There
+//    are two subcases: i.descriptor() is not connected vs. it is connected.
+// 2) ReleaseId(i) is called when i refers to a request which is not complete.
+//
+// ReleaseId(int)
+// Examined properties:
+// 1) Whether the connection is connected or not.
+// 2) Whether completed but unreleased application requests are associated with
+//    the connection.
+// 3) The presence of other connection state, such as pending management
+//    requests, that should not be affected by a call to ReleaseId.
+// 4) The presence of multiple connections to the same server when both
+//    connections have state which should be affected by an appropriate call to
+//    ReleaseId.
+//
+// Test cases for ReleaseId(int):
+// 1) A call to ReleaseId(c) is made when c refers to a connection value which
+//    has never been used by the interface.
+// 2) A call to ReleaseId(c) is made when c refers to a connected connection
+//    which does not have completed but unreleased application requests.
+// 3) As in 2, but completed anb unreleased application requests are present.
+// 4) As in 3, but another connection to the server of the connection to be
+//    released is present. This other connection also has completed but
+//    unreleased application requests. The connection to be released has a
+//    larger socket descriptor than the other connection.
+// 5) A call to ReleaseId(c) is made when c refers to a connection which is
+//    no longer connected and which has completed but unreleased application
+//    requests.
+
+// RetrieveServerEvent
+// Examined properties:
+// 1) Proper behavior regarding the specified throw of a std::logic_error
+//    exception.
+//    a) As a special case, correct behavior is verified when ConnectionCount()
+//       returns zero but at least one connection is disconnected and
+//       associated with completed but unreleased application requests.
+// 2) Correct behavior when a partial response is received on a connection and
+//    other connections are present which are ready to be read. It is specified
+//    that other ready connections will be read until either the ready event
+//    queue is nonempty or all ready connections have been read until they
+//    would block.
+// 3) Tests based on types derived from ServerEvent:
+//    ConnectionClosure
+//    a) A connection is made, and the server immediately closes the
+//       connection.
+//    b) Other test cases? ?????????????????????????????????????????????
+// 
 
 // Management request testing discussion:
 //  1) Management requests and responses each use a single FastCGI record.
@@ -1221,13 +1323,13 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendBinaryManagementRequest)
 //
 // Test case set 2:
 // 10) To ensure that the client interface correctly handles connection
-//     closure by the client interface user in the case completed and
+//     closure by the client interface user in the case that completed and
 //     unreleased requests are present, an FCGI_GET_VALUES request is made when
 //     such an application request is present. Then the connection is closed by
 //     the user. A new connection with the same descriptor value is made. Then
 //     a management request is made which should have a response which is
 //     distinct from the response that would have been returned for the
-//     previous request. It is verified that the correct response it returned.
+//     previous request. It is verified that the correct response is returned.
 // 11) As 10, but connection closure is performed by the server and detected
 //     by the client interface.
 //
