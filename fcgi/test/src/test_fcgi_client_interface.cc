@@ -944,7 +944,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
       case FcgiType::kFCGI_END_REQUEST : {
         // Extract the application status.
         std::uint8_t* data_ptr {state_ptr->record_state.local_buffer.data()};
-        std::int32_t local_app_status {*data_ptr};
+        std::int32_t  local_app_status {*data_ptr};
         for(int i {0}; i < 3; ++i)
         {
           local_app_status <<= 8U;
@@ -1251,8 +1251,8 @@ std::unique_ptr<ServerEvent> TestFcgiClientInterface::RetrieveServerEvent()
       continue;
     }
     // Prepare to call select.
-    // select_set_ is filled with all connected connections. If no connected
-    // connections are present, an exceptions is thrown.
+    // select_set_ is filled with all connections which are ready for reading.
+    // If no connections are ready for reading, then an exception is thrown.
     FD_ZERO(&select_set_);
     int max_for_select {-1};
     std::map<int, ConnectionState>::reverse_iterator r_iter
@@ -1757,6 +1757,10 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
   std::uint8_t expected_padding {state_ptr->record_state.
     header[kHeaderPaddingLengthIndex]};
 
+  // This lambda function is used to update pending_iter in the case that
+  // it does not refer to the request of the current record.
+  //
+  // Exception note: It is assumed that find will not throw.
   auto PendingIterCheckAndUpdate = 
   [&pending_iter, &descriptor, &fcgi_id, &pending_end, this]()->void
   {
@@ -1765,7 +1769,14 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
     {
       // It is acceptable for find to return end as a spurious record may
       // have been sent.
-      pending_iter = pending_request_map_.find(id);
+      try // noexcept-equivalent block
+      {
+        pending_iter = pending_request_map_.find(id);
+      }
+      catch(...)
+      {
+        std::terminate();
+      }
     }
   };
   
@@ -1783,10 +1794,32 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
         // Among other questions, does a request exist for this end record?
         // Note that a pending request is moved to the completed map upon its
         // completion. It will then not be present in the pending map.
+        //
+        // FCGI_STDERR is always optional. If no data is sent over FCGI_STDERR,
+        // then a terminal record is not needed for FCGI_STDERR. This special
+        // logic is implemented below.
+        auto StderrorEndAcceptance = [&pending_iter]()->bool
+        {
+          if(pending_iter->second.stderr_completed)
+          {
+            return true;
+          }
+          else if(!(pending_iter->second.fcgi_stderr.size()))
+          {
+            // The FCGI_STDERR stream has implicitly been completed in this
+            // case.
+            pending_iter->second.stderr_completed = true;
+            return true;
+          }
+          else
+          {
+            return false;
+          }
+        };
         if((pending_iter == pending_end)                 ||
-            (!(pending_iter->second.stderr_completed) ||
-             !(pending_iter->second.stdout_completed))   ||
-            (expected_content != 8U))
+           (!StderrorEndAcceptance() || 
+            !(pending_iter->second.stdout_completed))    ||
+           (expected_content != 8U))
         {
           error_detected = true;
         }
