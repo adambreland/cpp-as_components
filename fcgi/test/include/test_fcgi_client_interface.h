@@ -199,7 +199,8 @@ class GetValuesResult : public ServerEvent
  public:
   // 1) Returns true if a FastCGI name-value pair encoding error was detected
   //    in the response for the FCGI_GET_VALUES request described
-  //    by RequestMap.
+  //    by RequestMap. See the discussion of GetValuesResult in the
+  //    documentation of TestFcgiClientInterface::RetrieveServerEvent.
   //    a) If true is returned, then ResponseMap returns an empty map. The
   //       received erroneous data was discarded.
   // 2) Returns false if no FastCGI name-value pair encoding error was detected.
@@ -456,7 +457,7 @@ class UnknownType : public ServerEvent
 // are also allowed. Different socket domains may be used; all connections
 // are stream-based as FastCGI utilizes stream-based sockets.
 //
-// Management requests:
+// Management requests and responses:
 //    The interface has a management request queue for each connection. As all
 // management requests on a given connection c share the same request
 // identifier (c, 0), management request order is preserved by the queue.
@@ -505,10 +506,11 @@ class UnknownType : public ServerEvent
 // type ServerEvent to represent information which was received from
 // application servers. ServerEvent was defined for this purpose. An internal
 // ready event queue is used to store ready events. RetrieveServerEvent is used
-// to retrieve a server event. dynamic_cast may be used to cast the contained
-// ServerEvent* to a pointer to one of the derived server event types.
+// to retrieve a std::unique_ptr<ServerEvent> instance. dynamic_cast may be
+// used to cast the contained ServerEvent* to a pointer to one of the types
+// derived from ServerEvent.
 //
-// Connection closure:
+// Connection closure and its influence on interface state:
 //    A user can manually close a connection through a call to CloseConnection.
 // When this is done, all pending application requests and pending management
 // requests are lost.
@@ -520,6 +522,12 @@ class UnknownType : public ServerEvent
 // SendBinaryManagementRequest, SendGetValuesRequest, and SendRequest to report
 // the detection during their invocation of the closure of a connection by its
 // peer.
+//    When a connection is closed, no attempt is made to read unread data which
+// was sent by a server. In other words, unread server writes are lost when a
+// connection is closed. For example, closure by the peer may be detected when
+// a write is attempted. This detecttion leads to local connection closure with
+// subsequent loss of any unread data which was written by the server (in
+// addition to other state changes). 
 //
 // The interface as a component for testing:
 //    Several features of the interface make it suited for programs which
@@ -796,7 +804,7 @@ class TestFcgiClientInterface
   //       2) A duplicate name was detected among the name-value pairs.
   //    InvalidRecord
   //    a) The construction of an InvalidRecord instance r indicates that an
-  //       invalid valid record was received over the connection and with the
+  //       invalid record was received over the connection and with the
   //       FastCGI request identifier given by r.RequestId(). The conditions
   //       which cause records to be deemed invalid are given in the
   //       description of InvalidRecord.
@@ -953,9 +961,9 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
-  // Sends a request whose data is described by the FcgiRequestDataReference
-  // argument to the FastCGI application server connected to the client
-  // interface by connection.
+  // Attempts to send a request whose data is described by the
+  // FcgiRequestDataReference argument to the FastCGI application server which
+  // is connected to the client interface by connection.
   //
   // Parameters:
   // connection: The local socket descriptor of a connection to a FastCGI

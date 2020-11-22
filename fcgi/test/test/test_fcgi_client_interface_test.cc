@@ -342,7 +342,7 @@ void GTestFatalSendExerciseRequests(
     ::testing::ScopedTrace iteration_tracer {"", __LINE__,
       iteration_count_string.data()};
     ASSERT_NO_THROW(identifier_buffer = client_inter_ptr->SendRequest(
-      observer_ptr->connection, kExerciseDataRef));
+      observer_ptr->connection, exercise_data_ref));
     ASSERT_NE(identifier_buffer, FcgiRequestIdentifier {});
     ASSERT_EQ(identifier_buffer.descriptor(), observer_ptr->connection);
     ASSERT_NE(identifier_buffer.Fcgi_id(), FCGI_NULL_REQUEST_ID);
@@ -445,8 +445,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   constexpr int kDomainCount {3};
   constexpr int kInternetDomainCount {kDomainCount - 1};
   constexpr int kDomainArray[kDomainCount] = {AF_INET, AF_INET6, AF_UNIX};
-  int pipes[kDomainCount][2] = {}; // AF_UNIX doesn't need a pipe.
-  for(int i {0}; i != kDomainCount; ++i)
+  int pipes[kInternetDomainCount][2] = {}; // AF_UNIX doesn't need a pipe.
+  for(int i {0}; i != kInternetDomainCount; ++i)
   {
     ASSERT_NE(pipe(pipes[i]), -1) << std::strerror(errno);
   }
@@ -485,7 +485,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       }
       // Internet servers should write the ephemeral port back to the parent
       // process.
-      if(server_index < kDomainCount)
+      if(server_index < kInternetDomainCount)
       {
         // The port is in network byte order. We can byte-serialize it directly.
         std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
@@ -497,7 +497,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
         }
       }
       // Close all of the pipes.
-      for(int i {0}; i != kDomainCount; ++i)
+      for(int i {0}; i != kInternetDomainCount; ++i)
       {
         close(pipes[i][0]);
         close(pipes[i][1]);
@@ -536,8 +536,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   }
   // else, in parent.
   // Wait to receive port values from the internet servers.
-  in_port_t ports[kDomainCount] = {};
-  for(int i {0}; i < kDomainCount; ++i)
+  in_port_t ports[kInternetDomainCount] = {};
+  for(int i {0}; i < kInternetDomainCount; ++i)
   {
     close(pipes[i][1]);
     ASSERT_EQ(
@@ -807,14 +807,15 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   (
     bool                                   expect_closure_by_server,
     const struct FcgiRequestDataReference& sent_request_ref,
-    int                                    application_request_count
+    int                                    application_request_count,
+    int                                    invocation_line
   )
   {
     int count_of_connections {static_cast<int>(connection_map.size())};
     while(true)
     {
       std::string error_message {ApplicationRequestCountMessage()};
-      ::testing::ScopedTrace response_tracer {"", __LINE__,
+      ::testing::ScopedTrace response_tracer {"", invocation_line,
         error_message.data()};
       std::unique_ptr<ServerEvent> event_uptr {};
       ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
@@ -1034,7 +1035,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
     } // end while(true) loop on types of events derived from ServerEvent.
   };
   ASSERT_NO_FATAL_FAILURE(GTestFatalProcessServerEvents(false,
-    kExerciseDataRef, first_application_request_count));
+    kExerciseDataRef, first_application_request_count, __LINE__));
   // Once all of the responses have been received, the expected observable
   // state values of the client interface are known.
   total_pending_request_count   = 0U;
@@ -1103,7 +1104,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       << "Domain: " << connection_iter->second.domain;
   }
   ASSERT_NO_FATAL_FAILURE(GTestFatalProcessServerEvents(true,
-    close_exercise_data, second_application_request_count));
+    close_exercise_data, second_application_request_count, __LINE__));
   // Verify state for totals.
   total_pending_request_count    = 0U;
   total_completed_request_count += kDomainCount * connection_count *
@@ -1205,17 +1206,110 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 //    a) As a special case, correct behavior is verified when ConnectionCount()
 //       returns zero but at least one connection is disconnected and
 //       associated with completed but unreleased application requests.
-// 2) Correct behavior when a partial response is received on a connection and
-//    other connections are present which are ready to be read. It is specified
-//    that other ready connections will be read until either the ready event
-//    queue is nonempty or all ready connections have been read until they
-//    would block.
+// 2)    The ability to successfully generate an instance of the appropriate
+//    type derived from ServerEvent when receipt of the data of a response has
+//    been interrupted by receipt of data for other responses. In other words,
+//    the ability to handle response generation when the data of a response is
+//    provided over more than one cycle of I/O multiplexing over open
+//    connections.
+//       Note that correct behavior for the above case implies correct behavior
+//    relative to the specification of how data is read in the case that
+//    reading from a connection would block and other ready connections are
+//    present.
 // 3) Tests based on types derived from ServerEvent:
-//    ConnectionClosure
+//    ConnectionClosure:
+//       ConnectionClosure instances are constructed in calls to
+//    RetrieveServerEvent throughout testing. It was determined that the
+//    following properties may not be examined in other testing code.
 //    a) A connection is made, and the server immediately closes the
 //       connection.
-//    b) Other test cases? ?????????????????????????????????????????????
-// 
+//    b) A partial response to a request has been received, and the server
+//       closes the connection before the response is received in-full. At
+//       least, a case for management requests and a case for application
+//       requests should be present.
+//
+//    FcgiResponse:
+//       Use of RetrieveServerEvent and concomitant generation of FcgiResponse
+//    instances occurs throughout testing. The following discussion addresses
+//    properties which were determined to potentially not be covered in testing
+//    code which is not specific to the testing of RetrieveServerEvent.
+//       FcgiResponse is the only event which contains information which will
+//    have been received from a server over multiple FastCGI records. This is
+//    because at least an empty FCGI_STDOUT record and an FCGI_END_REQUEST
+//    record must be received for a response. All other responses are responses
+//    to management requests and use one FastCGI record. Given this property
+//    for FcgiResponse, the order of record receipt is a relevant property for
+//    testing. Also, given this property, record type interleaving is a
+//    relevant property for testing. Finally, all responses to FastCGI requests
+//    share the property that the transmission of a terminal record for
+//    FCGI_STDERR is optional if no data was transmitted over this stream. All
+//    of these properties should be addressed when testing the generation of
+//    FcgiResponse instances from data received from a server upon the
+//    invocation of RetrieveServerEvent.
+//
+//    GetValuesResult:
+//       Generation of GetValuesResult instances is tested in the testing of
+//    SendGetValuuesRequest.
+//    
+//    InvalidRecord:
+//       Generation of an InvalidRecord instance for each of the conditions
+//    that should cause the generation of such a record should be tested. These
+//    conditions are listed in the documentation of InvalidRecord.
+//
+//    UnknownType
+//       Generation of UnknownType instances is tested in the testing of
+//    SendBinaryManagementRequest.
+
+// SendAbortRequest
+// Examined properties:
+// 1) Four properties, each with distinct possible values, are present which
+//    can be considered in combination:
+//    a) Whether the connection of the FcgiRequestIdentifier argument is
+//       connected or not.
+//    b) Whether requests other than the potential request given by the
+//       FcgiRequestIdentifier argument are pending on the connection.
+//    c) As in b, but for completed requests instead of pending requests.
+//    d) Which of the three possible states applies to the
+//       FcgiRequestIdentifier argument: pending, completed, or released.
+//    When disallowed combinations are removed, 16 states remain. Not all of
+//    these states are tested.
+// 2) Detection of connection closure during the call. This involves a
+//    transition of the interface from a state where it registered the
+//    connection as connected to a state where it registered the connection
+//    as disconnected. Specified behavior in this case should be verified.
+//
+// Test cases:
+// 1) A call is made with an FcgiRequestIdentifier argument that corresponds to
+//    a connection that never existed. A return of false is verified.
+// 2) A connection is made.
+//    a) A call is made to SendAbortRequest. A return of false is verified.
+//    b) Two application requests are made. Before the server can process the
+//       requests, a call to SendAbortRequest is made for the second request.
+//       Transmission of a correct FCGI_ABORT_REQUEST record is verified.
+//       Responses are sent by the server. The responses are received by the
+//       client interface and exposed by a call to RetrieveServerEvent. This
+//       causes the requests to transition from pending to completed.
+//    c) A call to SendAbortRequest is made for one of the requests that was
+//       just completed. A return of false is verified.
+//    d) An application request is made. As before, a call to SendAbortRequest
+//       is made for the new request, and correct behavior is verified.
+//    e) The connection is closed. A call to SendAbortRequest is made for one
+//       of the completed-but-unreleased requests. A return of false is
+//       verified.
+//    f) The completed-but-unreleased requests are released. A call to
+//       SendAbortRequest is made with an FcgiRequestIdentifier argument that
+//       does not correspond to one of the previous requests.
+// Note: 1 and 2 cover each of the values of each of the four properties
+//       separately (though not in combination).
+// 3) A connection is made. A request is made with keep_conn set to false. The
+//    server is allowed to process the request. A call to SendAbortRequest is
+//    made. Proper behavior regarding detection of connection is verified.
+//
+// Modules which testing depends on:
+// 1) FcgiServerInterface and, in particular, its behavior regarding receipt
+//    of FCGI_ABORT_REQUEST records.
+//
+// Other modules whose testing depends on this module: none. 
 
 // Management request testing discussion:
 //  1) Management requests and responses each use a single FastCGI record.
@@ -1304,7 +1398,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendBinaryManagementRequest)
 //     server. Distinct requests are sent to each connection. The appropriate
 //     responses are verified.
 //  5) At least one call is made. Before the response to the call is retrieved,
-//     the connection over which the call was made is close by the application
+//     the connection over which the call was made is closed by the application
 //     from a call to CloseConnection. The clearance of the management request
 //     queue for the connection is verified.
 //  6) The client interface must correctly handle the presence of multiple,
@@ -2141,6 +2235,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendGetValuesRequestTestCaseSet3)
   GTestFatalCheckGetValuesResult(gvr_ptr, true,
     local_connection, kNameOnlyMap, ParamsMap {}, __LINE__);
 }
+
+
 
 } // namespace test
 } // namespace test

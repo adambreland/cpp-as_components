@@ -151,7 +151,7 @@ TestFcgiClientInterface::~TestFcgiClientInterface()
 
 bool TestFcgiClientInterface::CloseConnection(int connection)
 {
-  std::map<int, TestFcgiClientInterface::ConnectionState>::iterator
+  std::map<int, ConnectionState>::iterator
   connection_iter {ConnectedCheck(connection)};
   if(connection_iter == connection_map_.end())
     return false;
@@ -830,8 +830,7 @@ void TestFcgiClientInterface::FailedWrite(
   //    then recovery may be possible. In this case, CloseConnection
   //    does not need to be called.
   // 3) If something was written or the server did close the connection,
-  //    then the entry for connection must be removed from connection_map_.
-  //    CloseConnection should be called.
+  //    then CloseConnection should be called.
 
   try // noexcept-equivalent block
   {
