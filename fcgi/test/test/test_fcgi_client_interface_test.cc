@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -105,15 +106,24 @@ void GTestFatalClientInterfaceObserverCheck(
     values.co, __LINE__);
 }
 
-std::atomic<bool> test_fcgi_client_interface_fcgi_server_accept_timeout
+std::atomic<bool> server_accept_timeout
   {false};
 
-extern "C" void SigAlrmHandler(int sig)
+extern "C" void SigAlrmHandler(int)
 {
-  test_fcgi_client_interface_fcgi_server_accept_timeout.store(true);
+  server_accept_timeout.store(true);
 }
 
 // A Google Test test fixture.
+// This test fixture:
+// 1) Performs file descriptor leak checking.
+// 2) Allows pairs of a socket descriptor and a Unix socket file to be
+//    registered for closure and removal, respectively, during clean up.
+//    The file is described by a const char* to the file path.
+// 3) Sets SIGPIPE to be ignored,
+// 4) Establishes SigAlrmHandler for SIGALRM.
+// 5) Restores the default dispositions for SIGPIPE and SIGALRM during clean
+//    up.
 class TestFcgiClientInterfaceTestFixture : public ::testing::Test
 {
  protected:
@@ -123,10 +133,9 @@ class TestFcgiClientInterfaceTestFixture : public ::testing::Test
       __LINE__));
     ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalSetSignalDisposition(
       SIGALRM, &SigAlrmHandler, __LINE__));
-    ASSERT_TRUE(test_fcgi_client_interface_fcgi_server_accept_timeout.
-      is_lock_free());
+    ASSERT_TRUE(server_accept_timeout.is_lock_free());
     // Ensure that the the kTimeout flag is cleared.
-    test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
+    server_accept_timeout.store(false);
   }
 
   void TearDown() override
@@ -138,7 +147,7 @@ class TestFcgiClientInterfaceTestFixture : public ::testing::Test
       EXPECT_NE(unlink(iter->second), -1) << std::strerror(errno);
     }
     // Clear the kTimeout flag to reset shared state.
-    test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
+    server_accept_timeout.store(false);
     testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc_,
       "TestFcgiClientInterfaceManagementRequestTests", __LINE__);
     ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGALRM,
@@ -151,6 +160,8 @@ class TestFcgiClientInterfaceTestFixture : public ::testing::Test
   testing::FileDescriptorLeakChecker fdlc_ {};
 };
 
+// The socket domain must be set in a copy before use.
+// If AF_UNIX is the domain, a path must be set in the copy.
 constexpr const struct InterfaceCreationArguments kDefaultInterfaceArguments
 {
   /* domain          = */ AF_UNSPEC,
@@ -161,7 +172,7 @@ constexpr const struct InterfaceCreationArguments kDefaultInterfaceArguments
   /* unix_path       = */ nullptr,
 };
 
-// Create maps for testing which match the default server interface arguments.
+// Maps for testing which match the default server interface arguments.
 const ParamsMap kNameOnlyMap
 {
   {FCGI_MAX_CONNS, {}},
@@ -186,9 +197,9 @@ const ParamsMap kMpxsMapWithValue
 // AF_UNIX files cannot be created in the Bazel temporary file directory
 // because its name is too long.
 constexpr const char*const kUnixPath1
-  {"/tmp/TestFcgiClientInterfaceManagementRequests1"};
+  {"/tmp/TestFcgiClientInterfaceTesting_AF_UNIX_1"};
 constexpr const char*const kUnixPath2
-  {"/tmp/TestFcgiClientInterfaceManagementRequests2"};
+  {"/tmp/TestFcgiClientInterfaceTesting_AF_UNIX_2"};
 
 void GTestFatalCheckGetValuesResult(
   const GetValuesResult* gvr_ptr,
@@ -207,37 +218,6 @@ void GTestFatalCheckGetValuesResult(
     gvr_ptr->RequestId());
   EXPECT_EQ(request_map, gvr_ptr->RequestMap());
   EXPECT_EQ(response_map, gvr_ptr->ResponseMap());
-}
-
-constexpr const struct itimerval kTimeout
-{
-  {0, 0},   // it_interval (don't repeat)
-  {0, 2000} // it_value (wait 2 ms)
-};
-
-//    The loop until AcceptRequests blocks was found to be needed as a single
-// call to AcceptRequests does not necessarily read all of the information
-// of a management request. The timer set above and its associated
-// SIGALRM signal are used to break out of the blocked AcceptRequests call
-// and the loop.
-//    Note that this implementation also tests the specified behavior of
-// AcceptRequests when it has blocked in an I/O multiplexing call and the
-// call fails with errno == EINTR.
-void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
-  int invocation_line)
-{
-  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
-    "GTestFatalAcceptRequestsExpectNone"};
-  std::vector<FcgiRequest> accept_buffer {};
-  test_fcgi_client_interface_fcgi_server_accept_timeout.store(false);
-  ASSERT_NE(setitimer(ITIMER_REAL, &kTimeout, nullptr), -1) <<
-    std::strerror(errno);
-  while(!(test_fcgi_client_interface_fcgi_server_accept_timeout.load()))
-  {
-    ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests());
-    EXPECT_EQ(accept_buffer.size(), 0U);
-    accept_buffer.clear();
-  }
 }
 
 void ChildServerAlrmRestoreAndSelfKillSet()
@@ -282,20 +262,21 @@ const std::vector<std::uint8_t> kFcgiDataForClientExercise  {5, 6, 7, 8, 9};
 
 const struct FcgiRequestDataReference kExerciseDataRef
 {
-  /* role           = */ FCGI_RESPONDER,
-  /* keep_conn      = */ true,
+  /* role           = */  FCGI_RESPONDER,
+  /* keep_conn      = */  true,
   /* params_map_ptr = */ &kSharedExerciseParams,
-  /* stdin_begin    = */ kStdinDataForClientExercise.data(),
-  /* stdin_end      = */ kStdinDataForClientExercise.data() +
-                         kStdinDataForClientExercise.size(),
-  /* data_begin     = */ kFcgiDataForClientExercise.data(),
-  /* data_end       = */ kFcgiDataForClientExercise.data() +
-                         kFcgiDataForClientExercise.size()
+  /* stdin_begin    = */  kStdinDataForClientExercise.data(),
+  /* stdin_end      = */  kStdinDataForClientExercise.data() +
+                          kStdinDataForClientExercise.size(),
+  /* data_begin     = */  kFcgiDataForClientExercise.data(),
+  /* data_end       = */  kFcgiDataForClientExercise.data() +
+                          kFcgiDataForClientExercise.size()
 };
 
 constexpr FcgiType kUnknownTypeForExercise {static_cast<FcgiType>(64)};
 const std::vector<std::uint8_t> kDataForUnknownBinaryRequest {2U, 4U};
 
+// This function is used in the implementation of ConnectCase1.
 void GTestFatalSendExerciseRequests(
   TestFcgiClientInterface*                            client_inter_ptr,
   const struct FcgiRequestDataReference&              exercise_data_ref,
@@ -361,6 +342,148 @@ void GTestFatalSendExerciseRequests(
     *client_inter_ptr, total_observer, __LINE__));
 }
 
+void GTestNonFatalStreamDataComparison
+(
+  const std::uint8_t*              reference_stream_begin,
+  const std::uint8_t*              reference_stream_end,
+  const std::vector<std::uint8_t>& response_stream,
+  int                              invocation_line
+)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalStreamDataComparison"};
+  using IterPair = std::pair<const std::uint8_t*,
+                             std::vector<std::uint8_t>::const_iterator>;
+  std::size_t reference_stream_length
+    {static_cast<std::size_t>(std::distance(
+      reference_stream_begin, reference_stream_end))};
+  if(reference_stream_length == response_stream.size())
+  {
+    IterPair first_diff {std::mismatch(
+      reference_stream_begin,
+      reference_stream_end,
+      response_stream.begin())};
+    IterPair ends {
+      reference_stream_end,
+      response_stream.end()};
+    EXPECT_EQ(first_diff, ends);
+  }
+  else
+  {
+    ADD_FAILURE() << "Stream length mismatch";
+  }
+};
+
+void GTestNonFatalExerciseResponseCompare(
+  const struct FcgiRequestDataReference sent_request_ref,
+  FcgiResponse* app_response_ptr,
+  int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalExerciseResponseCompare"};
+
+  // Returned FcgiRequestDataReference instance
+  const struct FcgiRequestDataReference& request_ref
+    {app_response_ptr->Request()};
+  EXPECT_EQ(request_ref.role,           sent_request_ref.role);
+  EXPECT_EQ(request_ref.keep_conn,      sent_request_ref.keep_conn);
+  EXPECT_EQ(request_ref.params_map_ptr, sent_request_ref.params_map_ptr);
+  EXPECT_EQ(request_ref.stdin_begin,    sent_request_ref.stdin_begin);
+  EXPECT_EQ(request_ref.stdin_end,      sent_request_ref.stdin_end);
+  EXPECT_EQ(request_ref.data_begin,     sent_request_ref.data_begin);
+  EXPECT_EQ(request_ref.data_end,       sent_request_ref.data_end);
+  // Application status
+  EXPECT_EQ(app_response_ptr->AppStatus(), EXIT_SUCCESS);
+  // Protocol status
+  EXPECT_EQ(app_response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+  // FCGI_STDERR and FCGI_STDOUT
+  GTestNonFatalStreamDataComparison(sent_request_ref.data_begin,
+    sent_request_ref.data_end, app_response_ptr->FcgiStderr(), __LINE__);
+  GTestNonFatalStreamDataComparison(sent_request_ref.stdin_begin,
+    sent_request_ref.stdin_end, app_response_ptr->FcgiStdout(), __LINE__);
+}
+
+constexpr const struct itimerval kTimeout
+{
+  {0, 0},   // it_interval (don't repeat)
+  {0, 2000} // it_value (wait 2 ms)
+};
+
+// The following functions facilitate the processing of management and
+// application requests by FastCGI test server instances.
+//    The loop until AcceptRequests blocks was found to be needed as a single
+// call to AcceptRequests does not necessarily read all of the information
+// of a request. A timer and its associated SIGALRM signal are used to break
+// out of the blocked AcceptRequests call and the loop.
+//    Note that this implementation also tests the specified behavior of
+// AcceptRequests when it has blocked in an I/O multiplexing call and the
+// call fails with errno == EINTR.
+//    Any FcgiRequest objects which remain after op is called are cleared
+// before another call to AcceptRequests is made.
+template <typename Func>
+void GTestFatalServerAcceptLoop(FcgiServerInterface* inter_ptr,
+  Func op, int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalServerAcceptLoop"};
+  std::vector<FcgiRequest> accept_buffer {};
+  server_accept_timeout.store(false);
+  ASSERT_NE(setitimer(ITIMER_REAL, &kTimeout, nullptr), -1) <<
+    std::strerror(errno);
+  while(!(server_accept_timeout.load()))
+  {
+    ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests());
+    ASSERT_NO_THROW(ASSERT_NO_FATAL_FAILURE(op(&accept_buffer)));
+    accept_buffer.clear();
+  }
+}
+
+void OperationForExpectNone(std::vector<FcgiRequest>* accept_buffer_ptr)
+{
+  EXPECT_EQ(accept_buffer_ptr->size(), 0U);
+  accept_buffer_ptr->clear();
+}
+
+void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
+  int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalAcceptRequestsExpectNone"};
+  ASSERT_NO_FATAL_FAILURE(GTestFatalServerAcceptLoop(inter_ptr,
+    &OperationForExpectNone, __LINE__));
+}
+
+void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
+  const ParamsMap& sent_environ, int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalAcceptRequestsExerciseRequestEcho"};
+
+  auto OperationForRequestEcho = [&sent_environ]
+  (
+    std::vector<FcgiRequest>* accept_buffer_ptr
+  )->void
+  {
+    for(std::vector<FcgiRequest>::iterator iter {accept_buffer_ptr->begin()};
+      iter != accept_buffer_ptr->end(); ++iter)
+    {
+      EXPECT_EQ(iter->get_environment_map(), sent_environ);
+      const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
+      const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
+      int write_count {0};
+      // Convert the returned boolean write status to an integer.
+      // Check that all writes were successful.
+      write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
+      write_count += iter->WriteError(data_ref.begin(), data_ref.end());
+      write_count += iter->Complete(EXIT_SUCCESS);
+      ASSERT_EQ(write_count, 3);
+    }
+  };
+  std::function<void(std::vector<FcgiRequest>*)> local_op
+    {OperationForRequestEcho};
+  GTestFatalServerAcceptLoop(inter_ptr, local_op, __LINE__);
+}
+
 } // namespace
 
 // CloseConnection
@@ -376,22 +499,278 @@ void GTestFatalSendExerciseRequests(
 // 7) Whether or not closure occurs when the client interface has registered
 //    that the connection is ready to be read and it has not been read.
 //
+// Test cases:
+// 1) A call to CloseConnection is made for a connection which was never
+//    connected.
+// 2) A connection is made. An application request is made and the server
+//    is allowed to respond to it. The response is retrieved with a call to
+//    RetrieveServerEvent. Another application request is made. An
+//    FCGI_GET_VALUES request is made. A call to CloseConnection is made before
+//    the server is allowed to respond to the requests. When the connection
+//    has been closed, another call to CloseConnection is made.
+// 3) Two connections are made to a server. A call to CloseConnection is made
+//    for one of the connections. An application request is then made to the
+//    other connection. The server is allowed to process the request. The
+//    response is retrieved. The connection is closed with a call to
+//    CloseConnection.
+// 4) Two connections are made to a server. A management request is made to
+//    both connections. The server is allowed to process the requests. A call
+//    to RetrieveServerEvent is made. The second connection is closed with a
+//    call to CloseConnection.
 //
+// Modules which testing depends on:
+// 1) FcgiServerInterface
+// 2) The immediate success or failure of connection to a listening socket by
+//    the implementation of local (AF_UNIX) sockets.
 //
+// Other modules whose testing depends on this module: none.
 
-// CompletedRequestCount
-// Discussion:
-//    Both overloads of CompletedRequestCount are used throughout testing code.
-// In particular, the connection overload is used in
-// GTestFatalClientInterfaceConnectionOnlyObserverCheck, and the overload which
-// takes no parameters is used in GTestFatalClientInterfaceObserverCheck.
-// Only special cases which may not be covered in other tests are treated here.
-//
-// Properties examined here:
-// 1) Correct behavior of the connection overload when it is called with a
-//    value for connection which has never been connected.
-//
-// 
+TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet1)
+{
+  // Create a server.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  // Create the server interface.
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  // Create a client.
+  TestFcgiClientInterface client_inter {};
+  ClientInterfaceConnectionOnlyObserverValues observer
+  {
+    /* connection                         = */ 1000,
+    /* connection_completed_request_count = */ 0U,
+    /* connection_count                   = */ 0,
+    /* is_connected                       = */ false,
+    /* management_request_count           = */ 0U,
+    /* connection_pending_request_count   = */ 0U,
+    /* ready_event_count                  = */ 0U
+  };
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+
+  // TEST CASE 1
+  ASSERT_NO_THROW(ASSERT_FALSE(client_inter.CloseConnection(1000)));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+
+  // TEST CASE 2
+  int local_connection {};
+  ASSERT_NO_THROW(local_connection = client_inter.Connect(kUnixPath1, 0U));
+  ASSERT_NE(local_connection, -1) << std::strerror(errno);
+  observer.connection       = local_connection;
+  observer.connection_count = 1;
+  observer.is_connected     = true;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  FcgiRequestIdentifier request_id_1 {};
+  ASSERT_NO_THROW(request_id_1 =
+    client_inter.SendRequest(local_connection, kExerciseDataRef));
+  observer.connection_pending_request_count = 1U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  // Allow the server to process the connection and the request.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsRequestEcho(
+    inter_uptr.get(), kSharedExerciseParams, __LINE__));
+  // Process the response.
+  std::unique_ptr<ServerEvent> response_uptr {};
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(response_uptr.get())};
+  ASSERT_NE(response_ptr, nullptr);
+  observer.connection_completed_request_count = 1U;
+  observer.connection_pending_request_count   = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  GTestNonFatalExerciseResponseCompare(kExerciseDataRef, response_ptr,
+    __LINE__);
+  FcgiRequestIdentifier request_id_2 {};
+  ASSERT_NO_THROW(request_id_2 =
+    client_inter.SendRequest(local_connection, kExerciseDataRef));
+  observer.connection_pending_request_count = 1U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendGetValuesRequest(
+    local_connection, kMapWithValues)));
+  observer.management_request_count = 1U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  ASSERT_NO_THROW(EXPECT_TRUE(client_inter.CloseConnection(local_connection)));
+  observer.connection_count                 = 0;
+  observer.is_connected                     = false;
+  observer.management_request_count         = 0U;
+  observer.connection_pending_request_count = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  ASSERT_NO_THROW(EXPECT_FALSE(client_inter.CloseConnection(local_connection)));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet2)
+{
+  // Create a server.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  // Create the server interface.
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  // Create a client.
+  TestFcgiClientInterface client_inter {};
+
+  // TEST CASE 3
+  constexpr int connection_number {2};
+  int local_connection_array[connection_number] = {};
+  for(int i {0}; i != connection_number; ++i)
+  {
+    ASSERT_NO_THROW(local_connection_array[i] = client_inter.Connect(
+      kUnixPath1, 0U)) << "Connection iteration: " << i;
+    EXPECT_TRUE(client_inter.IsConnected(local_connection_array[i]));
+    EXPECT_NE(local_connection_array[i], -1);
+  }
+  EXPECT_EQ(connection_number, client_inter.ConnectionCount());
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.CloseConnection(
+    local_connection_array[0])));
+  EXPECT_FALSE(client_inter.IsConnected(local_connection_array[0]));
+  EXPECT_EQ(client_inter.ConnectionCount(), 1);
+  ClientInterfaceConnectionOnlyObserverValues observer
+  {
+    /* connection                         = */ local_connection_array[1],
+    /* connection_completed_request_count = */ 0U,
+    /* connection_count                   = */ 1,
+    /* is_connected                       = */ true,
+    /* management_request_count           = */ 0U,
+    /* connection_pending_request_count   = */ 0U,
+    /* ready_event_count                  = */ 0U
+  };
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  FcgiRequestIdentifier new_request {};
+  ASSERT_NO_THROW(new_request =
+    client_inter.SendRequest(local_connection_array[1], kExerciseDataRef));
+  observer.connection_pending_request_count = 1U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  // Allow the server to process the request.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsRequestEcho(
+    inter_uptr.get(), kSharedExerciseParams, __LINE__));
+  // Process the response.
+  std::unique_ptr<ServerEvent> response_uptr {};
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(response_uptr.get())};
+  ASSERT_NE(response_ptr, nullptr);
+  observer.connection_completed_request_count = 1U;
+  observer.connection_pending_request_count   = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+  GTestNonFatalExerciseResponseCompare(kExerciseDataRef, response_ptr,
+    __LINE__);
+  ASSERT_NO_THROW(EXPECT_TRUE(
+    client_inter.CloseConnection(local_connection_array[1])));
+  observer.connection_count                 = 0;
+  observer.is_connected                     = false;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer, __LINE__));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet3)
+{
+  // Create a server.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  // Create the server interface.
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  // Create a client.
+  TestFcgiClientInterface client_inter {};
+
+  // TEST CASE 4
+  constexpr int connection_number {2};
+  int local_connection_array[connection_number] = {};
+  for(int i {0}; i != connection_number; ++i)
+  {
+    ASSERT_NO_THROW(local_connection_array[i] = client_inter.Connect(
+      kUnixPath1, 0U)) << "Connection iteration: " << i;
+    EXPECT_TRUE(client_inter.IsConnected(local_connection_array[i]));
+    EXPECT_NE(local_connection_array[i], -1);
+  }
+  ClientInterfaceConnectionOnlyObserverValues observer_array[connection_number]
+    = {};
+  for(int i {0}; i != connection_number; ++i)
+  {
+    observer_array[i].connection                         =
+      local_connection_array[i];
+    observer_array[i].connection_completed_request_count = 0U;
+    observer_array[i].connection_count                   = 2;
+    observer_array[i].is_connected                       = true;
+    observer_array[i].management_request_count           = 0U;
+    observer_array[i].connection_pending_request_count   = 0U;
+    observer_array[i].ready_event_count                  = 0U;
+
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendGetValuesRequest(
+      local_connection_array[i], kMapWithValues)));
+    observer_array[i].management_request_count = 1U;
+    ASSERT_NO_FATAL_FAILURE(
+      GTestFatalClientInterfaceConnectionOnlyObserverCheck(client_inter,
+        observer_array[i], __LINE__));
+  }
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(
+    inter_uptr.get(), __LINE__));
+  std::unique_ptr<ServerEvent> response_uptr {};
+  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(response_uptr.get(), nullptr);
+  GetValuesResult* gvr_ptr {dynamic_cast<GetValuesResult*>(
+    response_uptr.get())};
+  ASSERT_NE(gvr_ptr, nullptr);
+  int management_response_connection {gvr_ptr->RequestId().descriptor()};
+  bool first_connection {management_response_connection ==
+    local_connection_array[0]};
+  int management_response_connection_index {int(!first_connection)};
+  int other_connection_index {int(first_connection)};
+  ASSERT_EQ(local_connection_array[management_response_connection_index],
+    management_response_connection);
+  int unretrieved_response_connection
+    {local_connection_array[other_connection_index]};
+  ASSERT_NO_FATAL_FAILURE(GTestFatalCheckGetValuesResult(gvr_ptr, false,
+    management_response_connection, kNameOnlyMap, kMapWithValues, __LINE__));
+  observer_array[management_response_connection_index].management_request_count
+    = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer_array[management_response_connection_index],
+    __LINE__));
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.CloseConnection(
+    unretrieved_response_connection)));
+  observer_array[other_connection_index].connection_count         = 1;
+  observer_array[other_connection_index].is_connected             = false;
+  observer_array[other_connection_index].management_request_count = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
+    client_inter, observer_array[other_connection_index], __LINE__));
+}
 
 // Connect
 // Examined properties:
@@ -438,15 +817,15 @@ void GTestFatalSendExerciseRequests(
 // 3) Failure as described above for each of the three domains is checked.
 //    For AF_UNIX, failure is checked when the connection path is present and
 //    absent in the file system.
+//
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 {
   ASSERT_NO_THROW(resource_list_.push_back({-1, kUnixPath1}));
   constexpr int kDomainCount {3};
-  constexpr int kInternetDomainCount {kDomainCount - 1};
   constexpr int kDomainArray[kDomainCount] = {AF_INET, AF_INET6, AF_UNIX};
-  int pipes[kInternetDomainCount][2] = {}; // AF_UNIX doesn't need a pipe.
-  for(int i {0}; i != kInternetDomainCount; ++i)
+  int pipes[kDomainCount][2] = {};
+  for(int i {0}; i != kDomainCount; ++i)
   {
     ASSERT_NE(pipe(pipes[i]), -1) << std::strerror(errno);
   }
@@ -483,23 +862,25 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       {
         _exit(EXIT_FAILURE);
       }
-      // Internet servers should write the ephemeral port back to the parent
-      // process.
-      if(server_index < kInternetDomainCount)
-      {
-        // The port is in network byte order. We can byte-serialize it directly.
-        std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
-          &std::get<2>(inter_return)))};
-        if(socket_functions::SocketWrite(pipes[server_index][1], port_ptr,
-          sizeof(in_port_t)) < sizeof(in_port_t))
-        {
-          _exit(EXIT_FAILURE);
-        }
-      }
-      // Close all of the pipes.
-      for(int i {0}; i != kInternetDomainCount; ++i)
+      // All servers should write the ephemeral port back to the parent process.
+      // The port is in network byte order. We can byte-serialize it directly.
+      // Note that this process is a synchronization mechanism between the
+      // server processes and the client process.
+      // Close all of the read pipes.
+      for(int i {0}; i != kDomainCount; ++i)
       {
         close(pipes[i][0]);
+      }
+      std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
+        &std::get<2>(inter_return)))};
+      if(socket_functions::SocketWrite(pipes[server_index][1], port_ptr,
+        sizeof(in_port_t)) < sizeof(in_port_t))
+      {
+        _exit(EXIT_FAILURE);
+      }
+      // Close all of the write pipes.
+      for(int i {0}; i != kDomainCount; ++i)
+      {
         close(pipes[i][1]);
       }
       std::vector<FcgiRequest> requests {};
@@ -536,8 +917,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   }
   // else, in parent.
   // Wait to receive port values from the internet servers.
-  in_port_t ports[kInternetDomainCount] = {};
-  for(int i {0}; i < kInternetDomainCount; ++i)
+  // Note that this process is a synchronization mechanism between the
+  // server processes and the client process.
+  in_port_t ports[kDomainCount] = {};
+  for(int i {0}; i < kDomainCount; ++i)
   {
     close(pipes[i][1]);
     ASSERT_EQ(
@@ -845,54 +1228,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
         ASSERT_NE(app_request_iter, application_request_set.end());
         application_request_set.erase(app_request_iter);
                     /// Verify the data of the response. ///
-        // Returned FcgiRequestDataReference instance
-          const struct FcgiRequestDataReference& request_ref
-            {app_response_ptr->Request()};
-          EXPECT_EQ(request_ref.role,           sent_request_ref.role);
-          EXPECT_EQ(request_ref.keep_conn,      sent_request_ref.keep_conn);
-          EXPECT_EQ(request_ref.params_map_ptr, sent_request_ref.params_map_ptr);
-          EXPECT_EQ(request_ref.stdin_begin,    sent_request_ref.stdin_begin);
-          EXPECT_EQ(request_ref.stdin_end,      sent_request_ref.stdin_end);
-          EXPECT_EQ(request_ref.data_begin,     sent_request_ref.data_begin);
-          EXPECT_EQ(request_ref.data_end,       sent_request_ref.data_end);
-        // Application status
-          EXPECT_EQ(app_response_ptr->AppStatus(), EXIT_SUCCESS);
-        // Protocol status
-          EXPECT_EQ(app_response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
-        // FCGI_STDERR and FCGI_STDOUT
-        auto StreamDataComparison =
-        []
-        (
-          const std::uint8_t*              reference_stream_begin,
-          const std::uint8_t*              reference_stream_end,
-          const std::vector<std::uint8_t>& response_stream
-        )->void
-        {
-          using IterPair = std::pair<const std::uint8_t*,
-                                     std::vector<std::uint8_t>::const_iterator>;
-          std::size_t reference_stream_length
-            {static_cast<std::size_t>(std::distance(
-              reference_stream_begin, reference_stream_end))};
-          if(reference_stream_length == response_stream.size())
-          {
-            IterPair first_diff {std::mismatch(
-              reference_stream_begin,
-              reference_stream_end,
-              response_stream.begin())};
-            IterPair ends {
-              reference_stream_end,
-              response_stream.end()};
-            EXPECT_EQ(first_diff, ends);
-          }
-          else
-          {
-            ADD_FAILURE() << "Stream length mismatch";
-          }
-        };
-        StreamDataComparison(sent_request_ref.data_begin,
-          sent_request_ref.data_end, app_response_ptr->FcgiStderr());
-        StreamDataComparison(sent_request_ref.stdin_begin,
-          sent_request_ref.stdin_end, app_response_ptr->FcgiStdout());
+        GTestNonFatalExerciseResponseCompare(sent_request_ref,
+          app_response_ptr, __LINE__);
               /// Check if all expected events have been received. ///
         if(ResponseReceiptCompletionCheck())
         {
@@ -1146,6 +1483,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 }
 
 // Testing of:
+// std::size_t CompletedRequestCount()
+// std::size_t CompletedRequestCount(int)
 // ConnectionCount
 // IsConnected
 // ManagementRequestCount
@@ -1154,15 +1493,24 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 // ReadyEventCount
 //
 // Discussion:
-//    The above functions are used throughout testing and in
+//    The above functions are used throughout testing and, in particular, in
 // GTestFatalClientInterfaceConnectionOnlyObserverCheck and
 // GTestFatalClientInterfaceObserverCheck. The only special cases which have
-// been determined for these functions are when IsConnected and
-// PendingRequestCount are called with a connection which has never been
-// connected.
+// been determined for these functions are when CompletedRequestCount,
+// IsConnected, and PendingRequestCount are called with a connection which has
+// never been connected.
 //
 //
+// Modules which testing depends on: none.
+// Other modules whose testing depends on this module: none.
 
+TEST(AggregatedObservers, UknownConnection)
+{
+  TestFcgiClientInterface client_inter {};
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.CompletedRequestCount(1000), 0U));
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.IsConnected(1000), false));
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.PendingRequestCount(1000), 0U));
+}
 
 // ReleaseId
 // ReleaseId(FcgiRequestIdentifier)
@@ -1198,6 +1546,12 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 // 5) A call to ReleaseId(c) is made when c refers to a connection which is
 //    no longer connected and which has completed but unreleased application
 //    requests.
+
+
+
+
+
+
 
 // RetrieveServerEvent
 // Examined properties:
