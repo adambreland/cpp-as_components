@@ -30,7 +30,11 @@ Discipline for defining functions which use Google Test assertions:
 3) Any function which uses a fatal assertion must return void. As such, any
    function which is named with the "GTestFatal" prefix must return void. The
    requirement on returning void is not present for functions which do not use
-   fatal assertions. 
+   fatal assertions.
+4) Exceptions from tested modules which occur during the execution of a
+   function which uses Google Test assertions are usually caught and treated
+   as fatal failures. For example, ASSERT_NO_THROW could be used to catch an
+   exception from a function under test and report it as a fatal failure.
 
 Use of functions which use Google Test assertions:
 1) When using a function with a Google Test prefix, the invocation line of the
