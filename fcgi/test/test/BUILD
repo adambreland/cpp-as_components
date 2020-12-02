@@ -86,6 +86,7 @@ cc_library(
 cc_test(
     name     = "connect_interpositioning_test",
     deps     = [
+        "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "//test:test_fcgi_client_interface",
         "//test/test:client_interface_testing_utilities",
