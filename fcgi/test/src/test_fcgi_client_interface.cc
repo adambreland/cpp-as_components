@@ -348,7 +348,7 @@ int TestFcgiClientInterface::Connect(const char* address, in_port_t port)
         continue;
       }
       else if((errno == ECONNREFUSED) || (errno == EACCES) ||
-        (errno == ETIMEDOUT))
+        (errno == ETIMEDOUT) || (errno == ENOENT))
       {
         return -1;
       }

@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -1292,6 +1293,31 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
     EXPECT_EQ(completed_req_return, 0U);
   }
   EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
+}
+
+// See the documentation for the test cases of Connect for the discussion of
+// ConnectCase2.
+
+TEST(Connect, ConnectCase3)
+{
+  TestFcgiClientInterface client_inter {};
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("127.0.0.1", 11000U), -1));
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("::1", 11000U), -1));
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect(kUnixPath1, 0U), -1));
+  int unix_socket {socket(AF_UNIX, SOCK_STREAM, 0)};
+  ASSERT_NE(unix_socket, -1) << std::strerror(errno);
+  struct sockaddr_un unix_address {};
+  unix_address.sun_family = AF_UNIX;
+  std::strcpy(unix_address.sun_path, kUnixPath1);
+  if((bind(unix_socket, static_cast<struct sockaddr*>(static_cast<void*>(
+    &unix_address)), sizeof(struct sockaddr_un))) == -1)
+  {
+    close(unix_socket);
+    FAIL() << "A call to bind failed.\n" << std::strerror(errno);
+  }
+  close(unix_socket);
+  EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect(kUnixPath1, 0U), -1));
+  ASSERT_NE(unlink(kUnixPath1), -1) << std::strerror(errno);
 }
 
 // Testing of:
