@@ -31,9 +31,6 @@ void GTestFatalClientInterfaceConnectionOnlyObserverCheck(
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalClientInterfaceConnectionOnlyObserverCheck"};
-  // Nonfatal checks.
-  EXPECT_EQ(client_inter.ConnectionCount(), values.connection_count);
-  EXPECT_EQ(client_inter.ReadyEventCount(), values.ready_event_count);
 
   // Fatal checks.
   std::size_t connection_completed_request_count_return {};
@@ -59,6 +56,22 @@ void GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     values.connection_pending_request_count);
 }
 
+void GTestNonFatalClientInterfaceInstanceObserverCheck(
+  const TestFcgiClientInterface& client_inter,
+  const struct ClientInterfaceInstanceObserverValues& values,
+  int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestNonFatalClientInterfaceInstanceObserverCheck"};
+
+  EXPECT_EQ(values.total_completed_request_count,
+    client_inter.CompletedRequestCount());
+  EXPECT_EQ(values.connection_count, client_inter.ConnectionCount());
+  EXPECT_EQ(values.total_pending_request_count,
+    client_inter.PendingRequestCount());
+  EXPECT_EQ(values.ready_event_count, client_inter.ReadyEventCount());
+}
+
 void GTestFatalClientInterfaceObserverCheck(
   const TestFcgiClientInterface& client_inter,
   const struct ClientInterfaceObserverValues& values,
@@ -67,11 +80,8 @@ void GTestFatalClientInterfaceObserverCheck(
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalClientInterfaceObserverCheck"};
 
-  EXPECT_EQ(values.total_completed_request_count,
-    client_inter.CompletedRequestCount());
-  EXPECT_EQ(values.total_pending_request_count,
-    client_inter.PendingRequestCount());
-
+  GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
+    values.in, __LINE__);
   GTestFatalClientInterfaceConnectionOnlyObserverCheck(client_inter,
     values.co, __LINE__);
 }
@@ -150,9 +160,8 @@ void ChildServerAlrmRestoreAndSelfKillSet()
   {
     _exit(EXIT_FAILURE);
   }
-  // Establish a self-kill timer to ensure process termination regardless of
-  // potential errors in the parent.
-  alarm(3U);
+  // Establish a self-kill timer to ensure process termination.
+  alarm(kAlarmSecondLimit);
 }
 
 // This function is used in the implementation of ConnectCase1.
@@ -168,17 +177,11 @@ void GTestFatalSendExerciseRequests(
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalExerciseTestFcgiClientInterface"};
-  // Actions:
-  // 0) Perform observer updates checks throughout.
-  // 1) Send an FCGI_GET_VALUES request through SendGetValuesRequest.
-  // 2) Send an unknown mangement request through SendBinaryManagementRequest.
-  // 3) Send three application requests.
-  // 4) Update pointed-to state.
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr = client_inter_ptr->SendGetValuesRequest(
     observer_ptr->connection, kMapWithValues));
   ASSERT_TRUE(send_gvr);
-  observer_ptr->management_request_count += 1U;
+  ++(observer_ptr->management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     *client_inter_ptr, *observer_ptr, __LINE__));
   bool send_binary {false};
@@ -189,7 +192,7 @@ void GTestFatalSendExerciseRequests(
     kDataForUnknownBinaryRequest.data() +
       kDataForUnknownBinaryRequest.size()));
   ASSERT_TRUE(send_binary);
-  observer_ptr->management_request_count += 1U;
+  ++(observer_ptr->management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     *client_inter_ptr, *observer_ptr, __LINE__));
   FcgiRequestIdentifier identifier_buffer {};
@@ -211,14 +214,10 @@ void GTestFatalSendExerciseRequests(
   // Update the pointed-to total pending request count.
   observer_ptr->connection_pending_request_count += application_request_count;
   *total_pending_ptr   += application_request_count;
-  struct ClientInterfaceObserverValues total_observer
-  {
-    *observer_ptr,
-    *total_completed_ptr,
-    *total_pending_ptr
-  };
-  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
-    *client_inter_ptr, total_observer, __LINE__));
+  EXPECT_EQ(*total_completed_ptr, client_inter_ptr->CompletedRequestCount());
+  EXPECT_EQ(*total_pending_ptr, client_inter_ptr->PendingRequestCount());
+  GTestFatalClientInterfaceConnectionOnlyObserverCheck(*client_inter_ptr,
+    *observer_ptr, __LINE__);
 }
 
 void GTestNonFatalStreamDataComparison
@@ -248,7 +247,7 @@ void GTestNonFatalStreamDataComparison
   }
   else
   {
-    ADD_FAILURE() << "Stream length mismatch";
+    ADD_FAILURE() << "Stream length mismatch.";
   }
 };
 
@@ -263,13 +262,8 @@ void GTestNonFatalExerciseResponseCompare(
   // Returned FcgiRequestDataReference instance
   const struct FcgiRequestDataReference& request_ref
     {app_response_ptr->Request()};
-  EXPECT_EQ(request_ref.role,           sent_request_ref.role);
-  EXPECT_EQ(request_ref.keep_conn,      sent_request_ref.keep_conn);
-  EXPECT_EQ(request_ref.params_map_ptr, sent_request_ref.params_map_ptr);
-  EXPECT_EQ(request_ref.stdin_begin,    sent_request_ref.stdin_begin);
-  EXPECT_EQ(request_ref.stdin_end,      sent_request_ref.stdin_end);
-  EXPECT_EQ(request_ref.data_begin,     sent_request_ref.data_begin);
-  EXPECT_EQ(request_ref.data_end,       sent_request_ref.data_end);
+  EXPECT_EQ(request_ref, sent_request_ref);
+  
   // Application status
   EXPECT_EQ(app_response_ptr->AppStatus(), EXIT_SUCCESS);
   // Protocol status

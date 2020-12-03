@@ -38,6 +38,17 @@ using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
 // values.
 struct FcgiRequestDataReference
 {
+  bool operator==(const FcgiRequestDataReference& rhs) const noexcept
+  {
+    return (role           == rhs.role)           &&
+           (keep_conn      == rhs.keep_conn)      &&
+           (params_map_ptr == rhs.params_map_ptr) &&
+           (stdin_begin    == rhs.stdin_begin)    &&
+           (stdin_end      == rhs.stdin_end)      &&
+           (data_begin     == rhs.data_begin)     &&
+           (data_end       == rhs.data_end);
+  }
+
   // Request metadata.
   std::uint16_t       role;
   bool                keep_conn;
