@@ -290,34 +290,43 @@ void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
     &OperationForExpectNone, __LINE__));
 }
 
+void GTestFatalOperationForRequestEcho(
+  std::vector<FcgiRequest>* accept_buffer_ptr,
+  const ParamsMap& sent_environ,
+  int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalOperationForRequestEcho"};
+
+  for(std::vector<FcgiRequest>::iterator iter {accept_buffer_ptr->begin()};
+    iter != accept_buffer_ptr->end(); ++iter)
+  {
+    EXPECT_EQ(iter->get_environment_map(), sent_environ);
+    const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
+    const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
+    int write_count {0};
+    // Convert the returned boolean write status to an integer.
+    // Check that all writes were successful.
+    write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
+    write_count += iter->WriteError(data_ref.begin(), data_ref.end());
+    write_count += iter->Complete(EXIT_SUCCESS);
+    ASSERT_EQ(write_count, 3);
+  }
+};
+
 void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
   const ParamsMap& sent_environ, int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalAcceptRequestsExerciseRequestEcho"};
 
-  auto OperationForRequestEcho = [&sent_environ]
-  (
-    std::vector<FcgiRequest>* accept_buffer_ptr
-  )->void
-  {
-    for(std::vector<FcgiRequest>::iterator iter {accept_buffer_ptr->begin()};
-      iter != accept_buffer_ptr->end(); ++iter)
-    {
-      EXPECT_EQ(iter->get_environment_map(), sent_environ);
-      const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
-      const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
-      int write_count {0};
-      // Convert the returned boolean write status to an integer.
-      // Check that all writes were successful.
-      write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
-      write_count += iter->WriteError(data_ref.begin(), data_ref.end());
-      write_count += iter->Complete(EXIT_SUCCESS);
-      ASSERT_EQ(write_count, 3);
-    }
-  };
+  // Use std::bind to remove sent_environ from the parameter list of
+  // OperationForRequestEcho so that the result can be used in a call to
+  // GTestFatalServerAcceptLoop.
+  auto bound_operation {std::bind(GTestFatalOperationForRequestEcho,
+    std::placeholders::_1, std::cref(sent_environ), __LINE__)};
   std::function<void(std::vector<FcgiRequest>*)> local_op
-    {OperationForRequestEcho};
+    {bound_operation};
   GTestFatalServerAcceptLoop(inter_ptr, local_op, __LINE__);
 }
 

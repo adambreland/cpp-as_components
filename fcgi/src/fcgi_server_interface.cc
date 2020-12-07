@@ -812,9 +812,9 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
       if(FD_ISSET(current_connection, &read_set))
       {
         connections_read++;
-        std::vector<FcgiRequestIdentifier> request_identifiers
-          {it->second.ReadRecords()};
-        if(request_identifiers.size())
+        std::vector<std::map<FcgiRequestIdentifier, RequestData>::iterator>
+        request_iterators {it->second.ReadRecords()};
+        if(request_iterators.size())
         {
           // ACQUIRE interface_state_mutex_.
           std::unique_lock<std::mutex> unique_interface_state_lock
@@ -835,27 +835,20 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
           bool* write_mutex_bad_state_ptr
             {&(write_mutex_map_iter->second.second)};
 
-          // For each request_id, find the associated RequestData object, extract
-          // a pointer to it, and create an FcgiRequest object from it.
-          for(FcgiRequestIdentifier request_id : request_identifiers)
+          // For each request_id, find the associated RequestData object,
+          // extract a pointer to it, and create an FcgiRequest object from it.
+          for(std::vector<std::map<FcgiRequestIdentifier,
+            RequestData>::iterator>::iterator iter {request_iterators.begin()};
+            iter != request_iterators.end(); ++iter)
           {
-            std::map<FcgiRequestIdentifier, RequestData>::iterator request_data_iter
-              {request_map_.find(request_id)};
-            if(request_data_iter == request_map_.end())
-            {
-              bad_interface_state_detected_ = true;
-              throw std::logic_error {"An expected request "
-                "was not present in request_map_ in a call to "
-                "fcgi_si::FcgiServerInterface::AcceptRequests."};
-            }
-            RequestData* request_data_ptr {&(request_data_iter->second)};
+            RequestData* request_data_ptr {&((*iter)->second)};
             
             // This is a rare instance where an FcgiRequest may be destroyed
             // within the scope of implementation code. The destructor of
             // FcgiRequest objects tries to acquire interface_state_mutex_
             // if the object to be destroyed is neither completed nor null.
             // See the catch block immediately below.
-            FcgiRequest request {request_id,
+            FcgiRequest request {(*iter)->first,
               FcgiServerInterface::interface_identifier_, this, 
               request_data_ptr, write_mutex_ptr, write_mutex_bad_state_ptr, 
               self_pipe_write_descriptor_};
@@ -938,7 +931,8 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 
 // Synchronization:
 // 1) interface_state_mutex_ must be held prior to a call.
-void FcgiServerInterface::AddRequest(FcgiRequestIdentifier request_id, 
+std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
+FcgiServerInterface::AddRequest(FcgiRequestIdentifier request_id,
   std::uint16_t role, bool close_connection)
 {
   std::map<int, int>::iterator request_count_iter {};
@@ -968,9 +962,11 @@ void FcgiServerInterface::AddRequest(FcgiRequestIdentifier request_id,
   
   request_count_iter->second++;
   try
-  { 
+  {
     // Insertion has no effect on a throw.
-    request_map_[request_id] = RequestData(role, close_connection);
+    return (request_map_.insert(std::make_pair<FcgiRequestIdentifier,
+      RequestData>(std::move(request_id), RequestData {role, close_connection}
+      ))).first;
   }
   catch(...)
   {

@@ -174,7 +174,7 @@ void GTestFatalCheckGetValuesResult(
 // The default disposition for SIGALRM is restored so that receipt of
 // SIGALRM causes process termination.
 //
-// This utility is meant to be by every child process forked by the main test
+// This utility is meant to be used by every child process forked by the main
 // test process. This is done to to prevent process leaks in the case that the
 // main test process does not terminate the process or in the case that the
 // child process hangs and does not terminate.
@@ -351,11 +351,18 @@ void OperationForExpectNone(std::vector<FcgiRequest>* accept_buffer_ptr);
 void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
   int invocation_line);
 
+// Iterates over *accept_buffer_ptr and echoes a request back to the client.
+// FCGI_STDIN is mapped to FCGI_STDOUT. FCGI_DATA is mapped to FCGI_STDERR. The
+// sent_environ parameter is used to allow the utility to check that the
+// expected FCGI_PARAMS map was received.
+void GTestFatalOperationForRequestEcho(
+  std::vector<FcgiRequest>* accept_buffer_ptr,
+  const ParamsMap& sent_environ,
+  int invocation_line);
+
 // A utility which calls inter_ptr->AcceptRequests in a loop on
 // server_accept_timeout and echoes the content of a request in the response to
-// the request. FCGI_STDIN is mapped to FCGI_STDOUT. FCGI_DATA is mapped to
-// FCGI_STDERR. The sent_environ parameter is used to allow the utility to
-// check that the expected FCGI_PARAMS map was received.
+// the request. OperationForRequestEcho is used to echo the request.
 void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
   const ParamsMap& sent_environ, int invocation_line);
 
