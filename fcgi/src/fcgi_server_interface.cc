@@ -1,17 +1,17 @@
 #include "include/fcgi_server_interface.h"
 
-#include <arpa/inet.h>    // For inet_pton() and inet_ntop().
+#include <arpa/inet.h>
 #include <fcntl.h>
-#include <netinet/in.h>   // Defines constants for use with inet_ntop().
+#include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
-#include <sys/time.h>     // For portability for <sys/select.h>.
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdint>        // For std::uint8_t and others.
-#include <cstdlib>        // For std::getenv(), std::size_t, and EXIT_FAILURE.
+#include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -802,7 +802,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
   int current_connection {};
   try
   {
-    for(auto it = record_status_map_.begin();
+    for(std::map<int, RecordStatus>::iterator it {record_status_map_.begin()};
         (it != record_status_map_.end()) && (connections_read < select_return);
         ++it)
     {
@@ -811,7 +811,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
       // requests which are complete and ready to be passed to the application.
       if(FD_ISSET(current_connection, &read_set))
       {
-        connections_read++;
+        ++connections_read;
         std::vector<std::map<FcgiRequestIdentifier, RequestData>::iterator>
         request_iterators {it->second.ReadRecords()};
         if(request_iterators.size())
@@ -835,8 +835,8 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
           bool* write_mutex_bad_state_ptr
             {&(write_mutex_map_iter->second.second)};
 
-          // For each request_id, find the associated RequestData object,
-          // extract a pointer to it, and create an FcgiRequest object from it.
+          // For each request, extract a pointer to its RequestData object, and
+          // create an FcgiRequest object from it.
           for(std::vector<std::map<FcgiRequestIdentifier,
             RequestData>::iterator>::iterator iter {request_iterators.begin()};
             iter != request_iterators.end(); ++iter)
@@ -848,6 +848,10 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
             // FcgiRequest objects tries to acquire interface_state_mutex_
             // if the object to be destroyed is neither completed nor null.
             // See the catch block immediately below.
+            //
+            // Note that the "normal" constructor of FcgiRequest causes the
+            // associated RequestData instance to transition from pending to
+            // assigned.
             FcgiRequest request {(*iter)->first,
               FcgiServerInterface::interface_identifier_, this, 
               request_data_ptr, write_mutex_ptr, write_mutex_bad_state_ptr, 
@@ -884,7 +888,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
       throw;
 
     std::unique_lock<std::mutex> unique_interface_state_lock
-        {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
+      {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
     try
     {
       // We need to check if there is a point to try to preserve the request

@@ -110,9 +110,11 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
 
   try
   {
+    std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
+    request_map_end {i_ptr_->request_map_end_};
     // Initialize result to the end value to signify no result.
     std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
-    result {i_ptr_->request_map_end_};
+    result {request_map_end};
     // Copy the cached iterator which was passed through request_iter_ptr.
     std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
     local_request_iter {*request_iter_ptr};
@@ -205,6 +207,7 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
           bool send_end_request {false};
           {
             // Start lock handling block.
+
             // ACQUIRE interface_state_mutex_.
             std::lock_guard<std::mutex> interface_state_lock
               {FcgiServerInterface::interface_state_mutex_};
@@ -222,19 +225,21 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
             // access through a non-dereferenceable iterator.
             //
             // Check if the cached iterator can be used.
-            if((local_request_iter == i_ptr_->request_map_end_) ||
+            if((local_request_iter == request_map_end) ||
                (local_request_iter->first.Fcgi_id() != request_id_.Fcgi_id()))
             {
               local_request_iter = i_ptr_->request_map_.find(request_id_);
             }
-            if(local_request_iter == i_ptr_->request_map_.end())
+            if(local_request_iter == request_map_end)
+            {
               break;
+            }
             // The value-result parameter request_iter_ptr either should be or
             // must be used to update the pointed-to iterator to one that will
             // be handled correctly and will not be invalid.
             if(local_request_iter == *request_iter_ptr)
             {
-              *request_iter_ptr = i_ptr_->request_map_end_;
+              *request_iter_ptr = request_map_end;
             }
             if(local_request_iter->second.get_status() ==
               RequestStatus::kRequestAssigned)
@@ -246,7 +251,9 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
               // Check if we should indicate that a request was made by the
               // client web server to close the connection.
               if(local_request_iter->second.get_close_connection())
+              {
                 i_ptr_->application_closure_request_set_.insert(connection_);
+              }
 
               // It is possible that the data which completes a request is
               // processed in the same call to ReadRecords that processes the
@@ -276,8 +283,8 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
                 if(!found)
                 {
                   throw std::logic_error {"A request which was completed "
-                    "but not assigned was not found in the list of "
-                    "iterator instances provided in a call to "
+                    "but not yet assigned was not found in the list of "
+                    "iterator instances provided to a call to "
                     "FcgiServerInterface::RecordStatus::ProcessCompleteRecord. "
                     "This list was searched because an abort request was "
                     "received for the request."};
@@ -288,8 +295,8 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
             }
           } // RELEASE interface_state_mutex_.
 
-          // If send_end_request == true, the request is not assigned and cannot
-          // be removed from request_map_ by an FcgiRequest object.
+          // If send_end_request == true, the request is not assigned and
+          // cannot be removed from request_map_ by an FcgiRequest object.
           if(send_end_request)
             i_ptr_->SendFcgiEndRequest(connection_, request_id_,
               FCGI_REQUEST_COMPLETE, i_ptr_->app_status_on_abort_);
@@ -319,16 +326,16 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
               {FcgiServerInterface::interface_state_mutex_};
             InterfaceCheck();
             // Check if the cached iterator can be used.
-            if((local_request_iter == i_ptr_->request_map_end_) ||
+            if((local_request_iter == request_map_end) ||
                (local_request_iter->first.Fcgi_id() != request_id_.Fcgi_id()))
             {
               local_request_iter = i_ptr_->request_map_.find(request_id_);
             }
-            if(local_request_iter == i_ptr_->request_map_end_)
+            if(local_request_iter == request_map_end)
             {
               throw std::logic_error {"An expected request was not found in "
                 "request_map_ in a call to "
-                "fcgi_si::RecordStatus::ProcessCompleteRecord."};
+                "FcgiServerInterface::RecordStatus::ProcessCompleteRecord."};
             }
             RequestData* request_data_ptr {&local_request_iter->second};
             // RELEASE interface_state_mutex_.
@@ -346,7 +353,7 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
             if(request_data_ptr->CheckRequestCompletionWithConditionalUpdate())
             {
               //    In the case that the request is complete and well-formed,
-              // it is expected that no more records should be received for it.
+              // it is expected that no more records will be received for it.
               // As such, if the external cached iterator pointed to this
               // request, then it should be reset.
               //    In the case that the request is complete but malformed,
@@ -354,7 +361,7 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
               // not be invalid when ProcessCompleteRecord returns.
               if(local_request_iter == *request_iter_ptr)
               {
-                *request_iter_ptr = i_ptr_->request_map_end_;
+                *request_iter_ptr = request_map_end;
               }
 
               if(request_data_ptr->ProcessFCGI_PARAMS())
@@ -369,7 +376,9 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
                 // Check if we should indicate that a request was made by the
                 // client web sever to close the connection.
                 if(request_data_ptr->get_close_connection())
+                {
                   i_ptr_->application_closure_request_set_.insert(connection_);
+                }
                 send_end_request = true;
                 i_ptr_->RemoveRequest(local_request_iter);
               }
@@ -444,9 +453,12 @@ FcgiServerInterface::RecordStatus::ReadRecords()
   std::vector<std::map<FcgiRequestIdentifier, RequestData>::iterator>
     request_iterators {};
 
-  // An iterator over request_map_ which serves as a cache.
-  std::map<FcgiRequestIdentifier, RequestData>::iterator local_request_iter
+  const std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
     {i_ptr_->request_map_end_};
+  // An iterator over request_map_ which serves as a cache to the most recently
+  // accessed RequestData item or to a safe null value (end).
+  std::map<FcgiRequestIdentifier, RequestData>::iterator local_request_iter
+    {request_map_end};
 
   // Read from the connection until it would block (no more data),
   // it is found to be disconnected, or an unrecoverable error occurs.
@@ -640,7 +652,7 @@ FcgiServerInterface::RecordStatus::ReadRecords()
               try
               {
                 // Check if the cached iterator is the correct iterator.
-                if((local_request_iter == i_ptr_->request_map_end_) ||
+                if((local_request_iter == request_map_end) ||
                    (local_request_iter->first.Fcgi_id() !=
                     request_id_.Fcgi_id()))
                 {
@@ -670,8 +682,11 @@ FcgiServerInterface::RecordStatus::ReadRecords()
                   }
                   default : {
                     i_ptr_->bad_interface_state_detected_ = true;
+                    // An invalid type should have been rejected upon header
+                    // completion. The presence of an invalid type here then
+                    // indicates a logic error in the program.
                     throw std::logic_error {"An invalid type was encountered "
-                      "in a call to Read."};
+                      "in a call to FcgiServerInterface::ReadRecords."};
                   }
                 }
               }
@@ -823,43 +838,49 @@ void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion(
   // Before the checks, make sure that the interface is in a good state.
   if(i_ptr_->bad_interface_state_detected_)
     throw std::runtime_error {"The interface was found to be corrupted "
-      "in a call to fcgi_si::RecordStatus::UpdateAfterHeaderCompletion."};
+      "in a call to "
+      "FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion."};
   
+  std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
+    {i_ptr_->request_map_end_};
   // Note that it is expected that find may sometimes return the past-the-end
   // iterator.
   std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter 
     {*request_iter_ptr};
-  if((request_map_iter == i_ptr_->request_map_end_) ||
+  if((request_map_iter == request_map_end) ||
      (request_map_iter->first.Fcgi_id() != request_id_.Fcgi_id()))
   {
     request_map_iter = i_ptr_->request_map_.find(request_id_);
-    *request_iter_ptr = request_map_iter;
+    if(request_map_iter != request_map_end)
+    {
+      *request_iter_ptr = request_map_iter;
+    }
   }
 
   switch(type_)
   {
     case FcgiType::kFCGI_BEGIN_REQUEST : {
-      invalidated_by_header_ = (request_map_iter != i_ptr_->request_map_.end());
+      invalidated_by_header_ = (request_map_iter != request_map_end);
       break;
     }
     case FcgiType::kFCGI_ABORT_REQUEST : {
-      invalidated_by_header_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_abort());
+      invalidated_by_header_ = ((request_map_iter == request_map_end)
+        || (request_map_iter->second.get_abort()));
       break;
     }
     case FcgiType::kFCGI_PARAMS : {
-      invalidated_by_header_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_PARAMS_completion());
+      invalidated_by_header_ = ((request_map_iter == request_map_end)
+        || (request_map_iter->second.get_PARAMS_completion()));
       break;
     }
     case FcgiType::kFCGI_STDIN : {
-      invalidated_by_header_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_STDIN_completion());
+      invalidated_by_header_ = ((request_map_iter == request_map_end)
+        || (request_map_iter->second.get_STDIN_completion()));
       break;
     }
     case FcgiType::kFCGI_DATA : {
-      invalidated_by_header_ = (request_map_iter == i_ptr_->request_map_.end()
-        || request_map_iter->second.get_DATA_completion());
+      invalidated_by_header_ = ((request_map_iter == request_map_end)
+        || (request_map_iter->second.get_DATA_completion()));
       break;
     }
     // No other cases should occur. Reject any others.

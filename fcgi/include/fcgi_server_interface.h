@@ -347,7 +347,6 @@ class FcgiServerInterface {
    public:
     using size = std::allocator_traits<std::allocator<std::uint8_t>>::size_type;
 
-
     inline void set_connection_closed_by_interface() noexcept
     {
       connection_closed_by_interface_ = true;
@@ -378,6 +377,24 @@ class FcgiServerInterface {
       return role_;
     }
 
+    // Checks if a request has been received in-full according to the
+    // completion logic of the role of the request.
+    //
+    // Parameters: none.
+    //
+    // Preconditions: none.
+    //
+    // Effects:
+    // 1) Complete request receipt was checked and the status returned by:
+    //    FCGI_RESPONDER:  FCGI_PARAMS and FCGI_STDIN are complete and either
+    //                     FCGI_DATA is complete or no data has been received
+    //                     for FCGI_DATA.
+    //    FCGI_AUTHORIZER: FCGI_PARAMS is complete and a combination of
+    //                     FCGI_STDIN and FCGI_DATA being complete or not being
+    //                     associated with data is true.
+    //    FCGI_FILTER:     FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA are complete.
+    // 2) If a request was complete, the stream completion observers return
+    //    true. E.g. get_DATA_completion returns true for any completed request.
     bool CheckRequestCompletionWithConditionalUpdate() noexcept;
 
     // Attempts to convert the FCGI_PARAMS byte sequence which is encoded in the
@@ -574,17 +591,23 @@ class FcgiServerInterface {
       return ExpectedBytes() == bytes_received_;
     }
 
-    //    Takes various actions depending on the type of the completed record
-    // and returns either a non-null FcgiRequestIdentifier object or a null object
-    // (FcgiRequestIdentifier {}). A non-null object indicates that the associated
-    // request is complete and ready to be used to construct an FcgiRequest
-    // object.
-    //    Intended to be used within the implementation of ReadRecords.
+    //    Takes various actions depending on the type of the completed record.
+    // Returns either a non-null iterator to request_map_ or an iterator with
+    // value equal to that of request_map_end_. A non-end iterator indicates
+    // that the associated RequestData object is complete and ready to be used
+    // to construct an FcgiRequest object.
+    //    (This function is intended to be used within the implementation of
+    // ReadRecords.)
     //
     // Parameters:
-    // request_identifiers_ptr: A pointer to a list of FcgiRequestIdentifiers
-    //                          which were produced by previous calls to
-    //                          ProcessCompleteRecord.
+    // request_iterators_ptr: A pointer to a list of iterators to request_map_
+    //                        which were produced by previous calls to
+    //                        ProcessCompleteRecord.
+    // request_iter_ptr:         A pointer to an iterator to request_map_ which
+    //                        serves as a potentially "empty" (end) cache to
+    //                        the most recently accessed RequestData object of
+    //                        request_map_.
+    //                           This parameter is a value-result parameter.
     //
     // Preconditions:
     // 1) The record represented by the RecordStatus object must be complete.
@@ -592,9 +615,9 @@ class FcgiServerInterface {
     //    complete record.
     // 
     // Caller Responsibilities:
-    // 1) If a non-null FcgiRequestIdentifier object is returned, the list of
-    //    FcgiRequestIdentifier objects returned by ReadRecords must contain a
-    //    FcgiRequestIdentifier object equivalent to the returned object.
+    // 1) If an iterator which is not equal to the end is returned, the list of
+    //    iterators returned by ReadRecords must contain an iterator equal to
+    //    the returned iterator.
     //
     // Synchronization:
     // 1) May acquire and release interface_state_mutex_.
@@ -607,45 +630,55 @@ class FcgiServerInterface {
     // 3) An internal exception may result in program termination.
     //
     // Effects:
-    // 1) Records which were deemed invalid upon completion of their headers are
-    //    ignored. A null FcgiRequestIdentifier object is returned. (Note that all
-    //    record types not listed below which are not management records are
+    // 1) Records which were deemed invalid upon completion of their headers
+    //    are ignored. An end iterator is returned. (Note that all record types
+    //    which are not listed below and which are not management records are
     //    deemed invalid.)
     // 2) Management record:
-    //    a) A null FcgiRequestIdentifier object is returned. An appropriate
-    //       response is sent over connection_.
+    //    a) An end iterator is returned. An appropriate response is sent over
+    //       connection_.
     //    b) For FCGI_GET_VALUES, an FCGI_GET_VALUES_RESULT record is sent.
     //    c) Any other type causes an FCGI_UNKNOWN_TYPE record to be sent.
     // 3) Begin request record:
-    //    a) A null FcgiRequestIdentifier object is returned. 
+    //    a) An end iterator is returned.
     //    b) request_id_.Fcgi_id() is made active.
     // 4) Abort record:
-    //    a) A null FcgiRequestIdentifier object is returned.
+    //    a) An end iterator is returned.
     //    b) If the request of the record is present and has not been assigned, 
     //       the request is deleted, an FCGI_END_REQUEST record is sent to the 
     //       client, and request_id_.Fcgi_id() is made inactive. 
     //       1) The protocolStatus field of the FCGI_END_REQUEST record is set
-    //          to  FCGI_REQUEST_COMPLETE (0). 
+    //          to  FCGI_REQUEST_COMPLETE.
     //       2) The appStatus field of the record is equal to
     //          i_ptr_->app_status_on_abort_.
     //    c) If the request of the record is present and has been assigned, 
     //       the abort flag of the associated RequestData object is set. 
-    //       
-    //       Note that a request could have been assigned and the response to 
-    //       the request completed between the time of abort record header
-    //       validation and the call of ProcessCompleteRecord on the abort
-    //       record.
+    //    Notes:
+    //    1) A request may have been assigned and the response to the request
+    //       completed between the time of abort record header validation and
+    //       the call of ProcessCompleteRecord on the abort record. In other
+    //       words, an abort request may be received in-full after the
+    //       associated request has been handled but in-part before the
+    //       associated request has been handled.
+    //    2) It is possible that an abort request is received for a request
+    //       which was just received in-full and, as such, is in the list of
+    //       iterators to request_map_ which was produced through prior calls
+    //       to ProcessCompleteRecord. This case requires removal of the
+    //       iterator to such a request. Performing this removal requires
+    //       access to the list. request_iter_ptr provides this access.
     // 5) Params, stdin, and data stream records:
-    //    a) A null or non-null request identifier may be returned.
+    //    a) An end or non-end iterator may be returned.
     //    b) If the size of the content section of the record is non-zero, the
     //       content is appended to the corresponding stream content buffer in 
-    //       the RequestData object associated with the identifier. A null
-    //       FcgiRequestIdentifier object is returned.
+    //       the RequestData object associated with the identifier. An end
+    //       iterator is returned.
     //    c) If the size of the content section of the record is zero, the
     //       corresponding stream is completed. The RequestData object is
-    //       checked for completion. If complete, the identifier is returned.
-    //       If it is not complete, a null FcgiRequestIdentifier object is
-    //       returned.
+    //       checked for completion. If complete, the appropriate iterator
+    //       is returned. If it is not complete, an end iterator is returned.
+    // 6) The iterator pointed to by request_iter_ptr may have been modified.
+    //    It either is equal to request_map_.end() or is a valid iterator of
+    //    request_map_.
     std::map<FcgiRequestIdentifier, RequestData>::iterator
     ProcessCompleteRecord(
       std::vector<std::map<FcgiRequestIdentifier, RequestData>::iterator>*
@@ -811,10 +844,10 @@ class FcgiServerInterface {
   //
   // Effects:
   // 1) A RequestData object with the given role and close_connection values
-  //    was added to request_map_ with a key of request_id. The number of
-  //    requests associated with request_id.descriptor() in request_count_map_
-  //    was incremented.
-  // 2) An iterator to the added request was returned.
+  //    was added to request_map_ with a key of request_id.
+  // 2) The number of requests associated with request_id.descriptor() in
+  //    request_count_map_ was incremented.
+  // 3) An iterator to the added request was returned.
   std::map<FcgiRequestIdentifier, RequestData>::iterator AddRequest(
     FcgiRequestIdentifier request_id, std::uint16_t role,
     bool close_connection);
