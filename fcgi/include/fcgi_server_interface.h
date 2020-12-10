@@ -1,8 +1,8 @@
 #ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
 #define A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
 
-#include <cstdint>       // For uint8_t, ... .
-#include <cstdlib>       // For EXIT_FAILURE.
+#include <cstdint>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <mutex>

@@ -251,8 +251,8 @@ void GTestNonFatalStreamDataComparison
   }
 };
 
-void GTestNonFatalExerciseResponseCompare(
-  const struct FcgiRequestDataReference sent_request_ref,
+void GTestNonFatalEchoResponseCompare(
+  const struct FcgiRequestDataReference& sent_request_ref,
   FcgiResponse* app_response_ptr,
   int invocation_line)
 {
@@ -290,9 +290,30 @@ void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
     &OperationForExpectNone, __LINE__));
 }
 
+void GTestFatalRequestEcho(FcgiRequest* request_ptr, int invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalRequestEcho"};
+
+  const std::vector<std::uint8_t>& stdin_ref {request_ptr->get_STDIN()};
+  const std::vector<std::uint8_t>& data_ref  {request_ptr->get_DATA()};
+  int write_count {0};
+  // Convert the returned boolean write status to an integer.
+  // Check that all writes were successful.
+  ASSERT_NO_THROW
+  (
+    write_count += request_ptr->Write(stdin_ref.begin(), stdin_ref.end());
+    write_count += request_ptr->WriteError(data_ref.begin(), data_ref.end());
+    write_count += request_ptr->Complete(EXIT_SUCCESS);
+  );
+  ASSERT_EQ(write_count, 3);
+}
+
 void GTestFatalOperationForRequestEcho(
   std::vector<FcgiRequest>* accept_buffer_ptr,
   const ParamsMap& sent_environ,
+  std::uint16_t role,
+  bool keep_conn,
   int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
@@ -302,20 +323,15 @@ void GTestFatalOperationForRequestEcho(
     iter != accept_buffer_ptr->end(); ++iter)
   {
     EXPECT_EQ(iter->get_environment_map(), sent_environ);
-    const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
-    const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
-    int write_count {0};
-    // Convert the returned boolean write status to an integer.
-    // Check that all writes were successful.
-    write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
-    write_count += iter->WriteError(data_ref.begin(), data_ref.end());
-    write_count += iter->Complete(EXIT_SUCCESS);
-    ASSERT_EQ(write_count, 3);
+    EXPECT_EQ(iter->get_role(), role);
+    EXPECT_EQ(iter->get_keep_conn(), keep_conn);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalRequestEcho(&(*iter), __LINE__));
   }
 };
 
 void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
-  const ParamsMap& sent_environ, int invocation_line)
+  const ParamsMap& sent_environ, std::uint16_t role, bool keep_conn,
+  int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalAcceptRequestsExerciseRequestEcho"};
@@ -324,7 +340,7 @@ void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
   // OperationForRequestEcho so that the result can be used in a call to
   // GTestFatalServerAcceptLoop.
   auto bound_operation {std::bind(GTestFatalOperationForRequestEcho,
-    std::placeholders::_1, std::cref(sent_environ), __LINE__)};
+    std::placeholders::_1, std::cref(sent_environ), role, keep_conn, __LINE__)};
   std::function<void(std::vector<FcgiRequest>*)> local_op
     {bound_operation};
   GTestFatalServerAcceptLoop(inter_ptr, local_op, __LINE__);

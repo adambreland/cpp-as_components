@@ -5,7 +5,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#include <cstdint>         // For uint8_t.
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <utility>

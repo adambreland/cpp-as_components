@@ -1,5 +1,5 @@
 #include <algorithm>
-#include <cstdint>         // For uint16_t.
+#include <cstdint>
 #include <map>
 #include <vector>
 

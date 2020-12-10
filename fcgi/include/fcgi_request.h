@@ -30,7 +30,7 @@ namespace fcgi {
 // 1) The client sends an FCGI_ABORT_REQUEST record for the request.
 // 2) The client closes the connection of the request.
 // 3) The interface is forced to close the connection of the request.
-// AbortStatus allows the current abort status of request to be inspected.
+// AbortStatus allows the current abort status of a request to be inspected.
 //
 // When connection closure is detected from a call:
 // 1) Write, WriteError, and Complete return false. 

@@ -270,11 +270,22 @@ void GTestNonFatalStreamDataComparison
   const std::vector<std::uint8_t>& response_stream,
   int                              invocation_line);
 
-// Compares the observable state of an FcgiResponse instance except for
+//    Compares the observable state of an FcgiResponse instance except for
 // that given by RequestId to the corresponding state of an
 // FcgiRequestDataReference instance.
-void GTestNonFatalExerciseResponseCompare(
-  const struct FcgiRequestDataReference sent_request_ref,
+//    Comparison is based on:
+// 1) The mapping:
+//    FCGI_STDIN -> FCGI_STDOUT
+//    FCGI_DATA  -> FCGI_STDERR
+// 2) app_response_ptr->AppStatus()      == EXIT_SUCCESS
+// 3) app_response_ptr->ProtocolStatus() == FCGI_REQUEST_COMPLETE
+// 4) app_response_ptr->Request()        == sent_request_ref
+//
+// Note that this function cannot check that the correct value of the
+// FCGI_PARAMS stream was received by the FastCGI server which sent the
+// response.
+void GTestNonFatalEchoResponseCompare(
+  const struct FcgiRequestDataReference& sent_request_ref,
   FcgiResponse* app_response_ptr,
   int invocation_line);
 
@@ -351,20 +362,28 @@ void OperationForExpectNone(std::vector<FcgiRequest>* accept_buffer_ptr);
 void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
   int invocation_line);
 
-// Iterates over *accept_buffer_ptr and echoes a request back to the client.
-// FCGI_STDIN is mapped to FCGI_STDOUT. FCGI_DATA is mapped to FCGI_STDERR. The
-// sent_environ parameter is used to allow the utility to check that the
-// expected FCGI_PARAMS map was received.
+// Echoes a request. FCGI_STDIN is mapped to FCGI_STDOUT. FCGI_DATA is mapped
+// to FCGI_STDERR.
+void GTestFatalRequestEcho(FcgiRequest* request_ptr, int invocation_line);
+
+// 1) Iterates over *accept_buffer_ptr and echoes a request back to the client.
+//    The response echo is performed by invoking GTestFatalRequestEcho.
+// 2) The sent_environ parameter is used to allow the utility to check that the
+//    expected FCGI_PARAMS map was received.
+// 3) role and keep_conn values are compared to those of the FcgiRequest object.
 void GTestFatalOperationForRequestEcho(
   std::vector<FcgiRequest>* accept_buffer_ptr,
   const ParamsMap& sent_environ,
+  std::uint16_t role,
+  bool keep_conn,
   int invocation_line);
 
 // A utility which calls inter_ptr->AcceptRequests in a loop on
 // server_accept_timeout and echoes the content of a request in the response to
 // the request. OperationForRequestEcho is used to echo the request.
 void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
-  const ParamsMap& sent_environ, int invocation_line);
+  const ParamsMap& sent_environ, std::uint16_t role, bool keep_conn,
+  int invocation_line);
 
 // A helper function to terminate and reap a child process which was created by
 // the test process during testing. It is expected that the child has not

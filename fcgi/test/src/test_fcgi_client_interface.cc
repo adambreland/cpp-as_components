@@ -1579,7 +1579,6 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
     // is sent last to ensure that a request is not prematurely completed as
     // may occur for Responder and Authorizer roles. (FCGI_PARAMS is required
     // for all current roles.)
-
     constexpr int_fast32_t begin_length {2U * FCGI_HEADER_LEN};
     std::uint8_t begin_record[begin_length] = {};
     PopulateBeginRequestRecord(begin_record, new_id, role,

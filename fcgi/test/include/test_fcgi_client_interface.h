@@ -38,7 +38,7 @@ using ParamsMap = std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>
 // values.
 struct FcgiRequestDataReference
 {
-  bool operator==(const FcgiRequestDataReference& rhs) const noexcept
+  inline bool operator==(const FcgiRequestDataReference& rhs) const noexcept
   {
     return (role           == rhs.role)           &&
            (keep_conn      == rhs.keep_conn)      &&
@@ -47,6 +47,11 @@ struct FcgiRequestDataReference
            (stdin_end      == rhs.stdin_end)      &&
            (data_begin     == rhs.data_begin)     &&
            (data_end       == rhs.data_end);
+  }
+
+  inline bool operator!=(const FcgiRequestDataReference& rhs) const noexcept
+  {
+    return !(*this == rhs);
   }
 
   // Request metadata.
@@ -972,14 +977,14 @@ class TestFcgiClientInterface
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
-  // Attempts to send a request whose data is described by the
+  // Attempts to send an application request whose data is described by the
   // FcgiRequestDataReference argument to the FastCGI application server which
   // is connected to the client interface by connection.
   //
   // Parameters:
   // connection: The local socket descriptor of a connection to a FastCGI
   //             application server.
-  // request:    A FcgiRequestDataReference instance which describes the
+  // request:    An FcgiRequestDataReference instance which describes the
   //             request to be sent over connection. Note that:
   //             1) params_map_ptr may be null. In that case, an empty
   //                FCGI_PARAMS stream is indicated.
@@ -991,8 +996,9 @@ class TestFcgiClientInterface
   // 
   // Caller responsibilities:
   // 1) A copy of request is made and stored within the interface. The user
-  //    is responsible for the ensuring that the pointers of the copy remain
-  //    valid.
+  //    must ensure that the pointers of the copy remain valid until either
+  //    the request is completed and released or the request is removed while
+  //    pending.
   //
   // Exceptions:
   // 1) A call may throw exceptions derived from std::exception.
@@ -1021,7 +1027,8 @@ class TestFcgiClientInterface
   //       the ready event queue.
   // 2) If a non-default-constructed FcgiRequestIdentifier id was returned:
   //    a) id.descriptor() == connection.
-  //    b) id.Fcgi_id() was selected so that id was a released identifier.
+  //    b) id.Fcgi_id() was selected so that id was a released identifier
+  //       greater than zero.
   //    c) The FastCGI application request represented by request was sent
   //       over connection.
   //    d) id is allocated and the request is pending.
