@@ -77,6 +77,17 @@ struct FcgiRequestDataReference
 //    field is empty, and data holds the FastCGI record content of the request.
 struct ManagementRequestData
 {
+  inline bool operator==(const struct ManagementRequestData& rhs) const
+  {
+    return ((type == rhs.type) && (params_map == rhs.params_map) &&
+            (data == rhs.data));
+  }
+
+  inline bool operator!=(const struct ManagementRequestData& rhs) const
+  {
+    return !(*this == rhs);
+  }
+
   FcgiType                  type       {static_cast<FcgiType>(0U)};
   ParamsMap                 params_map {};
   std::vector<std::uint8_t> data       {};
@@ -234,8 +245,8 @@ class GetValuesResult : public ServerEvent
     return request_params_map_;
   }
 
-  // 1) For a default constructed instance, RequestId returns the
-  //    FcgiRequestIdentifier given by (-1, 0).
+  // 1) For a default constructed instance, RequestId returns
+  //    FcgiRequestIdentifier {}.
   // 2) For other, non-moved-from instances, RequestId returns the
   //    FcgiRequestIdentifier given by (connection, 0) where connection is the
   //    local socket descriptor of the socket over which the the
@@ -818,6 +829,10 @@ class TestFcgiClientInterface
   //       1) A call to ::a_component::fcgi::ExtractBinaryNameValuePairs
   //          indicated that an encoding error was present.
   //       2) A duplicate name was detected among the name-value pairs.
+  //    d) In the case that the FCGI_GET_VALUES record corresponding to the
+  //       request was sent by invocation of SendBinaryManagementRequest,
+  //       RequestMap of the returned GetValuesResult returns a reference to
+  //       an empty map.
   //    InvalidRecord
   //    a) The construction of an InvalidRecord instance r indicates that an
   //       invalid record was received over the connection and with the
@@ -885,7 +900,7 @@ class TestFcgiClientInterface
   // type:       The type of the management request. A type defined by the
   //             FastCGI protocol is not required.
   // (Copy overload)
-  // start:      A pointer to the first byte in the byte sequence which will
+  // begin:      A pointer to the first byte in the byte sequence which will
   //             form the content of the management request.
   // end:        A pointer to one past the last byte of the content sequence.
   // (Move overload)
@@ -893,7 +908,7 @@ class TestFcgiClientInterface
   //             connection.
   // 
   // Preconditions:
-  // 1) The byte range given by [start, end) must be valid.
+  // 1) The byte range given by [begin, end) must be valid.
   //
   // Exceptions:
   // 1) A call may throw exceptions derived from std::exception.
@@ -913,7 +928,7 @@ class TestFcgiClientInterface
   // 1) If false was returned, then one of the following occurred:
   //    a) connection was not a connected socket descriptor which was opened by
   //       the interface.
-  //    b) std::distance(start, end) was larger than
+  //    b) std::distance(begin, end) was larger than
   //       ::a_component::fcgi::kMaxRecordContentByteLength.
   //    c) It was discovered that the server closed the connection. When
   //       connection closure was discovered, a ConnectionClosure instance was

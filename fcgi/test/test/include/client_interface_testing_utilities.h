@@ -148,6 +148,16 @@ const ParamsMap kMpxsMapWithValue
   {FCGI_MPXS_CONNS, {'1'}}
 };
 
+// Populate a ManagementRequestData instance with a random byte sequence and
+// an unknown management request type. This is used for testing
+// SendBinaryManagementRequest.
+struct ManagementRequestData binary_request
+{
+  /* type       = */ static_cast<FcgiType>(27U),
+  /* params_map = */ {},
+  /* data       = */ {59U, 0U, 125U, 26U, 237U}
+};
+
 // Shared state for testing:
 //    When AF_UNIX is used for an FcgiServerInterface instance, a file is
 // needed to allow clients to connect to the interface.
@@ -263,7 +273,7 @@ void GTestFatalSendExerciseRequests(
 
 // Checks for equality of the byte sequences given by
 // [reference_stream_begin, reference_stream_end] and response_stream.
-void GTestNonFatalStreamDataComparison
+void GTestFatalStreamDataComparison
 (
   const std::uint8_t*              reference_stream_begin,
   const std::uint8_t*              reference_stream_end,
@@ -284,7 +294,7 @@ void GTestNonFatalStreamDataComparison
 // Note that this function cannot check that the correct value of the
 // FCGI_PARAMS stream was received by the FastCGI server which sent the
 // response.
-void GTestNonFatalEchoResponseCompare(
+void GTestFatalEchoResponseCompare(
   const struct FcgiRequestDataReference& sent_request_ref,
   FcgiResponse* app_response_ptr,
   int invocation_line);
@@ -338,6 +348,7 @@ void GTestFatalServerAcceptLoop(FcgiServerInterface* inter_ptr,
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalServerAcceptLoop"};
+  ASSERT_NE(inter_ptr, nullptr);
   std::vector<FcgiRequest> accept_buffer {};
   server_accept_timeout.store(false);
   ASSERT_NE(setitimer(ITIMER_REAL, &kTimeout, nullptr), -1) <<

@@ -177,6 +177,12 @@ void GTestFatalSendExerciseRequests(
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalExerciseTestFcgiClientInterface"};
+  // Check for and reject nullptr values.
+  ASSERT_NE(client_inter_ptr, nullptr);
+  ASSERT_NE(observer_ptr, nullptr);
+  ASSERT_NE(total_completed_ptr, nullptr);
+  ASSERT_NE(total_pending_ptr, nullptr);
+  ASSERT_NE(request_set_ptr, nullptr);
   bool send_gvr {false};
   ASSERT_NO_THROW(send_gvr = client_inter_ptr->SendGetValuesRequest(
     observer_ptr->connection, kMapWithValues));
@@ -220,7 +226,7 @@ void GTestFatalSendExerciseRequests(
     *observer_ptr, __LINE__);
 }
 
-void GTestNonFatalStreamDataComparison
+void GTestFatalStreamDataComparison
 (
   const std::uint8_t*              reference_stream_begin,
   const std::uint8_t*              reference_stream_end,
@@ -228,9 +234,15 @@ void GTestNonFatalStreamDataComparison
   int                              invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
-    "GTestNonFatalStreamDataComparison"};
+    "GTestFatalStreamDataComparison"};
+  ASSERT_TRUE(((reference_stream_begin == nullptr) &&
+               (reference_stream_end   == nullptr))    ||
+              ((reference_stream_begin != nullptr) &&
+               (reference_stream_end   != nullptr)));
+
   using IterPair = std::pair<const std::uint8_t*,
                              std::vector<std::uint8_t>::const_iterator>;
+
   std::size_t reference_stream_length
     {static_cast<std::size_t>(std::distance(
       reference_stream_begin, reference_stream_end))};
@@ -251,28 +263,29 @@ void GTestNonFatalStreamDataComparison
   }
 };
 
-void GTestNonFatalEchoResponseCompare(
+void GTestFatalEchoResponseCompare(
   const struct FcgiRequestDataReference& sent_request_ref,
   FcgiResponse* app_response_ptr,
   int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
-    "GTestNonFatalExerciseResponseCompare"};
-
+    "GTestFatalExerciseResponseCompare"};
+  ASSERT_NE(app_response_ptr, nullptr);
   // Returned FcgiRequestDataReference instance
   const struct FcgiRequestDataReference& request_ref
     {app_response_ptr->Request()};
   EXPECT_EQ(request_ref, sent_request_ref);
-  
   // Application status
   EXPECT_EQ(app_response_ptr->AppStatus(), EXIT_SUCCESS);
   // Protocol status
   EXPECT_EQ(app_response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
   // FCGI_STDERR and FCGI_STDOUT
-  GTestNonFatalStreamDataComparison(sent_request_ref.data_begin,
-    sent_request_ref.data_end, app_response_ptr->FcgiStderr(), __LINE__);
-  GTestNonFatalStreamDataComparison(sent_request_ref.stdin_begin,
-    sent_request_ref.stdin_end, app_response_ptr->FcgiStdout(), __LINE__);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalStreamDataComparison(
+    sent_request_ref.data_begin, sent_request_ref.data_end,
+    app_response_ptr->FcgiStderr(), __LINE__));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalStreamDataComparison(
+    sent_request_ref.stdin_begin, sent_request_ref.stdin_end,
+    app_response_ptr->FcgiStdout(), __LINE__));
 }
 
 void OperationForExpectNone(std::vector<FcgiRequest>* accept_buffer_ptr)
@@ -286,6 +299,7 @@ void GTestFatalAcceptRequestsExpectNone(FcgiServerInterface* inter_ptr,
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalAcceptRequestsExpectNone"};
+  ASSERT_NE(inter_ptr, nullptr);
   ASSERT_NO_FATAL_FAILURE(GTestFatalServerAcceptLoop(inter_ptr,
     &OperationForExpectNone, __LINE__));
 }
@@ -294,7 +308,7 @@ void GTestFatalRequestEcho(FcgiRequest* request_ptr, int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalRequestEcho"};
-
+  ASSERT_NE(request_ptr, nullptr);
   const std::vector<std::uint8_t>& stdin_ref {request_ptr->get_STDIN()};
   const std::vector<std::uint8_t>& data_ref  {request_ptr->get_DATA()};
   int write_count {0};
@@ -318,7 +332,7 @@ void GTestFatalOperationForRequestEcho(
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalOperationForRequestEcho"};
-
+  ASSERT_NE(accept_buffer_ptr, nullptr);
   for(std::vector<FcgiRequest>::iterator iter {accept_buffer_ptr->begin()};
     iter != accept_buffer_ptr->end(); ++iter)
   {
@@ -335,7 +349,7 @@ void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
     "GTestFatalAcceptRequestsExerciseRequestEcho"};
-
+  ASSERT_NE(inter_ptr, nullptr);
   // Use std::bind to remove sent_environ from the parameter list of
   // OperationForRequestEcho so that the result can be used in a call to
   // GTestFatalServerAcceptLoop.
@@ -348,8 +362,6 @@ void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
 
 // A helper function to reap a child process which was created by the test
 // process during testing.
-//
-//
 void GTestFatalTerminateChild(pid_t child_id, int invocation_line)
 {
   ::testing::ScopedTrace tracer {__FILE__, invocation_line,
