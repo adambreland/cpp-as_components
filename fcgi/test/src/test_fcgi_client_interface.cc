@@ -1023,11 +1023,19 @@ TestFcgiClientInterface::ProcessCompleteRecord(
             {
               return lhs.first < rhs.first;
             };
+            auto NameValuePairNameEquality = []
+            (
+              const NameValuePair& lhs,
+              const NameValuePair& rhs
+            )->bool
+            {
+              return lhs.first == rhs.first;
+            };
             std::sort(name_value_list.begin(), name_value_list.end(),
               NameValuePairNameCompare);
             std::vector<NameValuePair>::iterator duplicate_iter
               {std::adjacent_find(name_value_list.begin(),
-                name_value_list.end())};
+                name_value_list.end(), NameValuePairNameEquality)};
             if(duplicate_iter == name_value_list.end())
             {
               params_error = false;
@@ -1660,7 +1668,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         std::tuple<struct iovec*, int, std::size_t> params_write
           {socket_functions::ScatterGatherSocketWrite(connection,
             std::get<2>(params_encoding).data(),
-            std::get<2>(params_encoding).size(), false, nullptr)};
+            std::get<2>(params_encoding).size(), true, nullptr)};
         if(std::get<2>(params_write))
         {
           // Something has been written overall. id release is not required.

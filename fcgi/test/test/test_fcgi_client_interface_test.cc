@@ -634,14 +634,15 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
 //    connections to different domains. The properties described above can be
 //    tested on a sigle interface with simultaneous connections to each domain.
 // 4) The ability to connect to a server when a previous connection to the
-//    server was made and has since been closed.
+//    server was made and the connection has since been closed.
 // 5) The ability of the client to detect connection closure by a server for
 //    each domain.
 // 6) The non-blocking status of returned file descriptors.
-// 7) For internet sockets, proper handling of connection interruption by
-//    signal receipt (situations which cause blocking system calls to fail with
-//    errno == EINTR).
-// 8) Failure cases:
+// 7) Correct behavior when a connection is made on a previously used
+//    descriptor and that descriptor has completed but unreleased requests.
+// 8) Proper handling of connection interruption by signal receipt (situations
+//    which cause blocking system calls to fail with errno == EINTR).
+// 9) Failure cases:
 //    a) An attempt to connect to an address for which there is no
 //       listening server. For AF_UNIX, a special case is the existence of a
 //       file with the connection file path which is not associated with a
@@ -650,10 +651,11 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
 //
 // Test cases:
 // ConnectCase1
-// 1) A server for each of the three supported domains is created in a separate
+// 1) A server for each of the three supported domains is created in its own
 //    process. These servers call AcceptRequests in a loop. Connections are
 //    made to these servers from a single client interface. Properties 1 to 6
 //    are tested.
+// ConnectCase2
 // 2)    For each of AF_INET and AF_INET6, a server is created in a separate
 //    process. Library interpositioning is used to allow a call to connect
 //    which is made by Connect return -1 with errno == EINTR. This simulates
@@ -669,7 +671,14 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
 //    the test shell script. The script is intended to be executed with the
 //    current working directory equal to the fcgi workspace directory.
 // ConnectCase3
-// 3) a) Failure as described above for each of the three domains is checked.
+// 3) (Property 7) A connection is made and a request-response cycle is
+//    performed. The connection is closed by invoking close connection. Another
+//    connection is made which reuses the descriptor of the previous connection.
+//    Another request-response cycle is performed. Throughout, the observers of
+//    the client interface are used to verify that reuse of the connection
+//    descriptor is performed as specified.
+// ConnectCase4
+// 4) a) Failure as described above for each of the three domains is checked.
 //       For AF_UNIX, failure is checked when the connection path is present
 //       and absent in the file system.
 //    b) A return of -1 is checked for address == nullptr.
@@ -1275,8 +1284,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   }
   //    Connect to the servers again and exercise the client interface as
   // before with the exception that each connection should be closed by its
-  // server. Because of connection closure by servers, only a single request
-  // may be sent to each server.
+  // server. Because of connection closure by the servers due to their response
+  // to requests with keep_conn set to false, only a single request may be
+  // sent to each server.
   //    Variable, descriptive connection state which is passed as arguments
   // to helper functions is updated.
   ASSERT_EQ(application_request_set.size(), 0U);
@@ -1356,7 +1366,112 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 // See the documentation for the test cases of Connect for the discussion of
 // ConnectCase2.
 
-TEST(Connect, ConnectCase3)
+TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase3)
+{
+  // Create the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  TestFcgiClientInterface client_inter {};
+  int connection {};
+  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
+    -1) << std::strerror(errno));
+  struct ClientInterfaceObserverValues observer
+  {
+    /* co = */
+    {
+      /* connection                         = */ connection,
+      /* connection_completed_request_count = */ 0U,
+      /* is_connected                       = */ true,
+      /* management_request_count           = */ 0U,
+      /* connection_pending_request_count   = */ 0U
+    },
+    /* in = */
+    {
+      /* total_completed_request_count = */ 0U,
+      /* connection_count              = */ 1,
+      /* total_pending_request_count   = */ 0U,
+      /* ready_event_count             = */ 0U
+    }
+  };
+
+  auto GTestFatalRequestResponseCycle = [&inter_uptr, &client_inter, &observer]
+  (int invocation_line)->void
+  {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalRequestResponseCycle"};
+    FcgiRequestIdentifier id {};
+    ASSERT_NO_THROW(ASSERT_NE(id = client_inter.SendRequest(
+      observer.co.connection, kExerciseDataRef), FcgiRequestIdentifier {}));
+    ++(observer.co.connection_pending_request_count);
+    ++(observer.in.total_pending_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+      observer, __LINE__));
+    std::vector<FcgiRequest> accept_buffer {};
+    ASSERT_NO_THROW
+    (
+      while(!accept_buffer.size())
+      {
+        accept_buffer = inter_uptr->AcceptRequests();
+      }
+    );
+    EXPECT_EQ(accept_buffer.size(), 1U);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalOperationForRequestEcho(&accept_buffer,
+      kSharedExerciseParams, kExerciseDataRef.role, kExerciseDataRef.keep_conn,
+      __LINE__));
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+    ASSERT_NE(response_ptr, nullptr);
+    --(observer.co.connection_pending_request_count);
+    --(observer.in.total_pending_request_count);
+    ++(observer.co.connection_completed_request_count);
+    ++(observer.in.total_completed_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+      observer, __LINE__));
+    ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
+      response_ptr, __LINE__));
+  };
+
+  ASSERT_NO_FATAL_FAILURE(GTestFatalRequestResponseCycle(__LINE__));
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.CloseConnection(connection)));
+  observer.co.is_connected = false;
+  --(observer.in.connection_count);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+    observer, __LINE__));
+  int second_connection {};
+  ASSERT_NO_THROW(ASSERT_NE(second_connection = client_inter.Connect(kUnixPath1,
+    0U), -1));
+  ASSERT_EQ(second_connection, connection);
+  observer.co.is_connected = true;
+  ++(observer.in.connection_count);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+    observer, __LINE__));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalRequestResponseCycle(__LINE__));
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.ReleaseId(second_connection)));
+  observer.co.connection_completed_request_count = 0U;
+  observer.in.total_completed_request_count      = 0U;
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+    observer, __LINE__));
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.CloseConnection(second_connection)));
+  observer.co.is_connected = false;
+  --(observer.in.connection_count);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
+    observer, __LINE__));
+}
+
+TEST(Connect, ConnectCase4)
 {
   TestFcgiClientInterface client_inter {};
   EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("127.0.0.1", 11000U), -1));
@@ -1446,8 +1561,6 @@ TEST(AggregatedObservers, UknownConnection)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 {
-  // All test cases are implemented in this test.
-
   // Create the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
@@ -1694,6 +1807,26 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    a) The FCGI_UNKNOWN_TYPE record has no content (content length is zero).
 //    b) The FCGI_UNKNOWN_TYPE record has a content length which is non-zero
 //       and not equal to 8.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // SendAbortRequest
@@ -2137,11 +2270,14 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 //
 // Test case set 3: Exercising error detection during GetValuesResult
 // construction.
-// 13) An FCGI_GET_VALUES request is made and a response with a FastCGI
-//     name-value pair encoding error is sent. The detection of this error and
-//     the specified behavior of the GetValuesResult instance are verified.
-//     In particular, for GetValuesResult instance gvr, gvr.IsCorrupt() == true
-//     and gvr.ResponseMap() == ParamsMap {}.
+// 13) a) An FCGI_GET_VALUES request is made and a response with a FastCGI
+//        name-value pair encoding error is sent. The detection of this error
+//        and the specified behavior during construction of the GetValuesResult
+//        instance are verified. In particular, for GetValuesResult instance
+//        gvr, gvr.IsCorrupt() == true and gvr.ResponseMap() == ParamsMap {}.
+//     b) An FCGI_GET_VALUES request is made and a response with a duplicate
+//        name where the duplicates have the same value is received.
+//     c) As b, but the duplicates have distinct values.
 //
 // Modules and features which testing depends on:
 //  1) The immediate detection of peer closure by the implementation of
@@ -3087,7 +3223,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
 // SendGetValuesRequest: Test case set 2
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
 {
-  // TEST CASE 10
+  // TEST CASE 11
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -3252,7 +3388,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
   ASSERT_NO_FATAL_FAILURE(GTestFatalCheckGetValuesResult(gvr_ptr, false,
     new_connection, kMpxsNameMap, kMpxsMapWithValue, __LINE__));
 
-  // TEST CASE 11
+  // TEST CASE 12
   // Send another application request and FCGI_GET_VALUES request which will
   // not be answered.
   ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
@@ -3350,7 +3486,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
 // SendGetValuesRequest: Test case set 3
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
 {
-  // TEST CASE 12
+  // TEST CASE 13
   // The connected descriptor of the interface is used to allow an erroneous
   // response to be sent to the client interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
@@ -3367,63 +3503,130 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
   ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
     kUnixPath1}));
   TestFcgiClientInterface client_inter {};
-  int local_connection {};
-  ASSERT_NO_THROW(local_connection = client_inter.Connect(kUnixPath1, 0U));
-  ASSERT_NE(local_connection, -1) << std::strerror(errno);
-  struct ClientInterfaceConnectionOnlyObserverValues observer {};
-  observer.connection                         = local_connection;
-  observer.connection_completed_request_count = 0U;
-  observer.is_connected                       = true;
-  observer.management_request_count           = 0U;
-  observer.connection_pending_request_count   = 0U;
-  struct ClientInterfaceInstanceObserverValues instance_observer {};
-  instance_observer.total_completed_request_count = 0U;
-  instance_observer.connection_count              = 1;
-  instance_observer.total_pending_request_count   = 0U;
-  instance_observer.ready_event_count             = 0U;
-  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
-    client_inter, observer, __LINE__));
-  GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
-    instance_observer, __LINE__);
-  // Allow the server to process the connection before sending a management
-  // request.
-  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
-    __LINE__));
-  bool send_gvr {false};
-  ASSERT_NO_THROW(send_gvr = client_inter.SendGetValuesRequest(
-    local_connection, kMapWithValues));
-  ASSERT_TRUE(send_gvr);
-  ++(observer.management_request_count);
-  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
-    client_inter, observer, __LINE__));
-  // Construct and write an erroneous response.
-  // A header, 2 bytes for name and value lenths, and 14 bytes for the
-  // name FCGI_MAX_CONNS. This gives 24 bytes. No padding is required.
-  constexpr std::size_t buffer_length {static_cast<std::size_t>(
-    FCGI_HEADER_LEN + 2 + 14)};
-  std::uint8_t response_buffer[buffer_length] = {};
-  PopulateHeader(response_buffer, FcgiType::kFCGI_GET_VALUES_RESULT,
-    FCGI_NULL_REQUEST_ID, 16U, 0U);
-  response_buffer[FCGI_HEADER_LEN]      = FCGI_MAX_CONNS.size();
-  response_buffer[FCGI_HEADER_LEN + 1U] = 100U; // erroneous value length
-  std::memcpy(response_buffer + FCGI_HEADER_LEN + 2U, FCGI_MAX_CONNS.data(),
-    14);
-  // Access the descriptor which must be used for the connected socket which
-  // is managed by the server.
-  ASSERT_EQ(socket_functions::SocketWrite(local_connection + 1,
-    response_buffer, buffer_length), buffer_length);
-  // Allow the client to process the response.
-  std::unique_ptr<ServerEvent> response_uptr {};
-  ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NE(response_uptr.get(), nullptr);
-  GetValuesResult* gvr_ptr {dynamic_cast<GetValuesResult*>(
-    response_uptr.get())};
-  ASSERT_NE(gvr_ptr, nullptr);
-  --(observer.management_request_count);
-  ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
-    client_inter, observer, __LINE__));
-  GTestFatalCheckGetValuesResult(gvr_ptr, true,
-    local_connection, kNameOnlyMap, ParamsMap {}, __LINE__);
+  constexpr const int case_count {3};
+  for(int i {0}; i != case_count; ++i)
+  {
+    std::string trace_message {"Iteration count: "};
+    std::string iteration_count {std::to_string(i)};
+    trace_message.insert(trace_message.end(), iteration_count.begin(),
+      iteration_count.end());
+    ::testing::ScopedTrace tracer {__FILE__, __LINE__, trace_message};
+    int connection {};
+    ASSERT_NO_THROW(connection = client_inter.Connect(kUnixPath1, 0U));
+    ASSERT_NE(connection, -1) << std::strerror(errno);
+    struct ClientInterfaceObserverValues observer
+    {
+      /* co = */
+      {
+        /* connection                         = */ connection,
+        /* connection_completed_request_count = */ 0U,
+        /* is_connected                       = */ true,
+        /* management_request_count           = */ 0U,
+        /* connection_pending_request_count   = */ 0U
+      },
+      /* in = */
+      {
+        /* total_completed_request_count = */ 0U,
+        /* connection_count              = */ 1,
+        /* total_pending_request_count   = */ 0U,
+        /* ready_event_count             = */ 0U
+      }
+    };
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      client_inter, observer, __LINE__));
+    // Allow the server to process the connection before sending a management
+    // request.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
+      __LINE__));
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendGetValuesRequest(
+      connection, kMapWithValues)) << std::strerror(errno));
+    ++(observer.co.management_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      client_inter, observer, __LINE__));
+    switch(i) {
+      case 0 : {
+        // Construct and write an erroneous response.
+        // A header, 2 bytes for name and value lenths, and 14 bytes for the
+        // name FCGI_MAX_CONNS. This gives 24 bytes. No padding is required.
+        constexpr std::size_t buffer_length {static_cast<std::size_t>(
+          FCGI_HEADER_LEN + 2 + 14)};
+        std::uint8_t response_buffer[buffer_length] = {};
+        PopulateHeader(response_buffer, FcgiType::kFCGI_GET_VALUES_RESULT,
+          FCGI_NULL_REQUEST_ID, 16U, 0U);
+        response_buffer[FCGI_HEADER_LEN]      = FCGI_MAX_CONNS.size();
+        response_buffer[FCGI_HEADER_LEN + 1U] = 100U; // erroneous value length
+        std::memcpy(response_buffer + FCGI_HEADER_LEN + 2U, FCGI_MAX_CONNS.data(),
+          14);
+        // Access the descriptor which must be used for the connected socket which
+        // is managed by the server.
+        ASSERT_EQ(socket_functions::SocketWrite(connection + 1,
+          response_buffer, buffer_length), buffer_length);
+        break;
+      }
+      case 1 : [[fallthrough]];
+      case 2 : {
+        using PairList = std::vector<std::pair<std::vector<std::uint8_t>,
+          std::vector<std::uint8_t>>>;
+        std::string max_conn_string {std::to_string(
+          kDefaultInterfaceArguments.max_connections)};
+        std::string max_req_string {std::to_string(
+          kDefaultInterfaceArguments.max_requests)};
+        PairList pair_vector_duplicate
+        {
+          {{FCGI_MAX_CONNS}, {max_conn_string.begin(), max_conn_string.end()}},
+          {{FCGI_MAX_REQS}, {max_req_string.begin(), max_req_string.end()}},
+          {{FCGI_MAX_CONNS}, {max_conn_string.begin(), max_conn_string.end()}},
+          {{FCGI_MPXS_CONNS}, {'1'}}
+        };
+        PairList pair_vector_mismatch
+        {
+          {{FCGI_MAX_CONNS}, {max_conn_string.begin(), max_conn_string.end()}},
+          {{FCGI_MAX_REQS}, {max_req_string.begin(), max_req_string.end()}},
+          {{FCGI_MAX_CONNS}, {'2'}},
+          {{FCGI_MPXS_CONNS}, {'1'}}
+        };
+        PairList& pair_list_ref {(i == 1) ? pair_vector_duplicate :
+          pair_vector_mismatch};
+        std::tuple<bool, std::size_t, std::vector<struct iovec>, int,
+          std::vector<std::uint8_t>, std::size_t, PairList::iterator>
+        encode_return {EncodeNameValuePairs(pair_list_ref.begin(),
+          pair_list_ref.end(), FcgiType::kFCGI_GET_VALUES_RESULT, 0U, 0U)};
+        ASSERT_FALSE(EncodeNVPairSingleRecordFailure(encode_return,
+          pair_list_ref.end()));
+        std::vector<struct iovec>& iovec_list {std::get<2>(encode_return)};
+        std::size_t total_write_length {std::get<1>(encode_return)};
+        std::tuple<struct iovec*, int, std::size_t> gather_write_return
+          {socket_functions::ScatterGatherSocketWrite(connection + 1,
+            iovec_list.data(), iovec_list.size(), total_write_length)};
+        ASSERT_EQ(std::get<2>(gather_write_return), 0U) <<
+          std::strerror(errno);
+        break;
+      }
+    }
+    // Allow the client to process the response.
+    std::unique_ptr<ServerEvent> response_uptr {};
+    ASSERT_NO_THROW(response_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(response_uptr.get(), nullptr);
+    GetValuesResult* gvr_ptr {dynamic_cast<GetValuesResult*>(
+      response_uptr.get())};
+    ASSERT_NE(gvr_ptr, nullptr);
+    --(observer.co.management_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      client_inter, observer, __LINE__));
+    GTestFatalCheckGetValuesResult(gvr_ptr, true,
+      connection, kNameOnlyMap, ParamsMap {}, __LINE__);
+    // Prepare to send a response which includes duplicate names. Two cases
+    // may be distinguished: the duplicate names have the same value or they do
+    // not.
+    ASSERT_NO_THROW(EXPECT_TRUE(client_inter.CloseConnection(connection)));
+    observer.co.is_connected = false;
+    --(observer.in.connection_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      client_inter, observer, __LINE__));
+    // Allow the server to process connection closure.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
+      __LINE__));
+  }
 }
 
 // SendRequest

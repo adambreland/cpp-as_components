@@ -676,7 +676,8 @@ class TestFcgiClientInterface
   //    b) If the descriptor had previously been used and had requests which
   //       were not released by a call to ReleaseId, those requests continue
   //       to be active.
-  // 3) EINTR was ignored during the invocation.
+  // 3) The call may have blocked until a connection was able to be made.
+  //    Internal system calls which failed with errno == EINTR were retried.
   int Connect(const char* address, in_port_t network_port);
 
   // Returns the total number of connected socket descriptors which are managed
@@ -687,9 +688,13 @@ class TestFcgiClientInterface
   }
 
   // Returns true if connection is a connected socket descriptor managed by
-  // the interface. Note that false is returned in the case that connection
-  // is closed but request identifiers which are associated with completed
-  // requests on connection are present.
+  // the interface.
+  // a) False is returned in the case that connection is closed but request
+  //    identifiers which are associated with completed requests on connection
+  //    are present.
+  // b) The returned value reflects the status of the connection as it is known
+  //    by the interface. The server is not queried to determine if it closed
+  //    the connection.
   bool IsConnected(int connection) const;
 
   // Returns the number of pending management requests for connection. When
@@ -796,6 +801,8 @@ class TestFcgiClientInterface
   //       Note that any of the observers may return a value which differs
   //    from a previously returned value after the return of a call to
   //    RetrieveServerEvent.
+  //       Internal system calls which could block were retried if a failure
+  //    occurred and errno == EINTR.
   // 3) ServerEvent instance generation:
   //    ConnectionClosure
   //    a) The construction of a ConnectionClosure instance c indicates that
@@ -890,6 +897,9 @@ class TestFcgiClientInterface
   //    When connection closure was discovered, a ConnectionClosure instance
   //    was added to the micro server event queue.
   // 2) If true was returned, then a FastCGI request abort was sent for id.
+  // 3) The call may have blocked until the request was able to be written
+  //    on id.descriptor(). Internal system calls which failed with
+  //    errno == EINTR were retried.
   bool SendAbortRequest(FcgiRequestIdentifier id);
 
   // Attempts to send a management request to connection with the specified
@@ -940,6 +950,9 @@ class TestFcgiClientInterface
   //       initialized upon receipt of a response.
   //    c) For the move overload: No copy of data was made. data is in a
   //       moved from state.
+  //    d) The call may have blocked until the request was able to be written
+  //       on connection. Internal system calls which failed with
+  //       errno == EINTR were retried.
   bool SendBinaryManagementRequest(int connection,
     FcgiType type, const std::uint8_t* begin, const std::uint8_t* end);
   bool SendBinaryManagementRequest(int connection,
@@ -989,6 +1002,9 @@ class TestFcgiClientInterface
   //       an appropriate copy operation was performed.
   //    c) For the move overload: No copy of params_map was made. params_map
   //       is in a moved-from state.
+  //    d) The call may have blocked until the request was able to be written
+  //       on connection. Internal system calls which failed with
+  //       errno == EINTR were retried.
   bool SendGetValuesRequest(int connection, const ParamsMap& params_map);
   bool SendGetValuesRequest(int connection, ParamsMap&& params_map);
 
@@ -1050,6 +1066,9 @@ class TestFcgiClientInterface
   //    e) A copy of request was made and stored internally for later use
   //       in the construction of an FcgiResponse instance upon the receipt of
   //       the response to the request.
+  //    f) The call may have blocked until the request was able to be written
+  //       on connection. Internal system calls which failed with
+  //       errno == EINTR were retried.
   FcgiRequestIdentifier SendRequest(int connection,
     const FcgiRequestDataReference& request);
 
