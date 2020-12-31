@@ -1808,8 +1808,268 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    b) The FCGI_UNKNOWN_TYPE record has a content length which is non-zero
 //       and not equal to 8.
 
+// InvalidRecord
+// Discussion:
+//    In each case, the appropriate request, when one is present, should be
+// able to be completed and returned after the construction and return of an
+// InvalidRecord instance.
+//
+// Types:
+// Expected types:
+// FCGI_END_REQUEST
+// 1) An FCGI_END_REQUEST record is received when no application requests have
+//    been made. The record is not malformed.
+// 2) Several application requests have been made.
+//    a) The version of the FastCGI protocol is not 1 (malformed). Otherwise
+//       the record is not malformed and would be accepted.
+//    b) The state of received data for an application request is such that an
+//       FCGI_END_REQUEST record is expected. An FCGI_END_REQUEST record is
+//       received, but the FastCGI request identifier does not match any of the
+//       application requests.
+//    c) Content length error (malformed). Otherwise the record is not
+//       malformed and would be accepted.
+//       1) Zero content length.
+//       2) Content length is not a multiple of eight.
+//       3) Content length is a multiple of eight and greater than eight.
+//    d) The record would otherwise be accepted, but the protocol status
+//       value is not one the the four allowed values (malformed).
+//    e) Non-terminated (active) streams:
+//       1) Data has not been received for FCGI_STDOUT and FCGI_STDERR.
+//       2) Data has been received for FCGI_STDOUT, but it has not been
+//          terminated. No data has been received for FCGI_STDERR.
+//       3) As 2 but with FCGI_STDERR and FCGI_STDOUT switched.
+//       4) Data has been received for both FCGI_STDOUT and FCGI_STDERR and
+//          neither have been terminated.
+//
+// FCGI_STDOUT
+// 1) An FCGI_STDOUT record is received when no application requests have
+//    been made. The record is not malformed. Both terminal and non-terminal
+//    records are sent.
+// 2) Several application requests have been made. For each case below,
+//    terminal and non-terminal records are sent.
+//    a) The version of the FastCGI protocol is not 1 (malformed). Otherwise
+//       the record is not malformed and would be accepted.
+//    b) An FCGI_STDOUT record is received, and its FastCGI request identifier
+//       does not match any of the application requests.
+//    c) An FCGI_STDOUT record is received for a request whose FCGI_STDOUT
+//       stream has already been completed.
+//       1) The record is non-terminal (content length is not zero).
+//       2) The record is terminal (zero content length).
+//
+// FCGI_STDERR
+// As for FCGI_STDOUT, mutatis mutandis.
+//
+// FCGI_GET_VALUES_RESULT
+// 1) An FCGI_GET_VALUES_RESULT record is received when no management requests
+//    have been made. The record is not malformed.
+// 2) An FCGI_GET_VALUES_RESULT record is received when several management
+//    requests have been made:
+//    a) The version of the FastCGI protocol is not 1 (malformed). Otherwise
+//       the record is not malformed and would be accepted.
+//    b) Non-zero FastCGI request identifier (malformed). Otherwise the record
+//       is not malformed and would be accepted.
+//    c) The management request at the beginning of the management request
+//       queue does is not an FCGI_GET_VALUES request.
+//
+// FCGI_UNKNOWN_TYPE
+// 1) An FCGI_UKNOWN_TYPE record is received when no management requests have
+//    been made. The record is not malformed.
+// 2) An FCGI_UKNOWN_TYPE record is received when several management requests
+//    have been made:
+//    a) The version of the FastCGI protocol is not 1 (malformed). Otherwise
+//       the record is not malformed and would be accepted.
+//    b) Non-zero FastCGI request identifier (malformed). Otherwise the record
+//       is not malformed and would be accepted.
+//    c) Content length error (malformed). Otherwise the record is not
+//       malformed and would be accepted.
+//       1) Zero content length.
+//       2) Content length is not a multiple of eight.
+//       3) Content length is a multiple of eight and greater than eight.
+//    d) The management request at the front of the queue is an FCGI_GET_VALUES
+//       request. The record is not malformed.
+//
+// Unexpected, but known types; unknown types.
+// 1) No application or management requests have been made.
+// 2) Application and management requests have been made.
+//    a) The FastCGI request identifier is equal to FCGI_NULL_REQUEST_ID.
+//    b) The FastCGI request identifier is equal to that of a pending
+//       application request.
+//
+//
+//
+
+TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
+{
+  // Create the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  TestFcgiClientInterface client_inter {};
+  int connection {};
+  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
+    -1) << std::strerror(errno));
+  // Allow the server to process the connection.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
+    __LINE__));
+  int server_connection {connection + 1};
+  std::uint16_t request_id {1U};
+  constexpr const unsigned int three_header_length {3 * FCGI_HEADER_LEN};
+  // No padding.
+  // Padding which is not a multiple of 8.
+  // Non-zero padding which is a multiple of 8.
+  constexpr const int padding_case_count {3};
+  const std::uint8_t padding_lengths[padding_case_count] = {0U, 3U, 8U};
+
+  // FCGI_BEGIN_REQUEST, FCGI_END_REQUEST, FCGI_UNKNOWN_TYPE
+  // Records of these types each are specified as requiring one byte of content.
+  std::uint8_t one_content_byte_specified_buffer[three_header_length] = {};
+  constexpr const int one_content_byte_specified_type_count {3};
+  FcgiType one_content_byte_specified_types[one_content_byte_specified_type_count] =
+    {FcgiType::kFCGI_BEGIN_REQUEST, FcgiType::kFCGI_END_REQUEST,
+     FcgiType::kFCGI_UNKNOWN_TYPE};
+  PopulateHeader(one_content_byte_specified_buffer, FcgiType::kFCGI_END_REQUEST,
+    request_id, FCGI_HEADER_LEN, 0U);
+  struct ExpectedInvalidRecordValues expected_one_content_byte_values
+  {
+    /* content_buffer_ptr = */ one_content_byte_specified_buffer +
+      FCGI_HEADER_LEN,
+    /* content_length     = */ FCGI_HEADER_LEN,
+    /* padding_length     = */ 0U,
+    /* id                 = */ {connection, request_id},
+    /* type               = */ FcgiType::kFCGI_END_REQUEST,
+    /* version            = */ 1U
+  };
+  for(int i {0}; i != one_content_byte_specified_type_count; ++i)
+  {
+    FcgiType current_type {one_content_byte_specified_types[i]};
+    *(one_content_byte_specified_buffer + kHeaderTypeIndex) =
+      static_cast<std::uint8_t>(current_type);
+    expected_one_content_byte_values.type = current_type;
+    // Update the content for the type.
+    switch(current_type) {
+      case FcgiType::kFCGI_BEGIN_REQUEST : {
+        *(expected_one_content_byte_values.content_buffer_ptr +
+          kBeginRequestRoleB1Index) = 0U;
+        *(expected_one_content_byte_values.content_buffer_ptr +
+          kBeginRequestRoleB0Index) = 1U;
+        *(expected_one_content_byte_values.content_buffer_ptr +
+          kBeginRequestFlagsIndex)  = FCGI_KEEP_CONN;
+        break;
+      }
+      case FcgiType::kFCGI_END_REQUEST : {
+        std::int32_t app_status {EXIT_SUCCESS};
+        constexpr const int app_status_byte_count {4};
+        for(int i {0}; i != app_status_byte_count; ++i)
+        {
+          // Truncate after shifting.
+          *(expected_one_content_byte_values.content_buffer_ptr + i) =
+            (app_status >> ((3 - i) * 8));
+        }
+        *(expected_one_content_byte_values.content_buffer_ptr +
+          kEndRequestProtocolStatusIndex) = FCGI_REQUEST_COMPLETE;
+        break;
+      }
+      case FcgiType::kFCGI_UNKNOWN_TYPE : {
+        *expected_one_content_byte_values.content_buffer_ptr = 27U;
+        break;
+      }
+      default : {
+        FAIL() << "Unhandled switch case.";
+      }
+    }
+    for(int j {0}; j != padding_case_count; ++j)
+    {
+      std::uint8_t padding_length {padding_lengths[j]};
+      *(one_content_byte_specified_buffer + kHeaderPaddingLengthIndex) =
+        padding_length;
+      expected_one_content_byte_values.padding_length = padding_length;
+      ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+        &client_inter, server_connection, one_content_byte_specified_buffer,
+        (2 * FCGI_HEADER_LEN) + padding_length,
+        expected_one_content_byte_values, __LINE__));
+    }
+  }
+
+  // FCGI_STDIN, FCGI_DATA, FCGI_STDOUT, FCGI_STDERR
+  //    These are application record types. They are distinguished by being
+  // associated with data streams and, as such, by having special semantics
+  // for an empty record.
+  // ******************************************************************
+  std::uint8_t application_stream_buffer[three_header_length] = {};
+  struct ExpectedInvalidRecordValues expected_application_stream_values
+  {
+    /* content_buffer_ptr = */ application_stream_buffer + FCGI_HEADER_LEN,
+    /* content_length     = */ 0U,
+    /* padding_length     = */ 0U,
+    /* id                 = */ {connection, request_id},
+    /* type               = */ FcgiType::kFCGI_STDOUT,
+    /* version            = */ 1U
+  };
+  PopulateHeader(application_stream_buffer, FcgiType::kFCGI_STDOUT, request_id,
+    0U, 0U);
+  constexpr const std::uint8_t application_content_length {4};
+  // {1, 2, 3, 4}
+  for(int i {0}; i != application_content_length; ++i)
+  {
+    *(expected_application_stream_values.content_buffer_ptr + i) = (i + 1);
+  }
+  constexpr const int application_type_count {2};
+  FcgiType types[2] = {FcgiType::kFCGI_STDOUT, FcgiType::kFCGI_STDERR};
+  for(int i {0}; i != application_type_count; ++i)
+  {
+    // Terminal records.
+    *(application_stream_buffer + kHeaderTypeIndex) =
+      static_cast<std::uint8_t>(types[i]);
+    expected_application_stream_values.type = types[i];
+    *(application_stream_buffer + kHeaderContentLengthB0Index) = 0U;
+    expected_application_stream_values.content_length = 0U;
+    for(int j {0}; j != padding_case_count; ++j)
+    {
+      std::uint8_t padding_length {padding_lengths[j]};
+      *(application_stream_buffer + kHeaderPaddingLengthIndex) = padding_length;
+      expected_application_stream_values.padding_length = padding_length;
+      ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+        &client_inter, server_connection, application_stream_buffer,
+        FCGI_HEADER_LEN + padding_length, expected_application_stream_values,
+        __LINE__));
+    }
+    // Non-terminal records
+    *(application_stream_buffer + kHeaderContentLengthB0Index) =
+        application_content_length;
+    expected_application_stream_values.content_length =
+      application_content_length;
+    for(int j {0}; j != padding_case_count; ++j)
+    {
+      std::uint8_t padding_length {padding_lengths[j]};
+      *(application_stream_buffer + kHeaderPaddingLengthIndex) = padding_length;
+      expected_application_stream_values.padding_length = padding_length;
+      ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+        &client_inter, server_connection, application_stream_buffer,
+        FCGI_HEADER_LEN + application_content_length + padding_length,
+        expected_application_stream_values, __LINE__));
+    }
+  }
+
+  // FCGI_GET_VALUES_RESULT
+
+}
 
 
+
+// 3) An FCGI_UKNOWN_TYPE record is received when several management requests
+//    have been made and the type of the management request at the front of the
+//    queue is FCGI_GET_VALUES.
+// 3)
 
 
 

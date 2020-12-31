@@ -15,6 +15,7 @@
 
 #include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
+#include "external/socket_functions/include/socket_functions.h"
 
 #include "server_interface_combined.h"
 #include "test/include/test_fcgi_client_interface.h"
@@ -395,6 +396,55 @@ void GTestFatalTerminateChild(pid_t child_id, int invocation_line)
   else
   {
     FAIL() << std::strerror(errno);
+  }
+}
+
+void GTestFatalSendRecordAndExpectInvalidRecord(
+  TestFcgiClientInterface*                  client_interface_ptr,
+  int                                       server_connection,
+  std::uint8_t*                             record_buffer,
+  std::size_t                               record_length,
+  const struct ExpectedInvalidRecordValues& expected_values,
+  int                                       invocation_line)
+{
+  ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+    "GTestFatalSendRecordAndExpectInvalidRecord"};
+
+  ASSERT_NE(client_interface_ptr, nullptr);
+  ASSERT_NE(record_buffer, nullptr);
+  ASSERT_GT(record_length, 0U);
+  if(expected_values.content_length)
+  {
+    ASSERT_NE(expected_values.content_buffer_ptr, nullptr);
+  }
+
+  ASSERT_EQ(socket_functions::SocketWrite(server_connection, record_buffer,
+    record_length), record_length) << std::strerror(errno);
+  std::unique_ptr<ServerEvent> event_uptr {};
+  ASSERT_NO_THROW(event_uptr = client_interface_ptr->RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  InvalidRecord* invalid_record_ptr {dynamic_cast<InvalidRecord*>(
+    event_uptr.get())};
+  EXPECT_NE(invalid_record_ptr, nullptr);
+  if(invalid_record_ptr)
+  {
+    const std::vector<std::uint8_t>& end_content {invalid_record_ptr->Content()};
+    bool correct_content_length {end_content.size() ==
+      expected_values.content_length};
+    EXPECT_TRUE(correct_content_length);
+    if(correct_content_length && expected_values.content_length)
+    {
+      std::pair<std::vector<std::uint8_t>::const_iterator, std::uint8_t*>
+      expected_mismatch_ends {end_content.cend(),
+        expected_values.content_buffer_ptr + expected_values.content_length};
+      EXPECT_EQ(expected_mismatch_ends, std::mismatch(end_content.begin(),
+        end_content.end(), expected_values.content_buffer_ptr));
+    }
+    EXPECT_EQ(invalid_record_ptr->PaddingLength(),
+      expected_values.padding_length);
+    EXPECT_EQ(invalid_record_ptr->RequestId(), expected_values.id);
+    EXPECT_EQ(invalid_record_ptr->Type(), expected_values.type);
+    EXPECT_EQ(invalid_record_ptr->Version(), expected_values.version);
   }
 }
 

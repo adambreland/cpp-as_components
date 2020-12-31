@@ -299,9 +299,10 @@ class GetValuesResult : public ServerEvent
   ParamsMap             response_params_map_;
 };
 
-//    This class represents a FastCGI record which was deemed invalid. All of
-// the information of the record except for the value of the reserved header
-// byte and the values of padding bytes, if any, may be inspected.
+//    An instance of this class represents a FastCGI record which was deemed
+// invalid. All of the information of the record except for the value of the
+// reserved header byte and the values of padding bytes, if any, may be
+// inspected.
 //    A record is deemed invalid if:
 // 1) The value of the version byte of the record header is not equal to one.
 // 2) A type-based record property was not met. These properties may depend
@@ -311,6 +312,8 @@ class GetValuesResult : public ServerEvent
 //    b) The record concerns a request which does not exist.
 //    c) The record would imply termination of a response before the streams of
 //       the response are complete.
+//    d) The record has a protocol status which is not one the four allowed
+//       values.
 //    FCGI_STDOUT:
 //    a) The record concerns a request which does not exist.
 //    b) The record concerns a request whose response has a completed
@@ -761,7 +764,9 @@ class TestFcgiClientInterface
   //    a disconnected socket descriptor which was associated with completed
   //    but unreleased requests.
   // 2) If true was returned, then all completed but unreleased requests which
-  //    were associated with connection were released.
+  //    were associated with connection were released. This includes the case
+  //    where connection was valid and no unreleased requests were present for
+  //    connection.
   bool ReleaseId(int connection);
 
   // RetrieveServerEvent performs I/O multiplexing on server connections and
@@ -778,12 +783,10 @@ class TestFcgiClientInterface
   // 1) A call may throw exceptions derived from std::exception.
   // 2) Locally-unrecoverable errors from calls which set errno are represented
   //    by std::system_error instances with the corresponding errno value.
-  // 3)    std::logic_error is thrown when a call is made and an immediately
-  //    preceding call to ConnectionCount would have returned zero. In other
-  //    words, an exception is thrown when the interface has transitioned to a
-  //    state in which it is known by the interface that no connections are
-  //    connected.
-  //       The strong exception guarantee is satisfied in this case.
+  // 3) std::logic_error is thrown when a call is made and:
+  //    a) A call to ConnectionCount would return zero.
+  //    b) A call to ReadyEventCount would return zero.
+  //    The strong exception guarantee is satisfied in this case.
   //
   // Termination:
   // 1) If an error or exception would cause RetrieveServerEvent to return or

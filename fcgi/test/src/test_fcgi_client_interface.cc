@@ -563,12 +563,13 @@ void TestFcgiClientInterface::ExamineSelectReturn()
             if(remaining_data == 0U)
               break;
             
-            // A lambda to ensure that the assumptions on pending_iter
-            // are met and to update pending_iter when that is needed.
-            //
-            // Also, some common state for Content and Padding.
+            // Some common state for ptocessing content and padding.
             std::uint16_t fcgi_id {state_ptr->record_state.fcgi_id};
             FcgiType record_type {state_ptr->record_state.type};
+            bool invalidated {state_ptr->record_state.invalidated};
+
+            // A lambda to ensure that the assumptions on pending_iter
+            // are met and to update pending_iter when that is needed.
             auto PendingIterCheckAndUpdate =
             [&pending_iter, &pending_end, &descriptor, &fcgi_id, this]()->void
             {
@@ -597,8 +598,8 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               std::uint16_t copy_size {(remaining_data >= remaining_content) ?
                 remaining_content : static_cast<std::uint16_t>(remaining_data)};              
               std::uint8_t* current_end {current_byte + copy_size};
-              if(!(state_ptr->record_state.invalidated) &&
-                 (fcgi_id != FCGI_NULL_REQUEST_ID)      &&
+              if(!invalidated                      &&
+                 (fcgi_id != FCGI_NULL_REQUEST_ID) &&
                  (record_type != FcgiType::kFCGI_END_REQUEST))
               {
                 // Type is either FCGI_STDOUT or FCGI_STDERR.
@@ -633,7 +634,8 @@ void TestFcgiClientInterface::ExamineSelectReturn()
               }
               else
               {
-                if(record_type == FcgiType::kFCGI_END_REQUEST)
+                if((record_type == FcgiType::kFCGI_END_REQUEST) &&
+                   (!invalidated))
                 {
                   try // noexcept-equivalent block.
                   {
@@ -674,7 +676,8 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                 {
                   // Note that PendingIterCheckAndUpdate was called in the
                   // three cases in which this is required, i.e. record_type is
-                  // FCGI_END_REQUEST, FCGI_STDERR, or FCGI_STDOUT).
+                  // FCGI_END_REQUEST, FCGI_STDERR, or FCGI_STDOUT and, for
+                  // each case, the record is valid.
                   pending_iter = ProcessCompleteRecord(next_connection_,
                     pending_iter);
                   continue;
@@ -714,10 +717,11 @@ void TestFcgiClientInterface::ExamineSelectReturn()
                 try // noexcept-equivalent block.
                 {
                   // Ensure that pending_iter refers to the appropriate pending
-                  // request.
-                  if((record_type == FcgiType::kFCGI_END_REQUEST) ||
-                     (record_type == FcgiType::kFCGI_STDERR)      ||
-                     (record_type == FcgiType::kFCGI_STDOUT))
+                  // request when this is needed.
+                  if(!invalidated &&
+                     ((record_type == FcgiType::kFCGI_END_REQUEST) ||
+                      (record_type == FcgiType::kFCGI_STDERR)      ||
+                      (record_type == FcgiType::kFCGI_STDOUT)))
                   {
                     PendingIterCheckAndUpdate();
                   }
@@ -906,6 +910,8 @@ TestFcgiClientInterface::ProcessCompleteRecord(
   // the strong exception guarantee to be satisfied. This requires the
   // somewhat elaborate implementations of the cases.
 
+  ConnectionState* state_ptr {&(connection_iter->second)};
+
   auto TryToAssignLastQueueItemPointer = [this]
   (std::unique_ptr<ServerEvent>** assign_to)->void
   {
@@ -921,8 +927,14 @@ TestFcgiClientInterface::ProcessCompleteRecord(
     }
   };
 
-  ConnectionState* state_ptr {&(connection_iter->second)};
-  if(state_ptr->record_state.invalidated)
+  auto GenerateInvalidRecord =
+  [
+    this,
+    connection_iter,
+    &TryToAssignLastQueueItemPointer,
+    state_ptr
+  ]
+  ()->void
   {
     std::unique_ptr<InvalidRecord> new_event {new InvalidRecord {}};
     micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
@@ -937,6 +949,11 @@ TestFcgiClientInterface::ProcessCompleteRecord(
       state_ptr->record_state.padding_bytes_expected
     };
     *back_ptr = std::move(new_event); // Upcast to ServerEvent*.
+  };
+
+  if(state_ptr->record_state.invalidated)
+  {
+    GenerateInvalidRecord();
   }
   else
   {
@@ -953,7 +970,14 @@ TestFcgiClientInterface::ProcessCompleteRecord(
         }
         // Extract the protocol status.
         ++data_ptr;
-        std::uint8_t local_protocol_status {*data_ptr};
+        std::uint8_t lps {*data_ptr};
+        // Verify that the protocol status is one of the four allowed values.
+        if((lps != FCGI_REQUEST_COMPLETE) && (lps != FCGI_CANT_MPX_CONN) &&
+           (lps != FCGI_OVERLOADED)       && (lps != FCGI_UNKNOWN_ROLE))
+        {
+          GenerateInvalidRecord();
+          break;
+        }
         std::unique_ptr<FcgiResponse> new_event {new FcgiResponse {}};
         micro_event_queue_.push_back(std::unique_ptr<ServerEvent> {});
         std::unique_ptr<ServerEvent>* back_ptr {nullptr};
@@ -969,7 +993,7 @@ TestFcgiClientInterface::ProcessCompleteRecord(
           local_app_status,
           std::move(pending_iter->second.fcgi_stderr),
           std::move(pending_iter->second.fcgi_stdout),
-          local_protocol_status,
+          lps,
           pending_iter->second.request,
           pending_iter->first
         };

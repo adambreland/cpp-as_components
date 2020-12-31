@@ -44,9 +44,10 @@ namespace test {
 // of TestFcgiClientInterface instances change.
 //
 // These functions are useful for a testing strategy where the observable state
-// of an interface instance is verified on every occasion when a change in
-// observable state is expected or a change in observable state seems possible
-// due to error and state constancy is expected.
+// of an interface instance is verified:
+// 1) On every occasion when a change in observable state is expected.
+// 2) A change in observable state seems possible due to error and state
+//    constancy is expected.
 struct ClientInterfaceConnectionOnlyObserverValues
 {
   int         connection;
@@ -402,6 +403,24 @@ void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
 // the child has not terminated, it is terminated with SIGKILL. The child is
 // then reaped.
 void GTestFatalTerminateChild(pid_t child_id, int invocation_line);
+
+struct ExpectedInvalidRecordValues
+{
+  std::uint8_t*         content_buffer_ptr;
+  std::uint16_t         content_length;
+  std::uint8_t          padding_length;
+  FcgiRequestIdentifier id;
+  FcgiType              type;
+  std::uint8_t          version;
+};
+
+void GTestFatalSendRecordAndExpectInvalidRecord(
+  TestFcgiClientInterface*                  client_interface_ptr,
+  int                                       server_connection,
+  std::uint8_t*                             record_buffer,
+  std::size_t                               record_length,
+  const struct ExpectedInvalidRecordValues& expected_values,
+  int                                       invocation_line);
 
 } // namespace test
 } // namespace test
