@@ -35,6 +35,170 @@ namespace fcgi {
 namespace test {
 namespace test {
 
+// Testing discussion:
+// Connection closure:
+//    The interface maintains state for each connection and for the interface
+// as a whole. When a connection transitions from being connected to being
+// disconnected, this state must be appropriately updated. State update is
+// largely independent of the cause of detection closure. The connection may
+// have been found to be closed when a call which reads from or writes to the
+// connection was made. The methods which do so are:
+// Read:
+// 1) RetrieveServerEvent
+//
+// Write:
+// 1) SendAbortRequest
+// 2) SendBinaryManagementRequest
+// 3) SendGetValuesRequest
+// 4) SendRequest
+//
+// Alternatively, the connection may have been closed by the user by a call to
+// CloseConnection.
+//
+//    State update upon connection closure:
+// Connection state:
+// 1) Management request queue: Cleared.
+// 2) Current response record state: Cleared (e.g. because a partial record may
+//    be present whose data has not been assigned to a particular response).
+// 3) Pending requests (and any associated response data): Cleared.
+// 4) Completed and unreleased requests: Unchanged.
+// 5) Count observers:
+//    a) Connection pending request count: reset to zero.
+//    b) Connection completed request count: Unchanged.
+// 6) Connection status: Transitioned from true to false (disconnected).
+//
+// Interface state:
+// 1) Total connection count: Decremented.
+// 2) Total pending request count: Reduced by the number of pending requests
+//    which were cleared.
+// 3) Total completed request count: Unchanged.
+//
+//    To ensure that the interface updates state appropriately when a
+// connection is transitioned from connected to disconnected, two cases should
+// be tested for any method which may cause this transition.
+// 1) The connection is not associated with completed-and-unreleased requests.
+// 2) The connection is associated with at least one completed-and-unreleased
+//    request.
+//
+// The first case checks for appropriate update when no information about the
+// connection must be preserved after the connection is closed. In both cases,
+// the state of the connection should be as follows when the tests are
+// performed:
+// 1) At least one pending management request is present.
+// 2) At least one pending application request is present.
+// 3) A partially received record is present.
+//
+// After the interface processes connection closure, a new connection which
+// reuses the descriptor of the previous connection should be made.
+// Application and management request-response cycles should be performed.
+
+void GTestFatalConnectionClosureCheck(
+  const char*              address,
+  in_port_t                network_port,
+  TestFcgiClientInterface* client_inter_ptr,
+  FcgiServerInterface*     server_interface_ptr,
+  FcgiServerInterface* (*disconnect_with_server_return)(),
+  int                      invocation_line)
+{
+  int new_connection {};
+  ASSERT_NO_THROW(ASSERT_NE(new_connection =
+    client_inter_ptr->Connect(address, network_port), -1));
+  struct ClientInterfaceObserverValues observer
+  {
+    /* co = */
+    {
+      /* connection                         = */ new_connection,
+      /* connection_completed_request_count = */ 0U,
+      /* is_connected                       = */ true,
+      /* management_request_count           = */ 0U,
+      /* connection_pending_request_count   = */ 0U
+    },
+    /* in = */
+    {
+      /* total_completed_request_count = */
+        client_inter_ptr->CompletedRequestCount(),
+      /* connection_count              = */ client_inter_ptr->ConnectionCount(),
+      /* total_pending_request_count   = */
+        client_inter_ptr->PendingRequestCount(),
+      /* ready_event_count             = */ client_inter_ptr->ReadyEventCount()
+    }
+  };
+  constexpr const int kCaseCount {2};
+  constexpr const int kCompletedAndUnreleasedRequestsIndex {1};
+  for(int i {0}; i < kCaseCount; ++i)
+  {
+    if(i == kCompletedAndUnreleasedRequestsIndex)
+    {
+      // Perform an application request-response cycle so that a completed-
+      // and-unreleased request is present.
+      FcgiRequestIdentifier new_id {};
+      ASSERT_NO_THROW(ASSERT_NE(new_id = client_inter_ptr->SendRequest(
+        new_connection, kExerciseDataRef), FcgiRequestIdentifier {}));
+      ++(observer.co.connection_pending_request_count);
+      ++(observer.in.total_pending_request_count);
+      ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+        *client_inter_ptr, observer, __LINE__));
+      // Allow the server to process the request.
+      std::vector<FcgiRequest> accept_buffer {};
+      ASSERT_NO_THROW
+      (
+        while(!(accept_buffer.size()))
+        {
+          accept_buffer = server_interface_ptr->AcceptRequests();
+        }
+      );
+      ASSERT_EQ(accept_buffer.size(), 1U);
+      ASSERT_NO_FATAL_FAILURE(GTestFatalOperationForRequestEcho(&accept_buffer,
+        kSharedExerciseParams, kExerciseDataRef.role,
+        kExerciseDataRef.keep_conn, __LINE__));
+      // Allow the client to process the response.
+      std::unique_ptr<ServerEvent> event_uptr {};
+      ASSERT_NO_THROW(event_uptr = client_inter_ptr->RetrieveServerEvent());
+      ASSERT_NE(event_uptr.get(), nullptr);
+      FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+      ASSERT_NE(response_ptr, nullptr);
+      --(observer.co.connection_pending_request_count);
+      --(observer.in.total_pending_request_count);
+      ++(observer.co.connection_completed_request_count);
+      ++(observer.in.total_completed_request_count);
+      ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+        *client_inter_ptr, observer, __LINE__));
+      ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
+        response_ptr, __LINE__));
+    }
+    // Establish pending management and application requests.
+    ASSERT_NO_THROW(client_inter_ptr->SendGetValuesRequest(new_connection,
+      kMpxsMapWithValue));
+    ++(observer.co.management_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      *client_inter_ptr, observer, __LINE__));
+    FcgiRequestIdentifier pending_app_request_id {};
+    ASSERT_NO_THROW(pending_app_request_id = client_inter_ptr->SendRequest(
+      new_connection, kExerciseDataRef));
+    ++(observer.co.connection_pending_request_count);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
+      *client_inter_ptr, observer, __LINE__));
+    // Write a partial record to the connection.
+    std::uint8_t stdout_header[FCGI_HEADER_LEN] = {};
+    std::vector<std::uint8_t>::size_type stdin_size
+      {kStdinDataForClientExercise.size()};
+    ASSERT_LE(stdin_size, std::numeric_limits<std::uint16_t>::max());
+    std::uint8_t padding_mod {static_cast<std::uint8_t>(stdin_size % 8)};
+    std::uint8_t padding_length {(padding_mod) ? 8 - padding_mod : 0U};
+    PopulateHeader(stdout_header, FcgiType::kFCGI_STDOUT,
+      pending_app_request_id.Fcgi_id(), stdin_size, padding_length);
+    ASSERT_EQ(socket_functions::SocketWrite(new_connection + 1, stdout_header,
+      FCGI_HEADER_LEN), FCGI_HEADER_LEN) << std::strerror(errno);
+    // Call the function which will cause the connection to become
+    // disconnected and which will return a pointer to the server interface
+    // which will be connected to verify appropriate client interface state
+    // update.
+    ASSERT_NO_THROW(server_interface_ptr = (*disconnect_with_server_return)());
+    // Verify client interface state update by request-response cycles.
+    
+  }
+}
+
 // CloseConnection
 // Examined properties:
 // 1) Presence of pending management requests in the management request queue.
@@ -1737,6 +1901,30 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 
 // RetrieveServerEvent
 // Examined properties:
+// Conceptual properties:
+// 1) Record receipt:
+//    a) Receipt of data for the response to a request over multiple I/O
+//       multipexing cycles. Two independent properties can be identified:
+//       1) Partial record receipt with subsequent completion of the record
+//          during another I/O multiplexing cycle.
+//       2) Receipt of data for a response which uses multiple records. In this
+//          case, individual complete records and partial records may be
+//          received during distinct I/O multiplexing cycles.
+//    b) For responses which use multiple records and distinct streams
+//       (application request responses), the order of record receipt for
+//       distinct streams.
+//    c) Padding:
+// 2) Connection closure
+//    a) Detection of connection closure by a server when a call to
+//       RetrieveServerEvent is made. Proper update of interface state upon
+//       the detection of connection closure.
+//       1) A special case is when a partial record has been received on the
+//          connection.
+//    
+//     
+
+
+
 // 1) Proper behavior regarding the specified throw of a std::logic_error
 //    exception.
 //    a) As a special case, correct behavior is verified when ConnectionCount()
@@ -1807,6 +1995,24 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    a) The FCGI_UNKNOWN_TYPE record has no content (content length is zero).
 //    b) The FCGI_UNKNOWN_TYPE record has a content length which is non-zero
 //       and not equal to 8.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // InvalidRecord
 // Discussion:
