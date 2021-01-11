@@ -1,8 +1,10 @@
 #ifndef A_COMPONENT_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
 #define A_COMPONENT_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
 
+#include <signal.h>
 #include <sys/socket.h>
-#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -94,8 +96,8 @@ void GTestFatalClientInterfaceObserverCheck(
 //    The file is described by a const char* to the file path. A dummy
 //    descriptor does not cause an error during closure.
 // 3) Sets SIGPIPE to be ignored,
-// 4) Establishes SigAlrmHandler for SIGALRM.
-// 5) Restores the default dispositions for SIGPIPE and SIGALRM during clean
+// 4) Establishes SigUsr2Handler for SIGUSR2.
+// 5) Restores the default dispositions for SIGPIPE and SIGUSR2 during clean
 //    up.
 class TestFcgiClientInterfaceTestFixture : public ::testing::Test
 {
@@ -307,11 +309,10 @@ void GTestFatalEchoResponseCompare(
 // receipt can then be arranged to occur when AcceptRequests is blocked.
 //
 // This strategy is used by GTestFatalServerAcceptLoop<Func>.
-std::atomic<bool> server_accept_timeout
-  {false};
+std::atomic<bool> server_accept_timeout {false};
 
 // Sets server_accept_timeout and returns.
-extern "C" void SigAlrmHandler(int);
+extern "C" void SigUsr2Handler(int);
 
 // The default timeout for a blocked call to
 // FcgiServerInterface::AcceptRequests. The timeout was made relatively long to
@@ -320,17 +321,32 @@ extern "C" void SigAlrmHandler(int);
 // happen, for example, due to unusually long scheduling delays. Smaller values
 // caused such failures to occur relatively frequently when the test program
 // was executed many times in a row (on the order of thousands of executions).
-constexpr const struct itimerval kTimeout
+constexpr const struct timespec kNanoTimeout
 {
-  {0, 0},    // it_interval (don't repeat)
-  {0, 10000} // it_value (wait 10 ms)
+  /* tv_sec  = */ 0,
+  /* tv_nsec = */ 10000000 // 10 ms
 };
+constexpr const struct itimerspec kTimerTimeout
+{
+  /* it_interval = */ {},
+  /* it_value    = */ kNanoTimeout
+};
+struct sigevent sev
+{
+  /* sigev_notify        = */ SIGEV_SIGNAL,
+  /* sigev_signo         = */ SIGUSR2,
+  /* sigev_value (union) = */ 0,
+  /* _sigev_un           = */ 0 // system data set to default
+};
+
+timer_t CreateRealtimePosixTimer(struct sigevent* evp);
+timer_t accept_requests_block_escape_timer_id {CreateRealtimePosixTimer(&sev)};
 
 // The following functions facilitate the processing of management and
 // application requests by FastCGI test server instances.
 //    The loop until AcceptRequests blocks was found to be needed as a single
 // call to AcceptRequests does not necessarily read all of the information
-// of a request. A timer and its associated SIGALRM signal are used to break
+// of a request. A timer and its associated SIGUSR2 signal are used to break
 // out of the blocked AcceptRequests call and the loop.
 //    Note that this implementation also tests the specified behavior of
 // AcceptRequests when it has blocked in an I/O multiplexing call and the
@@ -352,8 +368,9 @@ void GTestFatalServerAcceptLoop(FcgiServerInterface* inter_ptr,
   ASSERT_NE(inter_ptr, nullptr);
   std::vector<FcgiRequest> accept_buffer {};
   server_accept_timeout.store(false);
-  ASSERT_NE(setitimer(ITIMER_REAL, &kTimeout, nullptr), -1) <<
-    std::strerror(errno);
+
+  ASSERT_NE(timer_settime(accept_requests_block_escape_timer_id, 0,
+    &kTimerTimeout, nullptr), -1) << std::strerror(errno);
   while(!(server_accept_timeout.load()))
   {
     ASSERT_NO_THROW(accept_buffer = inter_ptr->AcceptRequests());
@@ -392,14 +409,14 @@ void GTestFatalOperationForRequestEcho(
 
 // A utility which calls inter_ptr->AcceptRequests in a loop on
 // server_accept_timeout and echoes the content of a request in the response to
-// the request. OperationForRequestEcho is used to echo the request.
+// the request. GTestFatalOperationForRequestEcho is used to echo the request.
 void GTestFatalAcceptRequestsRequestEcho(FcgiServerInterface* inter_ptr,
   const ParamsMap& sent_environ, std::uint16_t role, bool keep_conn,
   int invocation_line);
 
 // A helper function to terminate and reap a child process which was created by
 // the test process during testing. It is expected that the child has not
-// terminated or otherwise changed state. The state the child is checked. If
+// terminated or otherwise changed state. The state of the child is checked. If
 // the child has not terminated, it is terminated with SIGKILL. The child is
 // then reaped.
 void GTestFatalTerminateChild(pid_t child_id, int invocation_line);
@@ -421,6 +438,83 @@ void GTestFatalSendRecordAndExpectInvalidRecord(
   std::size_t                               record_length,
   const struct ExpectedInvalidRecordValues& expected_values,
   int                                       invocation_line);
+
+using DisconnectWithServerReturnType =
+  std::function<void(int, FcgiServerInterface**, int)>;
+
+// Tests the behavior of *client_inteface_ptr when a new connection is closed
+// by the action of a call to *disconnect_with_server_return. Two cases are
+// tested: when at least one completed and unreleased application request is
+// present for the new connection, and when no completed and unreleased
+// application requests are present for the new connection.
+// *disconnect_with_server_return is called twice during the iterative
+// testing of *client_inteface_ptr over the two cases.
+//
+// Parameters:
+// address:                       The textual representation of the address
+//                                used by an FcgiServerInterface instance
+//                                without a port if one is applicable.
+// network_port:                  The port associated with address.
+// client_interface_ptr:          A pointer to the TestFcgiClientInterface
+//                                whose behavior on connection closure will be
+//                                tested.
+// server_interface_ptr:          A pointer to the initial FcgiServerInterface
+//                                which is associated with address.
+// disconnect_with_server_return: A function which will cause connection
+//                                closure and which will provide a pointer to
+//                                the next FcgiServerInterface which will be
+//                                used for request-response cycles.
+// invocation_line:               The line at which the function is invoked.
+//
+// Preconditions:
+// General:
+// 1) kUnixPath2 must be available for use by an AF_UNIX server.
+// disconnect_with_server_return:
+// 1) The FcgiServerInterface* instance associated with the result parameter
+//    with type FcgiServerInterface** of DisconnectWithServerReturnType must
+//    not be null after each invocation of disconnect_with_server_return.
+// 2) The value of the FcgiServerInterface* instance pointed to by the
+//    FcgiServerInterface** argument must be ignored.
+// 3) disconnect_with_server_return must be able to be called twice.
+// 4) disconnect_with_server_return must handle all resource management of
+//    objects created on the heap during its execution.
+// 5) The lifetime of the FcgiServerInterface instance pointed to by the value
+//    returned through the return parameter must extend from the time of the
+//    instance's creation to the time of the next call to
+//    disconnect_with_server_return.
+// 6) In addition to effecting connection closure, invocation of
+//    disconnect_with_server_return must cause:
+//    1) *client_interface_ptr to become aware of connection closure.
+//    2) client_interface_ptr->ReadyEventCount() == 0U by the time of the
+//       return of the invocation.
+// 7) disconnect_with_server_return must follow the conventions for reporting
+//    Google Test assertion failures. In particular, fatal failures may be
+//    reported with fatal assertions and the terminal int parameter value must
+//    be interpreted as an invocation line number.
+// Partial record delivery:
+// 1) Let new_connection be the value of the descriptor of the connection
+//    created by GTestFatalConnectionClosureCheck to test the client interface
+//    for one of the two cases of connection closure. new_connection + 1 must
+//    be the descriptor created by the FcgiServerInterface argument to handle
+//    new_connection. GTestFatalConnectionClosureCheck will write through this
+//    descriptor to send a partial record to the client interface.
+// *client_interface_ptr
+// 1) client_interface_ptr->ReadyEventCount() == 0U upon invocation of
+//    GTestFatalConnectionClosureCheck.
+//
+// Implied limitations:
+// 1) The FcgiServerInterface instances used during execution must be present
+//    in the process which houses *client_interface_ptr.
+//
+// Effects:
+//
+void GTestFatalConnectionClosureCheck(
+  const char*                    address,
+  in_port_t                      network_port,
+  TestFcgiClientInterface*       client_interface_ptr,
+  FcgiServerInterface*           server_interface_ptr,
+  DisconnectWithServerReturnType disconnect_with_server_return,
+  int                            invocation_line);
 
 } // namespace test
 } // namespace test

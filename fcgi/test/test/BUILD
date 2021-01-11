@@ -1,6 +1,6 @@
 cc_library(
-    name       = "client_interface_testing_utilities",
-    deps       = [
+    name          = "client_interface_testing_utilities",
+    deps          = [
         "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "//test:test_fcgi_client_interface",
@@ -8,15 +8,23 @@ cc_library(
         "@a_component_testing//gtest:a_component_testing_gtest_utilities",
         "@googletest//:gtest"
     ],
-    srcs       = ["//test/test:src/client_interface_testing_utilities.cc"],
-    hdrs       = ["//test/test:include/client_interface_testing_utilities.h"],
-    copts      = [
+    srcs          = ["//test/test:src/client_interface_testing_utilities.cc"],
+    hdrs          = [
+        "//test/test:include/client_interface_testing_utilities.h"
+    ],
+    copts         = [
         "-std=c++17",
         "-g",
         "-Wextra",
         "-iquote ."
     ],
-    visibility = ["//visibility:public"]
+    # Set the feature test macro which is required for use of timer_create and
+    # timer_settime. The minimum value is 199309L.
+    local_defines = ["_POSIX_C_SOURCE=199309L"],
+    # Link against the realtime library librt. Needed on Linux for use of
+    # timer_create and timer_settime (POSIX interval timer functions).
+    linkopts      = ["-lrt"],
+    visibility    = ["//visibility:public"]
 )
 
 cc_test(

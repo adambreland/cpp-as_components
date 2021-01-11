@@ -477,8 +477,15 @@ FcgiServerInterface::RecordStatus::ReadRecords()
     // Check for a disconnected socket or an unrecoverable error.
     if(number_bytes_received < kBufferSize)
     {
-      if((errno == 0) || ((errno != EAGAIN) && (errno != EWOULDBLOCK)))
+      if((errno == EAGAIN) || (errno == EWOULDBLOCK))
       {
+        // no-op here. The read buffer was emptied. Proceed to process any read
+        // data.
+      }
+      else
+      {
+        // An error other than blocking due to an empty read buffer was
+        // encountered.
         std::unique_lock<std::mutex> unique_interface_state_lock
           {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
         try
@@ -491,8 +498,11 @@ FcgiServerInterface::RecordStatus::ReadRecords()
           std::terminate();
         }
         InterfaceCheck();
+
         try
         {
+          // Due to the error, schedule the local descriptor of the connection
+          // for closure.
           i_ptr_->application_closure_request_set_.insert(connection_);
         }
         catch(...)
@@ -500,14 +510,17 @@ FcgiServerInterface::RecordStatus::ReadRecords()
           i_ptr_->bad_interface_state_detected_ = true;
           throw;
         }
-        if(errno == 0)
+        if((errno == 0) || (errno == ECONNRESET))
         {
           // Connection was closed. Discard any read data and update interface
-          // state.
+          // state. The case errno == ECONNRESET implies that data was sent to
+          // the peer and that the peer closed the connection before it read
+          // the sent data.
           return {};
         }
-        else // Unrecoverable error.
+        else
         {
+          // All other cases are treated as unknown unrecoverable errors.
           std::error_code ec {errno, std::system_category()};
           throw std::system_error {ec, "read from a call to "
             "SocketRead"};

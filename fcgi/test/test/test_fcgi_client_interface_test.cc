@@ -40,7 +40,7 @@ namespace test {
 //    The interface maintains state for each connection and for the interface
 // as a whole. When a connection transitions from being connected to being
 // disconnected, this state must be appropriately updated. State update is
-// largely independent of the cause of detection closure. The connection may
+// largely independent of the cause of connection closure. The connection may
 // have been found to be closed when a call which reads from or writes to the
 // connection was made. The methods which do so are:
 // Read:
@@ -92,113 +92,6 @@ namespace test {
 // reuses the descriptor of the previous connection should be made.
 // Application and management request-response cycles should be performed.
 
-void GTestFatalConnectionClosureCheck(
-  const char*              address,
-  in_port_t                network_port,
-  TestFcgiClientInterface* client_inter_ptr,
-  FcgiServerInterface*     server_interface_ptr,
-  FcgiServerInterface* (*disconnect_with_server_return)(),
-  int                      invocation_line)
-{
-  int new_connection {};
-  ASSERT_NO_THROW(ASSERT_NE(new_connection =
-    client_inter_ptr->Connect(address, network_port), -1));
-  struct ClientInterfaceObserverValues observer
-  {
-    /* co = */
-    {
-      /* connection                         = */ new_connection,
-      /* connection_completed_request_count = */ 0U,
-      /* is_connected                       = */ true,
-      /* management_request_count           = */ 0U,
-      /* connection_pending_request_count   = */ 0U
-    },
-    /* in = */
-    {
-      /* total_completed_request_count = */
-        client_inter_ptr->CompletedRequestCount(),
-      /* connection_count              = */ client_inter_ptr->ConnectionCount(),
-      /* total_pending_request_count   = */
-        client_inter_ptr->PendingRequestCount(),
-      /* ready_event_count             = */ client_inter_ptr->ReadyEventCount()
-    }
-  };
-  constexpr const int kCaseCount {2};
-  constexpr const int kCompletedAndUnreleasedRequestsIndex {1};
-  for(int i {0}; i < kCaseCount; ++i)
-  {
-    if(i == kCompletedAndUnreleasedRequestsIndex)
-    {
-      // Perform an application request-response cycle so that a completed-
-      // and-unreleased request is present.
-      FcgiRequestIdentifier new_id {};
-      ASSERT_NO_THROW(ASSERT_NE(new_id = client_inter_ptr->SendRequest(
-        new_connection, kExerciseDataRef), FcgiRequestIdentifier {}));
-      ++(observer.co.connection_pending_request_count);
-      ++(observer.in.total_pending_request_count);
-      ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
-        *client_inter_ptr, observer, __LINE__));
-      // Allow the server to process the request.
-      std::vector<FcgiRequest> accept_buffer {};
-      ASSERT_NO_THROW
-      (
-        while(!(accept_buffer.size()))
-        {
-          accept_buffer = server_interface_ptr->AcceptRequests();
-        }
-      );
-      ASSERT_EQ(accept_buffer.size(), 1U);
-      ASSERT_NO_FATAL_FAILURE(GTestFatalOperationForRequestEcho(&accept_buffer,
-        kSharedExerciseParams, kExerciseDataRef.role,
-        kExerciseDataRef.keep_conn, __LINE__));
-      // Allow the client to process the response.
-      std::unique_ptr<ServerEvent> event_uptr {};
-      ASSERT_NO_THROW(event_uptr = client_inter_ptr->RetrieveServerEvent());
-      ASSERT_NE(event_uptr.get(), nullptr);
-      FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
-      ASSERT_NE(response_ptr, nullptr);
-      --(observer.co.connection_pending_request_count);
-      --(observer.in.total_pending_request_count);
-      ++(observer.co.connection_completed_request_count);
-      ++(observer.in.total_completed_request_count);
-      ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
-        *client_inter_ptr, observer, __LINE__));
-      ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
-        response_ptr, __LINE__));
-    }
-    // Establish pending management and application requests.
-    ASSERT_NO_THROW(client_inter_ptr->SendGetValuesRequest(new_connection,
-      kMpxsMapWithValue));
-    ++(observer.co.management_request_count);
-    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
-      *client_inter_ptr, observer, __LINE__));
-    FcgiRequestIdentifier pending_app_request_id {};
-    ASSERT_NO_THROW(pending_app_request_id = client_inter_ptr->SendRequest(
-      new_connection, kExerciseDataRef));
-    ++(observer.co.connection_pending_request_count);
-    ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
-      *client_inter_ptr, observer, __LINE__));
-    // Write a partial record to the connection.
-    std::uint8_t stdout_header[FCGI_HEADER_LEN] = {};
-    std::vector<std::uint8_t>::size_type stdin_size
-      {kStdinDataForClientExercise.size()};
-    ASSERT_LE(stdin_size, std::numeric_limits<std::uint16_t>::max());
-    std::uint8_t padding_mod {static_cast<std::uint8_t>(stdin_size % 8)};
-    std::uint8_t padding_length {(padding_mod) ? 8 - padding_mod : 0U};
-    PopulateHeader(stdout_header, FcgiType::kFCGI_STDOUT,
-      pending_app_request_id.Fcgi_id(), stdin_size, padding_length);
-    ASSERT_EQ(socket_functions::SocketWrite(new_connection + 1, stdout_header,
-      FCGI_HEADER_LEN), FCGI_HEADER_LEN) << std::strerror(errno);
-    // Call the function which will cause the connection to become
-    // disconnected and which will return a pointer to the server interface
-    // which will be connected to verify appropriate client interface state
-    // update.
-    ASSERT_NO_THROW(server_interface_ptr = (*disconnect_with_server_return)());
-    // Verify client interface state update by request-response cycles.
-    
-  }
-}
-
 // CloseConnection
 // Examined properties:
 // 1) Presence of pending management requests in the management request queue.
@@ -237,12 +130,17 @@ void GTestFatalConnectionClosureCheck(
 //    both connections. The server is allowed to process the requests. A call
 //    to RetrieveServerEvent is made. The connection for which
 //    RetrieveServerEvent did not return a response is closed.
+// CloseConnectionCaseSet4
 // 5) A connection is made. Two application requests are made. The server
 //    completely responds to one of the requests and then sends a partial
 //    record for the other request. A call to RetrieveServerEvents is made.
 //    After the complete response is retrieved, a call to CloseConnection is
 //    made. A new connection is made to the same server. An application request
 //    and response cycle is performed.
+// CloseConnectionCaseSet5
+// 6) Proper interface state update upon connection closure is inspected by
+//    GTestFatalConnectionClosureCheck where connection closure is caused by
+//    calls to CloseConnection.
 //
 // Modules which testing depends on:
 // 1) FcgiServerInterface
@@ -777,6 +675,48 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
     client_inter, observer, __LINE__));
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
     instance_observer, __LINE__);
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
+{
+  // Create the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
+    kUnixPath1}));
+
+  TestFcgiClientInterface client_inter {};
+
+  // TEST CASE 6
+  auto GTestFatalCloseConnectionCloser = [&client_inter, &inter_uptr]
+  (
+    int                   connection,
+    FcgiServerInterface** server_interface_ptr_ptr,
+    int                   invocation_line
+  )->void
+  {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalCloseConnectionCloser"};
+    FcgiServerInterface* server_ptr {inter_uptr.get()};
+    ASSERT_NO_THROW(client_inter.CloseConnection(connection));
+    // Allows the server to process connection closure.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(
+      server_ptr, __LINE__));
+    *server_interface_ptr_ptr = server_ptr;
+    ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
+  };
+
+  ASSERT_NO_FATAL_FAILURE(GTestFatalConnectionClosureCheck(kUnixPath1, 0U,
+    &client_inter, inter_uptr.get(), DisconnectWithServerReturnType
+    {GTestFatalCloseConnectionCloser}, __LINE__));
 }
 
 // Connect
