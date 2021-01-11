@@ -123,11 +123,15 @@ void TestFcgiClientInterfaceTestFixture::TearDown()
 {
   // Resource release is performed before operations which could throw or
   // generate fatal Google Test failures.
-  for(std::vector<std::pair<int, const char*>>::iterator iter
-    {resource_list_.begin()}; iter != resource_list_.end(); ++iter)
+  for(std::vector<int>::iterator iter {descriptor_resource_list_.begin()};
+    iter != descriptor_resource_list_.end(); ++iter)
   {
-    close(iter->first);
-    EXPECT_NE(unlink(iter->second), -1) << std::strerror(errno);
+    close(*iter);
+  }
+  for(std::vector<const char*>::iterator iter {path_resource_list_.begin()};
+    iter != path_resource_list_.end(); ++iter)
+  {
+    EXPECT_NE(unlink(*iter), -1) << std::strerror(errno);
   }
   // Clear the kTimeout flag to reset shared state.
   server_accept_timeout.store(false);

@@ -106,8 +106,9 @@ class TestFcgiClientInterfaceTestFixture : public ::testing::Test
 
   void TearDown() override;
 
-  std::vector<std::pair<int, const char*>> resource_list_ {};
-  testing::FileDescriptorLeakChecker fdlc_ {};
+  std::vector<int>                   descriptor_resource_list_ {};
+  std::vector<const char*>           path_resource_list_       {};
+  testing::FileDescriptorLeakChecker fdlc_                     {};
 };
 
 // Default state for testing:

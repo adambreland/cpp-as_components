@@ -151,7 +151,7 @@ namespace test {
 
 TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet1)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -162,8 +162,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet1)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   ClientInterfaceObserverValues observer
@@ -267,7 +268,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet1)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet2)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -278,8 +279,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet2)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
@@ -369,7 +371,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet2)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet3)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -380,8 +382,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet3)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
@@ -473,8 +476,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
@@ -679,7 +683,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet4)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -690,8 +694,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
@@ -789,7 +794,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 {
-  ASSERT_NO_THROW(resource_list_.push_back({-1, kUnixPath1}));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
   constexpr int kDomainCount {3};
   constexpr int kDomainArray[kDomainCount] = {AF_INET, AF_INET6, AF_UNIX};
   int pipes[kDomainCount][2] = {};
@@ -1472,7 +1477,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase3)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -1483,8 +1488,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase3)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   int connection {};
@@ -1665,7 +1671,7 @@ TEST(AggregatedObservers, UknownConnection)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -1676,8 +1682,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   ASSERT_NO_THROW(EXPECT_FALSE(client_inter.ReleaseId(FcgiRequestIdentifier
@@ -2046,7 +2053,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -2057,8 +2064,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   int connection {};
@@ -2297,7 +2305,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
 // Other modules whose testing depends on this module: none.
 TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet1)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -2308,8 +2316,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet1)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   // TEST CASE 1
@@ -2482,7 +2491,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet1)
 TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 {
   // TEST CASE 3
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -2493,8 +2502,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   int local_connection {};
@@ -2710,11 +2720,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   //    The child process is forked to house the second interface. The child
   // is killed when the second interface is no longer needed. SIGKILL is sent
   // by the parent. This behavior does not allow the cleanup mechanism of
-  // Google Test test fixtures to be performed. The AF_UNIX file descriptor
-  // of the child server interface is scheduled for release in the parent
-  // process as a result. A dummy file descriptor is used (-1) as the listening
-  // socket descriptor of the second server interface is closed when the child
-  // process is killed.
+  // Google Test test fixtures to be performed. The AF_UNIX file path of the
+  // child server interface is scheduled for release in the parent process.
   //    Synchronization between the parent and child is needed to ensure that
   // the server interface has been constructed before the client (parent) tries
   // to connect to it.
@@ -2724,7 +2731,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   ASSERT_NE(sigprocmask(SIG_BLOCK, &sigusr1_set, nullptr), -1) <<
     std::strerror(errno);
 
-  ASSERT_NO_THROW(resource_list_.push_back({-1, kUnixPath2}));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath2));
 
   pid_t fork_return {fork()};
   if(fork_return == 0) // child
@@ -2782,8 +2789,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   // Create a client interface and check its initial observable state.
   TestFcgiClientInterface client_inter {};
@@ -3517,13 +3525,13 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   {
     ::testing::ScopedTrace {__FILE__, invocation_line,
       "lambda GTestFatalCleanUpAndCreateInterface"};
-    close(resource_list_[0].first);
+    close(descriptor_resource_list_[0]);
     ASSERT_NE(unlink(kUnixPath1), -1) << std::strerror(errno);
     ServerCreationReturn local_interface_data {};
     ASSERT_NO_THROW(local_interface_data = GTestNonFatalCreateInterface(
       inter_args, __LINE__));
     ASSERT_NE(std::get<0>(local_interface_data).get(), nullptr);
-    resource_list_[0].first = std::get<1>(local_interface_data);
+    descriptor_resource_list_[0] = std::get<1>(local_interface_data);
     *new_interface_data_ptr = std::move(local_interface_data);
   };
 
@@ -3633,7 +3641,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
-  // Create the server interface.
+  // Creates the server interface.
   std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
   inter_return {};
   ASSERT_NO_THROW(inter_return =
@@ -3641,8 +3649,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
   // Create a client interface and check its initial observable state.
   TestFcgiClientInterface client_inter {};
   EXPECT_EQ(client_inter.CompletedRequestCount(), 0U);
@@ -3831,8 +3840,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
   EXPECT_EQ(connection_closure_ptr->RequestId().descriptor(), new_connection);
   // Create a new server interface.
   // Close the listening socket descriptor of the first server.
-  close(resource_list_[0].first);
-  resource_list_[0].first = -1;
+  close(descriptor_resource_list_[0]);
+  descriptor_resource_list_.erase(descriptor_resource_list_.begin());
   inter_args.unix_path = kUnixPath2;
   std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
   new_inter_return {};
@@ -3841,8 +3850,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
   std::unique_ptr<FcgiServerInterface>& new_inter_uptr
     {std::get<0>(new_inter_return)};
   ASSERT_NE(new_inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(new_inter_return),
-    kUnixPath2}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+    std::get<1>(new_inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath2));
   // Connect to the server.
   int third_connection {};
   ASSERT_NO_THROW(third_connection = client_inter.Connect(kUnixPath2, 0U));
@@ -3898,7 +3908,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
-  // Create the server interface.
+  // Creates the server interface.
   std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
   inter_return {};
   ASSERT_NO_THROW(inter_return =
@@ -3906,8 +3916,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
   TestFcgiClientInterface client_inter {};
   constexpr const int case_count {3};
   for(int i {0}; i != case_count; ++i)
@@ -4117,7 +4128,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -4128,8 +4139,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
@@ -4273,7 +4285,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet2)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -4284,8 +4296,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet2)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
   int local_connection {};
@@ -4489,7 +4502,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet2)
 
 TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
 {
-  // Create the server interface.
+  // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
   inter_args.domain          = AF_UNIX;
   inter_args.unix_path       = kUnixPath1;
@@ -4500,8 +4513,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
   std::unique_ptr<FcgiServerInterface>& inter_uptr
     {std::get<0>(inter_return)};
   ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(resource_list_.push_back({std::get<1>(inter_return),
-    kUnixPath1}));
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
   TestFcgiClientInterface client_inter {};
 
