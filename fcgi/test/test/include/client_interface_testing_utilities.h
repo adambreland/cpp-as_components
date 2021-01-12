@@ -155,7 +155,7 @@ const ParamsMap kMpxsMapWithValue
 // Populate a ManagementRequestData instance with a random byte sequence and
 // an unknown management request type. This is used for testing
 // SendBinaryManagementRequest.
-struct ManagementRequestData binary_request
+const struct ManagementRequestData kBinaryRequest
 {
   /* type       = */ static_cast<FcgiType>(27U),
   /* params_map = */ {},
@@ -183,14 +183,13 @@ void GTestFatalCheckGetValuesResult(
   const ParamsMap&       response_map,
   int                    invocation_line);
 
-// This utility allows a child process to establish a timer which will
+//    This utility allows a child process to establish a timer which will
 // cause SIGALRM to be sent to the process after kAlarmSecondLimit seconds.
 // The default disposition for SIGALRM is restored so that receipt of
 // SIGALRM causes process termination.
-//
-// This utility is meant to be used by every child process forked by the main
-// test process. This is done to to prevent process leaks in the case that the
-// main test process does not terminate the process or in the case that the
+//    This utility is meant to be used by every child process forked by the
+// main test process. This is done to to prevent process leaks in the case that
+// the main test process does not terminate the process or in the case that the
 // child process hangs and does not terminate.
 unsigned int kAlarmSecondLimit {3U};
 void ChildServerAlrmRestoreAndSelfKillSet();
@@ -440,16 +439,19 @@ void GTestFatalSendRecordAndExpectInvalidRecord(
   const struct ExpectedInvalidRecordValues& expected_values,
   int                                       invocation_line);
 
-using DisconnectWithServerReturnType =
-  std::function<void(int, FcgiServerInterface**, int)>;
+using DisconnectWithServerReturn =
+  std::function<void(int, FcgiRequestIdentifier, FcgiServerInterface**, int)>;
 
-// Tests the behavior of *client_inteface_ptr when a new connection is closed
-// by the action of a call to *disconnect_with_server_return. Two cases are
+//    Tests the behavior of *client_inteface_ptr when a new connection is closed
+// by the action of a call to disconnect_with_server_return. Two cases are
 // tested: when at least one completed and unreleased application request is
 // present for the new connection, and when no completed and unreleased
 // application requests are present for the new connection.
-// *disconnect_with_server_return is called twice during the iterative
+// disconnect_with_server_return is called twice during the iterative
 // testing of *client_inteface_ptr over the two cases.
+//    This function is designed to exercise a client interface as per the
+// discussion of connection closure handling at the beginning of
+// test_fcgi_client_interface_test.cc.
 //
 // Parameters:
 // address:                       The textual representation of the address
@@ -473,9 +475,11 @@ using DisconnectWithServerReturnType =
 // disconnect_with_server_return:
 // 1) The FcgiServerInterface* instance associated with the result parameter
 //    with type FcgiServerInterface** of DisconnectWithServerReturnType must
-//    not be null after each invocation of disconnect_with_server_return.
+//    not be null after each invocation of disconnect_with_server_return. In
+//    other words, a call to disconnect_with_server_return must return an
+//    appropriate pointer value through the return parameter.
 // 2) The value of the FcgiServerInterface* instance pointed to by the
-//    FcgiServerInterface** argument must be ignored.
+//    FcgiServerInterface** argument must be ignored during invocation.
 // 3) disconnect_with_server_return must be able to be called twice.
 // 4) disconnect_with_server_return must handle all resource management of
 //    objects created on the heap during its execution.
@@ -483,14 +487,14 @@ using DisconnectWithServerReturnType =
 //    returned through the return parameter must extend from the time of the
 //    instance's creation to the time of the next call to
 //    disconnect_with_server_return.
-// 6) In addition to effecting connection closure, invocation of
+// 6) In addition to causing connection closure, invocation of
 //    disconnect_with_server_return must cause:
 //    1) *client_interface_ptr to become aware of connection closure.
 //    2) client_interface_ptr->ReadyEventCount() == 0U by the time of the
 //       return of the invocation.
 // 7) disconnect_with_server_return must follow the conventions for reporting
 //    Google Test assertion failures. In particular, fatal failures may be
-//    reported with fatal assertions and the terminal int parameter value must
+//    reported with fatal assertions, and the terminal int parameter value must
 //    be interpreted as an invocation line number.
 // Partial record delivery:
 // 1) Let new_connection be the value of the descriptor of the connection
@@ -506,16 +510,32 @@ using DisconnectWithServerReturnType =
 // Implied limitations:
 // 1) The FcgiServerInterface instances used during execution must be present
 //    in the process which houses *client_interface_ptr.
-//
-// Effects:
-//
 void GTestFatalConnectionClosureCheck(
-  const char*                    address,
-  in_port_t                      network_port,
-  TestFcgiClientInterface*       client_interface_ptr,
-  FcgiServerInterface*           server_interface_ptr,
-  DisconnectWithServerReturnType disconnect_with_server_return,
-  int                            invocation_line);
+  const char*                address,
+  in_port_t                  network_port,
+  TestFcgiClientInterface*   client_interface_ptr,
+  FcgiServerInterface*       server_interface_ptr,
+  DisconnectWithServerReturn disconnect_with_server_return,
+  int                        invocation_line);
+
+using ClosureDetector =
+  std::function<void(TestFcgiClientInterface*, FcgiRequestIdentifier)>;
+
+// A metafunction which is used in the implementation of test cases which
+// use GTestFatalConnectionClosureCheck. The first five parameters are
+// intended to be appropriately bound to generate a function which can be
+// passed as the argument to the parameter of GTestFatalConnectionClosureCheck
+// with type DisconnectWithServerReturnType.
+void GTestFatalServerDestructionClosureMeta(
+  struct InterfaceCreationArguments*    inter_args_ptr,
+  std::unique_ptr<FcgiServerInterface>* server_uptr_ptr,
+  TestFcgiClientInterface*              client_inter_ptr,
+  ClosureDetector                       closure_detector,
+  std::vector<int>*                     descriptor_list_ptr,
+  int                                   connection,
+  FcgiRequestIdentifier                 pending_application_request,
+  FcgiServerInterface**                 server_interface_ptr_ptr,
+  int                                   invocation_line);
 
 } // namespace test
 } // namespace test

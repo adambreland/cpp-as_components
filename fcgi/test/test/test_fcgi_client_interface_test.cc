@@ -90,7 +90,8 @@ namespace test {
 //
 // After the interface processes connection closure, a new connection which
 // reuses the descriptor of the previous connection should be made.
-// Application and management request-response cycles should be performed.
+// Application and management request-response cycles should be performed to
+// verify interface integrity.
 
 // CloseConnection
 // Examined properties:
@@ -250,8 +251,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet1)
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
     client_inter, observer, __LINE__));
   ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-    local_connection, binary_request.type, binary_request.data.data(),
-    binary_request.data.data() + binary_request.data.size())));
+    local_connection, kBinaryRequest.type, kBinaryRequest.data.data(),
+    kBinaryRequest.data.data() + kBinaryRequest.data.size())));
   ++(observer.co.management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
     client_inter, observer, __LINE__));
@@ -704,6 +705,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
   auto GTestFatalCloseConnectionCloser = [&client_inter, &inter_uptr]
   (
     int                   connection,
+    FcgiRequestIdentifier,
     FcgiServerInterface** server_interface_ptr_ptr,
     int                   invocation_line
   )->void
@@ -720,7 +722,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, CloseConnectionCaseSet5)
   };
 
   ASSERT_NO_FATAL_FAILURE(GTestFatalConnectionClosureCheck(kUnixPath1, 0U,
-    &client_inter, inter_uptr.get(), DisconnectWithServerReturnType
+    &client_inter, inter_uptr.get(), DisconnectWithServerReturn
     {GTestFatalCloseConnectionCloser}, __LINE__));
 }
 
@@ -1943,7 +1945,45 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    b) The FCGI_UNKNOWN_TYPE record has a content length which is non-zero
 //       and not equal to 8.
 
+TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveSeverEventConnectionClosure)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  // Move the unique_ptr to allow later assignments.
+  std::unique_ptr<FcgiServerInterface> inter_uptr
+    {std::move(std::get<0>(inter_return))};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
 
+  TestFcgiClientInterface client_inter {};
+  // No-op for the closure_detector parameter. An implicit call to
+  // RetrieveServerEvent will detect closure.
+  auto NoOp = [](TestFcgiClientInterface*, FcgiRequestIdentifier)->void{};
+  DisconnectWithServerReturn disconnector
+  {
+    std::bind(GTestFatalServerDestructionClosureMeta,
+    /* inter_args_ptr              */ &inter_args,
+    /* server_uptr_ptr             */ &inter_uptr,
+    /* client_inter_ptr            */ &client_inter,
+    /* closure_detector            */  NoOp,
+    /* descriptor_list_ptr         */ &descriptor_resource_list_,
+    /* connection                  */  std::placeholders::_1,
+    /* pending_application_request */  std::placeholders::_2,
+    /* server_interface_ptr_ptr    */  std::placeholders::_3,
+    /* invocation_line             */  std::placeholders::_4)
+  };
+
+  ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
+    kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
+}
 
 
 
@@ -2287,7 +2327,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
 //       does not correspond to one of the previous requests.
 // Note: 1 and 2 cover each of the values of each of the four properties
 //       separately (though not in combination).
-//
 // SendAbortRequestTestCaseSet2
 // 3) A connection is made. A request is made with keep_conn set to false. The
 //    server is allowed to process the request. A call to SendAbortRequest is
@@ -2295,6 +2334,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
 //    verified. At least one pending management request should be present when
 //    connection closure is detected to allow proper clearing of the queue for
 //    the connection to be verified.
+// SendAbortRequestTestCaseSet3
+// 4) Connection closure detection when SendAbortRequest is called is exercised
+//    through GTestFatalConnectionClosureCheck.
 //
 // Modules which testing depends on:
 // 1) FcgiServerInterface and, in particular, its behavior regarding receipt
@@ -2583,6 +2625,54 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
     observer, __LINE__));
 }
 
+TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet3)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  // Move the unique_ptr to allow later assignments.
+  std::unique_ptr<FcgiServerInterface> inter_uptr
+    {std::move(std::get<0>(inter_return))};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // No-op for the closure_detector parameter. An implicit call to
+  // RetrieveServerEvent will detect closure.
+  auto CallSendAbortRequest = []
+  (
+    TestFcgiClientInterface* client_inter_ptr,
+    FcgiRequestIdentifier pending_application_request
+  )->void
+  {
+    ASSERT_FALSE(client_inter_ptr->SendAbortRequest(
+      pending_application_request));
+  };
+  DisconnectWithServerReturn disconnector
+  {
+    std::bind(GTestFatalServerDestructionClosureMeta,
+    /* inter_args_ptr              */ &inter_args,
+    /* server_uptr_ptr             */ &inter_uptr,
+    /* client_inter_ptr            */ &client_inter,
+    /* closure_detector            */  CallSendAbortRequest,
+    /* descriptor_list_ptr         */ &descriptor_resource_list_,
+    /* connection                  */  std::placeholders::_1,
+    /* pending_application_request */  std::placeholders::_2,
+    /* server_interface_ptr_ptr    */  std::placeholders::_3,
+    /* invocation_line             */  std::placeholders::_4)
+  };
+
+  ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
+    kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
+}
+
 // Management request testing discussion:
 //  1) Management requests and responses each use a single FastCGI record.
 //     Because of this, tests which examine correct interface behavior when
@@ -2671,7 +2761,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 //     Correct detection of connection closure and correct interface state
 //     update, which includes clearing the queue of unanswered requests and the
 //     enqueuement of an appropriate ConnectionClosure instance, are verified.
-//
 // Test case set 2: Management request queue interaction with CloseConnection.
 // 11) To ensure that the client interface correctly handles connection
 //     closure by the client interface user in the case that completed and
@@ -2683,7 +2772,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 //     previous request. It is verified that the correct response is returned.
 // 12) As 10, but connection closure is performed by the server and detected
 //     by the client interface.
-//
 // Test case set 3: Exercising error detection during GetValuesResult
 // construction.
 // 13) a) An FCGI_GET_VALUES request is made and a response with a FastCGI
@@ -2694,6 +2782,12 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 //     b) An FCGI_GET_VALUES request is made and a response with a duplicate
 //        name where the duplicates have the same value is received.
 //     c) As b, but the duplicates have distinct values.
+// Test case set 4: Connection closure detection as exercised through
+// GTestFatalConnectionClosureCheck and GTestFatalServerDestructionClosureMeta
+// with a call to SendBinaryManagementRequest.
+// Test case set 5: Connection closure detection as exercised through
+// GTestFatalConnectionClosureCheck and GTestFatalServerDestructionClosureMeta
+// with a call to SendGetValuesRequest.
 //
 // Modules and features which testing depends on:
 //  1) The immediate detection of peer closure by the implementation of
@@ -2712,7 +2806,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet2)
 //     FCGI_END_REQUEST record by ::a_component::fcgi::FcgiRequest::Complete.
 // Other modules whose testing depends on this module: none.
 
-// SendGetValuesRequest: Test case set 1.
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
 {
   //    Creates server interfaces to respond to FCGI_GET_VALUES requests sent
@@ -2913,8 +3006,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
     local_socket, request_map, response_map, __LINE__);
   // Unknown management request.
   ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-    local_socket, binary_request.type, binary_request.data.data(),
-    binary_request.data.data() + binary_request.data.size())) <<
+    local_socket, kBinaryRequest.type, kBinaryRequest.data.data(),
+    kBinaryRequest.data.data() + kBinaryRequest.data.size())) <<
       std::strerror(errno));
   ++(observer_values.management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
@@ -2933,8 +3026,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   ASSERT_NE(unknown_ptr, nullptr);
   EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
     {local_socket, 0U}));
-  EXPECT_EQ(unknown_ptr->Request(), binary_request);
-  EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+  EXPECT_EQ(unknown_ptr->Request(), kBinaryRequest);
+  EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
   // An empty range described by non-null pointers and an empty range described
   // by null pointers.
   constexpr const int empty_range_count {2};
@@ -2943,13 +3036,13 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
     if(i == 0)
     {
       ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-        local_socket, binary_request.type, binary_request.data.data(),
-        binary_request.data.data())) << std::strerror(errno));
+        local_socket, kBinaryRequest.type, kBinaryRequest.data.data(),
+        kBinaryRequest.data.data())) << std::strerror(errno));
     }
     else
     {
       ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-        local_socket, binary_request.type, nullptr, nullptr)) <<
+        local_socket, kBinaryRequest.type, nullptr, nullptr)) <<
           std::strerror(errno));
     }
     ++(observer_values.management_request_count);
@@ -2969,10 +3062,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
     ASSERT_NE(unknown_ptr, nullptr);
     EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
       {local_socket, 0U}));
-    EXPECT_EQ(unknown_ptr->Request().type, binary_request.type);
+    EXPECT_EQ(unknown_ptr->Request().type, kBinaryRequest.type);
     EXPECT_EQ(unknown_ptr->Request().params_map.size(), 0U);
     EXPECT_EQ(unknown_ptr->Request().data.size(), 0U);
-    EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+    EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
   }
 
   // TEST CASE 4
@@ -2999,13 +3092,13 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   GTestFatalCheckGetValuesResult(gvr_ptr, false,
     local_socket, request_map, response_map, __LINE__);
   // Unknown management request.
-  std::vector<std::uint8_t> random_byte_sequence_copy {binary_request.data};
+  std::vector<std::uint8_t> random_byte_sequence_copy {kBinaryRequest.data};
   auto GTestFatalSendAndRetrieveUnknown = [&](int invocation_line)
   {
     ::testing::ScopedTrace tracer {__FILE__, invocation_line,
       "lambda GTestFatalSendAndRetrieveUnknown"};
     ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-      local_socket, binary_request.type, std::move(random_byte_sequence_copy)))
+      local_socket, kBinaryRequest.type, std::move(random_byte_sequence_copy)))
         << std::strerror(errno));
     ++(observer_values.management_request_count);
     ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
@@ -3026,17 +3119,17 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   ASSERT_NO_FATAL_FAILURE(GTestFatalSendAndRetrieveUnknown(__LINE__));
   EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
     {local_socket, 0U}));
-  EXPECT_EQ(unknown_ptr->Request(), binary_request);
-  EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+  EXPECT_EQ(unknown_ptr->Request(), kBinaryRequest);
+  EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
   // Empty vector.
   random_byte_sequence_copy.clear();
   ASSERT_NO_FATAL_FAILURE(GTestFatalSendAndRetrieveUnknown(__LINE__));
   EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
     {local_socket, 0U}));
-  EXPECT_EQ(unknown_ptr->Request().type, binary_request.type);
+  EXPECT_EQ(unknown_ptr->Request().type, kBinaryRequest.type);
   EXPECT_EQ(unknown_ptr->Request().params_map.size(), 0U);
   EXPECT_EQ(unknown_ptr->Request().data.size(), 0U);
-  EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+  EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
 
   // TEST CASE 5
   // Send two FCGI_GET_VALUES requests and two binary management requests.
@@ -3054,8 +3147,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
     kMapWithValues)) << std::strerror(errno));
   // 4
   ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-    local_socket, binary_request.type, binary_request.data.data(),
-    binary_request.data.data() +  binary_request.data.size())) <<
+    local_socket, kBinaryRequest.type, kBinaryRequest.data.data(),
+    kBinaryRequest.data.data() +  kBinaryRequest.data.size())) <<
       std::strerror(errno));
   observer_values.management_request_count += 4U;
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
@@ -3110,8 +3203,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   ASSERT_NE(unknown_ptr, nullptr);
   EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
     {local_socket, 0U}));
-  EXPECT_EQ(unknown_ptr->Request(), binary_request);
-  EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+  EXPECT_EQ(unknown_ptr->Request(), kBinaryRequest);
+  EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
 
   // TEST CASE 6
   int second_local_socket {};
@@ -3133,8 +3226,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   // local_socket
   // 1
   ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-    local_socket, binary_request.type, binary_request.data.data(),
-    binary_request.data.data() + binary_request.data.size())));
+    local_socket, kBinaryRequest.type, kBinaryRequest.data.data(),
+    kBinaryRequest.data.data() + kBinaryRequest.data.size())));
   ++(observer_values.management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     client_inter, observer_values, __LINE__));
@@ -3196,8 +3289,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
         ASSERT_NE(unknown_ptr, nullptr);
         EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
           {local_socket, 0U}));
-        EXPECT_EQ(unknown_ptr->Request(), binary_request);
-        EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+        EXPECT_EQ(unknown_ptr->Request(), kBinaryRequest);
+        EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
       }
       else
       {
@@ -3338,8 +3431,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
     instance_observer, __LINE__);
   ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
-    new_connection, binary_request.type, binary_request.data.data(),
-    binary_request.data.data() + binary_request.data.size())) <<
+    new_connection, kBinaryRequest.type, kBinaryRequest.data.data(),
+    kBinaryRequest.data.data() + kBinaryRequest.data.size())) <<
       std::strerror(errno));
   ++(new_observer.management_request_count);
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
@@ -3363,8 +3456,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
     ASSERT_NE(unknown_ptr, nullptr);
     EXPECT_EQ(unknown_ptr->RequestId(), (FcgiRequestIdentifier
       {new_connection, 0U}));
-    EXPECT_EQ(unknown_ptr->Request(), binary_request);
-    EXPECT_EQ(unknown_ptr->Type(), binary_request.type);
+    EXPECT_EQ(unknown_ptr->Request(), kBinaryRequest);
+    EXPECT_EQ(unknown_ptr->Type(), kBinaryRequest.type);
   };
   auto GTestFatalBinaryCyclicCheck = [&](bool first, int invocation_line)
   {
@@ -3444,30 +3537,30 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   // SendBinaryManagementRequest overloads
   // Copy
   ASSERT_NO_THROW(ASSERT_FALSE(client_inter.SendBinaryManagementRequest(-1,
-   binary_request.type, binary_request.data.data(), binary_request.data.data()
-    + binary_request.data.size())));
+   kBinaryRequest.type, kBinaryRequest.data.data(), kBinaryRequest.data.data()
+    + kBinaryRequest.data.size())));
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     client_inter, observer_values, __LINE__));
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
     instance_observer, __LINE__);
   ASSERT_NO_THROW(ASSERT_FALSE(client_inter.SendBinaryManagementRequest(1000,
-   binary_request.type, binary_request.data.data(), binary_request.data.data()
-    + binary_request.data.size())));
+   kBinaryRequest.type, kBinaryRequest.data.data(), kBinaryRequest.data.data()
+    + kBinaryRequest.data.size())));
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     client_inter, observer_values, __LINE__));
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
     instance_observer, __LINE__);
   // Move
-  random_byte_sequence_copy = binary_request.data;
+  random_byte_sequence_copy = kBinaryRequest.data;
   ASSERT_NO_THROW(ASSERT_FALSE(client_inter.SendBinaryManagementRequest(-1,
-   binary_request.type, std::move(random_byte_sequence_copy))));
+   kBinaryRequest.type, std::move(random_byte_sequence_copy))));
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     client_inter, observer_values, __LINE__));
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
     instance_observer, __LINE__);
-  random_byte_sequence_copy = binary_request.data;
+  random_byte_sequence_copy = kBinaryRequest.data;
   ASSERT_NO_THROW(ASSERT_FALSE(client_inter.SendBinaryManagementRequest(1000,
-   binary_request.type, std::move(random_byte_sequence_copy))));
+   kBinaryRequest.type, std::move(random_byte_sequence_copy))));
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceConnectionOnlyObserverCheck(
     client_inter, observer_values, __LINE__));
   GTestNonFatalClientInterfaceInstanceObserverCheck(client_inter,
@@ -3601,15 +3694,15 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
           break;
         }
         case 2 : {
-          EXPECT_FALSE(client_inter.SendBinaryManagementRequest(new_connection, binary_request.type,
-            binary_request.data.data(), binary_request.data.data() +
-            binary_request.data.size()));
+          EXPECT_FALSE(client_inter.SendBinaryManagementRequest(new_connection, kBinaryRequest.type,
+            kBinaryRequest.data.data(), kBinaryRequest.data.data() +
+            kBinaryRequest.data.size()));
           break;
         }
         case 3 : {
-          random_byte_sequence_copy = binary_request.data;
+          random_byte_sequence_copy = kBinaryRequest.data;
           EXPECT_FALSE(client_inter.SendBinaryManagementRequest(new_connection,
-            binary_request.type, std::move(random_byte_sequence_copy)));
+            kBinaryRequest.type, std::move(random_byte_sequence_copy)));
           break;
         }
       }
@@ -3634,7 +3727,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
   }
 }
 
-// SendGetValuesRequest: Test case set 2
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
 {
   // TEST CASE 11
@@ -3899,7 +3991,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet2)
     instance_observer, __LINE__);
 }
 
-// SendGetValuesRequest: Test case set 3
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
 {
   // TEST CASE 13
@@ -4046,6 +4137,104 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
   }
 }
 
+TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet4)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  // Move the unique_ptr to allow later assignments.
+  std::unique_ptr<FcgiServerInterface> inter_uptr
+    {std::move(std::get<0>(inter_return))};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // No-op for the closure_detector parameter. An implicit call to
+  // RetrieveServerEvent will detect closure.
+  auto CallSendBinaryManagementRequest = []
+  (
+    TestFcgiClientInterface* client_inter_ptr,
+    FcgiRequestIdentifier pending_application_request
+  )->void
+  {
+    ASSERT_NO_THROW(ASSERT_FALSE(client_inter_ptr->SendBinaryManagementRequest(
+      pending_application_request.descriptor(), FcgiType::kFCGI_GET_VALUES,
+      kBinaryRequest.data.data(),
+      kBinaryRequest.data.data() + kBinaryRequest.data.size())));
+  };
+  DisconnectWithServerReturn disconnector
+  {
+    std::bind(GTestFatalServerDestructionClosureMeta,
+    /* inter_args_ptr              */ &inter_args,
+    /* server_uptr_ptr             */ &inter_uptr,
+    /* client_inter_ptr            */ &client_inter,
+    /* closure_detector            */  CallSendBinaryManagementRequest,
+    /* descriptor_list_ptr         */ &descriptor_resource_list_,
+    /* connection                  */  std::placeholders::_1,
+    /* pending_application_request */  std::placeholders::_2,
+    /* server_interface_ptr_ptr    */  std::placeholders::_3,
+    /* invocation_line             */  std::placeholders::_4)
+  };
+
+  ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
+    kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  // Move the unique_ptr to allow later assignments.
+  std::unique_ptr<FcgiServerInterface> inter_uptr
+    {std::move(std::get<0>(inter_return))};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // No-op for the closure_detector parameter. An implicit call to
+  // RetrieveServerEvent will detect closure.
+  auto CallSendGetValuesRequest = []
+  (
+    TestFcgiClientInterface* client_inter_ptr,
+    FcgiRequestIdentifier pending_application_request
+  )->void
+  {
+    ASSERT_NO_THROW(ASSERT_FALSE(client_inter_ptr->SendGetValuesRequest(
+      pending_application_request.descriptor(), kMapWithValues)));
+  };
+  DisconnectWithServerReturn disconnector
+  {
+    std::bind(GTestFatalServerDestructionClosureMeta,
+    /* inter_args_ptr              */ &inter_args,
+    /* server_uptr_ptr             */ &inter_uptr,
+    /* client_inter_ptr            */ &client_inter,
+    /* closure_detector            */  CallSendGetValuesRequest,
+    /* descriptor_list_ptr         */ &descriptor_resource_list_,
+    /* connection                  */  std::placeholders::_1,
+    /* pending_application_request */  std::placeholders::_2,
+    /* server_interface_ptr_ptr    */  std::placeholders::_3,
+    /* invocation_line             */  std::placeholders::_4)
+  };
+
+  ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
+    kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
+}
+
 // SendRequest
 // Discussion:
 //    SendRequest is used throughout testing. Only the properties that may not
@@ -4118,6 +4307,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet3)
 //       that false is returned for a call to SendRequest for the connection.
 // 6) Proper detection and handling of connection closure by the peer is
 //    verified.
+//
+// SendRequestCaseSet4
+// 7) The connection was found to be closed by GTestFatalConnectionClosureCheck
+//    and GTestFatalServerDestructionClosureMeta with a call to SendRequest.
 //
 // Modules and features which testing depends on:
 // 1) FcgiServerInterface
@@ -4664,6 +4857,54 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
   ASSERT_NE(closure_ptr, nullptr);
   EXPECT_EQ(closure_ptr->RequestId(), (FcgiRequestIdentifier {new_connection,
     0U}));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet4)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  // Move the unique_ptr to allow later assignments.
+  std::unique_ptr<FcgiServerInterface> inter_uptr
+    {std::move(std::get<0>(inter_return))};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // No-op for the closure_detector parameter. An implicit call to
+  // RetrieveServerEvent will detect closure.
+  auto CallSendGetValuesRequest = []
+  (
+    TestFcgiClientInterface* client_inter_ptr,
+    FcgiRequestIdentifier pending_application_request
+  )->void
+  {
+    ASSERT_NO_THROW(ASSERT_FALSE(client_inter_ptr->SendRequest(
+      pending_application_request.descriptor(), kExerciseDataRef)));
+  };
+  DisconnectWithServerReturn disconnector
+  {
+    std::bind(GTestFatalServerDestructionClosureMeta,
+    /* inter_args_ptr              */ &inter_args,
+    /* server_uptr_ptr             */ &inter_uptr,
+    /* client_inter_ptr            */ &client_inter,
+    /* closure_detector            */  CallSendGetValuesRequest,
+    /* descriptor_list_ptr         */ &descriptor_resource_list_,
+    /* connection                  */  std::placeholders::_1,
+    /* pending_application_request */  std::placeholders::_2,
+    /* server_interface_ptr_ptr    */  std::placeholders::_3,
+    /* invocation_line             */  std::placeholders::_4)
+  };
+
+  ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
+    kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
 }
 
 } // namespace test
