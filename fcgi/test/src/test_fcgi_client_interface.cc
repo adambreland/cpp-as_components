@@ -1822,37 +1822,25 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
     switch(record_type) {
       case FcgiType::kFCGI_END_REQUEST : {
         PendingIterCheckAndUpdate();
-        // Among other questions, does a request exist for this end record?
+        //    Among other questions, does a request exist for this end record?
         // Note that a pending request is moved to the completed map upon its
         // completion. It will then not be present in the pending map.
-        //
-        // FCGI_STDERR is always optional. If no data is sent over FCGI_STDERR,
-        // then a terminal record is not needed for FCGI_STDERR. This special
-        // logic is implemented below.
-        auto StderrorEndAcceptance = [&pending_iter]()->bool
-        {
-          if(pending_iter->second.stderr_completed)
-          {
-            return true;
-          }
-          else if(!(pending_iter->second.fcgi_stderr.size()))
-          {
-            // The FCGI_STDERR stream has implicitly been completed in this
-            // case.
-            pending_iter->second.stderr_completed = true;
-            return true;
-          }
-          else
-          {
-            return false;
-          }
-        };
-        if((pending_iter == pending_end)                 ||
-           (!StderrorEndAcceptance() || 
-            !(pending_iter->second.stdout_completed))    ||
-           (expected_content != 8U))
+        //    FCGI_STDERR is always optional. If no data is sent over
+        // FCGI_STDERR, then a terminal record is not needed for FCGI_STDERR.
+        // This logic is implemented below.
+        bool stderr_empty {pending_iter->second.fcgi_stderr.size() == 0U};
+        if(/* Case 1 */(pending_iter == pending_end)              ||
+           /* Case 2 */!(pending_iter->second.stderr_completed ||
+                         stderr_empty)                            ||
+           /* Case 3 */!(pending_iter->second.stdout_completed)   ||
+           /* Case 4 */(expected_content != 8U))
         {
           error_detected = true;
+        }
+        else if(stderr_empty) // Accept the end record; check FCGI_STDERR.
+        {
+          // The FCGI_STDERR stream has been completed implicitly in this case.
+          pending_iter->second.stderr_completed = true;
         }
         break;
       }
