@@ -479,16 +479,28 @@ class UnknownType : public ServerEvent
 
                     ////// TestFcgiClientInterface //////
 
-// Introduction:
+// INTRODUCTION
 //    TestFcgiClientInterface provides an implementation of the FastCGI
 // protocol for programs which make requests of FastCGI application servers.
 // Such programs may be called clients or client servers from the perspective
 // of FastCGI.
+//    TestFcgiClientInterface is intended to be used to test FastCGI
+// application servers. It allows FastCGI requests to be sent to application
+// servers without the use of an HTTP server intermediary. For example,
+// application server unit tests may be implemented by:
+// 1) Having a TestFcgiClientInterface instance submit FastCGI requests to an
+//    application server.
+// 2) Inspecting the application server's responses to the requests.
+// 3) Inspecting any side effects which were caused by the application server
+//    during its processing of the requests.
+// See below for a description of the features of TestFcgiClientInterface which
+// are relevant to the testing of FastCGI application servers.
 //    The interface allows simultaneous connections to be made to distinct
 // FastCGI application servers. Simultaneous connections to the same server
-// are also allowed. Different socket domains may be used; all connections
+// are also allowed. Different socket domains may be used. All connections
 // are stream-based as FastCGI utilizes stream-based sockets.
 //
+// PROPERTIES OF TestFcgiClientInterface
 // Management requests and responses:
 //    The interface has a management request queue for each connection. As all
 // management requests on a given connection c share the same request
