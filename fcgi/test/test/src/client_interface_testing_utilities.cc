@@ -455,8 +455,35 @@ void GTestFatalSendRecordAndExpectInvalidRecord(
       std::pair<std::vector<std::uint8_t>::const_iterator, std::uint8_t*>
       expected_mismatch_ends {end_content.cend(),
         expected_values.content_buffer_ptr + expected_values.content_length};
-      EXPECT_EQ(expected_mismatch_ends, std::mismatch(end_content.begin(),
-        end_content.end(), expected_values.content_buffer_ptr));
+      std::pair<std::vector<std::uint8_t>::const_iterator, std::uint8_t*>
+      mismatch_ends {std::mismatch(end_content.cbegin(), end_content.cend(),
+        expected_values.content_buffer_ptr)};
+      EXPECT_EQ(expected_mismatch_ends.first, mismatch_ends.first);
+      EXPECT_EQ(expected_mismatch_ends.second, mismatch_ends.second);
+      if(expected_mismatch_ends.first != mismatch_ends.first)
+      {
+        std::cout << "Reported content: ";
+        std::vector<std::uint8_t>::const_iterator content_end_iter
+          {expected_mismatch_ends.first};
+        for(std::vector<std::uint8_t>::const_iterator content_iter
+          {end_content.begin()};
+          content_iter != content_end_iter;
+          ++content_iter)
+        {
+          std::cout << int(*content_iter) << " ";
+        }
+        std::cout << '\n';
+        std::cout << "Actual content: ";
+        const std::uint8_t* expected_end_ptr {expected_mismatch_ends.second};
+        for(const std::uint8_t* expected_content_ptr
+          {expected_values.content_buffer_ptr};
+          expected_content_ptr != expected_end_ptr;
+          ++expected_content_ptr)
+        {
+          std::cout << int(*expected_content_ptr) << " ";
+        }
+        std::cout << '\n';
+      }
     }
     EXPECT_EQ(invalid_record_ptr->PaddingLength(),
       expected_values.padding_length);

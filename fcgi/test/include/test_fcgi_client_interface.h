@@ -326,6 +326,8 @@ class GetValuesResult : public ServerEvent
 //       was sent.
 //    c) The management request at the beginning of the management request
 //       queue does is not an FCGI_GET_VALUES request.
+//    Note: Validation based on record content is not performed. However, see
+//          the description of GetValuesResult::IsCorrupt.
 //    FCGI_UNKNOWN_TYPE:
 //    a) The FastCGI identifier of the record is not zero.
 //    b) No management requests exist for the connection over which the record

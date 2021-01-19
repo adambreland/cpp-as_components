@@ -1913,15 +1913,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //          application requests.
 // 4) Tests based on types derived from ServerEvent:
 //    ConnectionClosure:
-//       ConnectionClosure instances are constructed in calls to
-//    RetrieveServerEvent throughout testing. It was determined that the
-//    following properties may not be examined in other testing code.
-//    a) A connection is made, and the server immediately closes the
-//       connection.
-//    b) A partial response to a request has been received, and the server
-//       closes the connection before the response is received in-full. At
-//       least, a case for management requests and a case for application
-//       requests should be present.
+//       See the description of connection closure handling above.
 //
 //    FcgiResponse:
 //       Use of RetrieveServerEvent and concomitant generation of FcgiResponse
@@ -1940,7 +1932,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    terminal record for FCGI_STDERR is optional if no data was transmitted
 //    over this stream. All of these properties should be addressed when
 //    testing the generation of FcgiResponse instances from data received from
-//    a server upon the invocation of RetrieveServerEvent.
+//    a server upon the invocation of RetrieveServerEvent. Some of these
+//    properties are also mentioned when the properties which are revelant for
+//    record receipt are discussed.
 //
 //    GetValuesResult:
 //       Generation of GetValuesResult instances is tested in the testing of
@@ -1948,8 +1942,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    
 //    InvalidRecord:
 //       Generation of an InvalidRecord instance for each of the conditions
-//    that should cause the generation of such a record should be tested. These
-//    conditions are listed in the documentation of InvalidRecord.
+//    that should cause the generation of such a record should be verified.
+//    These conditions are listed in the documentation of InvalidRecord. See
+//    below for an additional discussion of properties which should be examined
+//    when testing InvalidRecord instance generation.
 //
 //    UnknownType
 //       Generation of UnknownType instances is tested in the testing of
@@ -1958,7 +1954,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    Discussion:
 //       In each case, the appropriate request, when one is present, should be
 //    able to be completed and returned after the construction and return of an
-//    InvalidRecord instance.
+//    InvalidRecord instance. This is implied from the intended property of
+//    TestFcgiClientInterface that the receipt of an invalid record should not
+//    modify interface state.
 //
 //    Types:
 //    Expected types:
@@ -2015,7 +2013,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //       b) Non-zero FastCGI request identifier (malformed). Otherwise the
 //          record is not malformed and would be accepted.
 //       c) The management request at the beginning of the management request
-//          queue does is not an FCGI_GET_VALUES request.
+//          queue is not an FCGI_GET_VALUES request.
 //    FCGI_UNKNOWN_TYPE
 //    1) An FCGI_UKNOWN_TYPE record is received when no management requests
 //       have been made. The record is not malformed.
@@ -2260,8 +2258,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
       __LINE__));
   }
 
+  // Case 2a for FCGI_END_REQUEST.
   {
-    // Case 2a for FCGI_END_REQUEST.
     FcgiRequestIdentifier id {};
     ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
       kExerciseDataRef));
@@ -2357,8 +2355,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
       __LINE__));
   }
 
+  // Case 2b for FCGI_END_REQUEST.
   {
-    // Case 2b for FCGI_END_REQUEST.
     FcgiRequestIdentifier id {};
     ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
       kExerciseDataRef));
@@ -2497,8 +2495,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     );
   }
 
+  // Case 2d for FCGI_END_REQUEST.
   {
-    // Case 2d for FCGI_END_REQUEST.
     FcgiRequestIdentifier id {};
     ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
       kExerciseDataRef));
@@ -2566,8 +2564,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     );
   }
 
+  // Cases 2.e.1 and 2.e.2 for FCGI_END_REQUEST.
   {
-    // Cases 2.e.1 and 2.e.2 for FCGI_END_REQUEST.
     std::uint8_t record_buffer[kTwoHeaderLength] {};
     struct ExpectedInvalidRecordValues expected_invalid_values
     {
@@ -2623,11 +2621,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     ASSERT_NE(event_uptr.get(), nullptr);
     FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
     ASSERT_NE(response_ptr, nullptr) << typeid(*event_uptr).name();
-    // InvalidRecord* invalid_record_ptr {dynamic_cast<InvalidRecord*>(
-    //   event_uptr.get())};
-    // ASSERT_NE(invalid_record_ptr, nullptr);
-    // EXPECT_EQ(invalid_record_ptr->Type(), FcgiType::kFCGI_STDERR);
-    // EXPECT_EQ(invalid_record_ptr->Content().size(), 8U);
     EXPECT_EQ(response_ptr->AppStatus(), 0);
     EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
     EXPECT_EQ(response_ptr->Request(), kExerciseDataRef);
@@ -2653,8 +2646,528 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
       accept_buffer.clear();
     );
   }
+
+  // Case 2.e.3 for FCGI_END_REQUEST.
+  {
+    std::uint8_t record_buffer[kTwoHeaderLength] {};
+    struct ExpectedInvalidRecordValues expected_invalid_values
+    {
+      /* content_buffer_ptr */ record_buffer + FCGI_HEADER_LEN,
+      /* content_length     */ 8U,
+      /* padding_length     */ 0U,
+      /* id                 */ default_identifier,
+      /* type               */ FcgiType::kFCGI_END_REQUEST,
+      /* version            */ FCGI_VERSION_1
+    };
+    FcgiRequestIdentifier id {};
+    ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
+      kExerciseDataRef));
+    ASSERT_EQ(id, default_identifier);
+    // Send data over FCGI_STDERR. The values of the FCGI_STDERR stream are
+    // immaterial.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDERR, default_request_id,
+      8U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    // Prepare and send the invalid record.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_END_REQUEST,
+      default_request_id, 8U, 0U);
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] =
+      FCGI_REQUEST_COMPLETE;
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, record_buffer, kTwoHeaderLength,
+      expected_invalid_values, __LINE__));
+    // Complete the FCGI_STDERR stream, the FCGI_STDOUT stream, and the
+    // response.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDERR, default_request_id,
+      0U, 0U);
+    ASSERT_EQ(static_cast<std::uint32_t>(FCGI_HEADER_LEN),
+      socket_functions::SocketWrite(server_connection, record_buffer,
+      static_cast<std::uint32_t>(FCGI_HEADER_LEN))) << std::strerror(errno);
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDOUT, default_request_id,
+      0U, 0U);
+    ASSERT_EQ(static_cast<std::uint32_t>(FCGI_HEADER_LEN),
+      socket_functions::SocketWrite(server_connection, record_buffer,
+      static_cast<std::uint32_t>(FCGI_HEADER_LEN))) << std::strerror(errno);
+    PopulateHeader(record_buffer, FcgiType::kFCGI_END_REQUEST,
+      default_request_id, 8U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    // Retrieve and verify the response.
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] = 0U;
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+    ASSERT_NE(response_ptr, nullptr) << typeid(*event_uptr).name();
+    EXPECT_EQ(response_ptr->AppStatus(), 0);
+    EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+    EXPECT_EQ(response_ptr->Request(), kExerciseDataRef);
+    std::uint8_t* stderr_content_begin_ptr {record_buffer + FCGI_HEADER_LEN};
+    std::uint8_t* stderr_content_end_ptr {stderr_content_begin_ptr + 8U};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalStreamDataComparison(
+      stderr_content_begin_ptr, stderr_content_end_ptr,
+      response_ptr->FcgiStderr(), __LINE__));
+    EXPECT_EQ(response_ptr->FcgiStdout().size(), 0U);
+    EXPECT_EQ(response_ptr->RequestId(), default_identifier);
+    // Release the completed request to allow reuse of default_identifier.
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.ReleaseId(connection)));
+    // Clear the request from the server.
+    std::vector<FcgiRequest> accept_buffer {};
+    ASSERT_NO_THROW
+    (
+      while(!(accept_buffer.size()))
+      {
+        accept_buffer = inter_uptr->AcceptRequests();
+      }
+      EXPECT_EQ(accept_buffer.size(), 1U);
+      accept_buffer.clear();
+    );
+  }
+
+  // Case 2.e.4 for FCGI_END_REQUEST.
+  {
+    std::uint8_t record_buffer[kTwoHeaderLength] {};
+    struct ExpectedInvalidRecordValues expected_invalid_values
+    {
+      /* content_buffer_ptr */ record_buffer + FCGI_HEADER_LEN,
+      /* content_length     */ 8U,
+      /* padding_length     */ 0U,
+      /* id                 */ default_identifier,
+      /* type               */ FcgiType::kFCGI_END_REQUEST,
+      /* version            */ FCGI_VERSION_1
+    };
+    FcgiRequestIdentifier id {};
+    ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
+      kExerciseDataRef));
+    ASSERT_EQ(id, default_identifier);
+    // Send data over FCGI_STDERR. The values of the FCGI_STDERR stream are
+    // immaterial.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDERR, default_request_id,
+      8U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDOUT, default_request_id,
+      8U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    // Prepare and send the invalid record.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_END_REQUEST,
+      default_request_id, 8U, 0U);
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] =
+      FCGI_REQUEST_COMPLETE;
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, record_buffer, kTwoHeaderLength,
+      expected_invalid_values, __LINE__));
+    // Complete the FCGI_STDERR stream, the FCGI_STDOUT stream, and the
+    // response.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDERR, default_request_id,
+      0U, 0U);
+    ASSERT_EQ(static_cast<std::uint32_t>(FCGI_HEADER_LEN),
+      socket_functions::SocketWrite(server_connection, record_buffer,
+      static_cast<std::uint32_t>(FCGI_HEADER_LEN))) << std::strerror(errno);
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDOUT, default_request_id,
+      0U, 0U);
+    ASSERT_EQ(static_cast<std::uint32_t>(FCGI_HEADER_LEN),
+      socket_functions::SocketWrite(server_connection, record_buffer,
+      static_cast<std::uint32_t>(FCGI_HEADER_LEN))) << std::strerror(errno);
+    PopulateHeader(record_buffer, FcgiType::kFCGI_END_REQUEST,
+      default_request_id, 8U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    // Retrieve and verify the response.
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] = 0U;
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+    ASSERT_NE(response_ptr, nullptr) << typeid(*event_uptr).name();
+    EXPECT_EQ(response_ptr->AppStatus(), 0);
+    EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+    EXPECT_EQ(response_ptr->Request(), kExerciseDataRef);
+    std::uint8_t* content_begin_ptr {record_buffer + FCGI_HEADER_LEN};
+    std::uint8_t* content_end_ptr {content_begin_ptr + 8U};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalStreamDataComparison(
+      content_begin_ptr, content_end_ptr, response_ptr->FcgiStderr(),
+      __LINE__));
+    ASSERT_NO_FATAL_FAILURE(GTestFatalStreamDataComparison(
+      content_begin_ptr, content_end_ptr, response_ptr->FcgiStdout(),
+      __LINE__));
+    EXPECT_EQ(response_ptr->RequestId(), default_identifier);
+    // Release the completed request to allow reuse of default_identifier.
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.ReleaseId(connection)));
+    // Clear the request from the server.
+    std::vector<FcgiRequest> accept_buffer {};
+    ASSERT_NO_THROW
+    (
+      while(!(accept_buffer.size()))
+      {
+        accept_buffer = inter_uptr->AcceptRequests();
+      }
+      EXPECT_EQ(accept_buffer.size(), 1U);
+      accept_buffer.clear();
+    );
+  }
+
+  // Cases 2.c.1 and 2.c.2 for FCGI_STDOUT anf FCGI_STDERR.
+  {
+    std::uint8_t record_buffer[kTwoHeaderLength] {};
+    FcgiRequestIdentifier id {};
+    ASSERT_NO_THROW(id = client_inter.SendRequest(connection,
+      kExerciseDataRef));
+    ASSERT_EQ(id, default_identifier);
+    // Complete the FCGI_STDOUT and FCGI_STDERR streams.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_STDOUT, default_request_id,
+      0U, 0U);
+    PopulateHeader(record_buffer + FCGI_HEADER_LEN, FcgiType::kFCGI_STDERR,
+      default_request_id, 0U, 0U);
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(server_connection,
+      record_buffer, kTwoHeaderLength)) << std::strerror(errno);
+    struct ExpectedInvalidRecordValues expected_invalid_values {};
+    expected_invalid_values.content_buffer_ptr = record_buffer +
+      FCGI_HEADER_LEN;
+    expected_invalid_values.padding_length     = 0U;
+    expected_invalid_values.id                 = default_identifier;
+    expected_invalid_values.version            = FCGI_VERSION_1;
+    std::memset(record_buffer + FCGI_HEADER_LEN, 0, 8U);
+    constexpr const int kTerminalOrNonterminalCaseCount {2};
+    constexpr const int content_lengths[kTerminalOrNonterminalCaseCount] =
+      {3, 0};
+    constexpr const int record_lengths[kTerminalOrNonterminalCaseCount] =
+      {static_cast<int>(FCGI_HEADER_LEN) + 3,
+       static_cast<int>(FCGI_HEADER_LEN)};
+    for(int i {0}; i < kStreamTypeCount; ++i)
+    {
+      for(int j {0}; j < kTerminalOrNonterminalCaseCount; ++j)
+      {
+        // j == 0, then non-terminal; j == 1, then terminal.
+        // A data length less than 8 is used without padding.
+        const FcgiType current_type {no_application_request_type_list[i]};
+        const int current_content_length {content_lengths[j]};
+        PopulateHeader(record_buffer, current_type, default_request_id,
+          current_content_length, 0U);
+        expected_invalid_values.type           = current_type;
+        expected_invalid_values.content_length = current_content_length;
+        ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+          &client_inter, server_connection, record_buffer, record_lengths[j],
+          expected_invalid_values, __LINE__));
+      }
+    }
+    // Send an FCGI_END_REQUEST record to complete the response.
+    PopulateHeader(record_buffer, FcgiType::kFCGI_END_REQUEST,
+      default_request_id, 8U, 0U);
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] =
+      FCGI_REQUEST_COMPLETE;
+    ASSERT_EQ(kTwoHeaderLength, socket_functions::SocketWrite(
+      server_connection, record_buffer, kTwoHeaderLength)) <<
+      std::strerror(errno);
+    // Retrieve and verify the response.
+    record_buffer[FCGI_HEADER_LEN + kEndRequestProtocolStatusIndex] = 0U;
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+    ASSERT_NE(response_ptr, nullptr) << typeid(*event_uptr).name();
+    EXPECT_EQ(response_ptr->AppStatus(), 0);
+    EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+    EXPECT_EQ(response_ptr->Request(), kExerciseDataRef);
+    EXPECT_EQ(response_ptr->FcgiStdout().size(), 0U);
+    EXPECT_EQ(response_ptr->FcgiStderr().size(), 0U);
+    EXPECT_EQ(response_ptr->RequestId(), default_identifier);
+    // Release the completed request to allow reuse of default_identifier.
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.ReleaseId(connection)));
+    // Clear the request from the server.
+    std::vector<FcgiRequest> accept_buffer {};
+    ASSERT_NO_THROW
+    (
+      while(!(accept_buffer.size()))
+      {
+        accept_buffer = inter_uptr->AcceptRequests();
+      }
+      EXPECT_EQ(accept_buffer.size(), 1U);
+      accept_buffer.clear();
+    );
+  }
+
+  // Cases for expected management request types: FCGI_GET_VALUES_RESULT and
+  // FCGI_UNKNOWN_TYPE.
+
+  FcgiRequestIdentifier management_identifier
+    {connection, FCGI_NULL_REQUEST_ID};
+
+  auto GTestFatalGetValuesRetrieveCompare =
+  [&inter_uptr, &client_inter, management_identifier]
+  (
+    int invocation_line
+  )->void
+  {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalGetValuesRetrieveCompare"};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
+      __LINE__));
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    GetValuesResult* gvr_ptr {dynamic_cast<GetValuesResult*>(event_uptr.get())};
+    ASSERT_NE(gvr_ptr, nullptr);
+    EXPECT_FALSE(gvr_ptr->IsCorrupt());
+    EXPECT_EQ(gvr_ptr->RequestMap(), kMpxsNameMap);
+    EXPECT_EQ(gvr_ptr->ResponseMap(), kMpxsMapWithValue);
+    EXPECT_EQ(gvr_ptr->RequestId(), management_identifier);
+    ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
+  };
+
+  // Populate an FCGI_GET_VALUES_RESULT record for use across test cases.
+  constexpr const int MPXS_name_length {15};
+  constexpr const int encoded_MPXS_pair_byte_length
+    {2 + MPXS_name_length + 1};
+  constexpr const int MPXS_pair_record_length
+    {static_cast<int>(FCGI_HEADER_LEN) + encoded_MPXS_pair_byte_length};
+  std::uint8_t MPXS_record_buffer[MPXS_pair_record_length] {};
+  std::uint8_t* MPXS_content_ptr {MPXS_record_buffer + FCGI_HEADER_LEN};
+  const struct ExpectedInvalidRecordValues MPXS_expected_invalid_values
+  {
+    /* content_buffer_ptr */ MPXS_content_ptr,
+    /* content_length     */ encoded_MPXS_pair_byte_length,
+    /* padding_length     */ 0U,
+    /* id                 */ management_identifier,
+    /* type               */ FcgiType::kFCGI_GET_VALUES_RESULT,
+    /* version            */ FCGI_VERSION_1
+  };
+  PopulateHeader(MPXS_record_buffer, FcgiType::kFCGI_GET_VALUES_RESULT,
+    FCGI_NULL_REQUEST_ID, encoded_MPXS_pair_byte_length, 0U);
+  *MPXS_content_ptr = MPXS_name_length;
+  ++MPXS_content_ptr;
+  *MPXS_content_ptr = 1U;
+  ++MPXS_content_ptr;
+  std::memcpy(MPXS_content_ptr, FCGI_MPXS_CONNS.data(), MPXS_name_length);
+  MPXS_content_ptr += MPXS_name_length;
+  *MPXS_content_ptr = '1';
+
+  std::uint8_t unknown_type_record_buffer[kTwoHeaderLength] {};
+  PopulateHeader(unknown_type_record_buffer, FcgiType::kFCGI_UNKNOWN_TYPE,
+    FCGI_NULL_REQUEST_ID, 8U, 0U);
+  // The first content byte is used to store the unknown type.
+  unknown_type_record_buffer[FCGI_HEADER_LEN] = 27U;
+  const struct ExpectedInvalidRecordValues unknown_type_expected_invalid_values
+  {
+    /* content_buffer_ptr */ unknown_type_record_buffer + FCGI_HEADER_LEN,
+    /* content_length     */ 8U,
+    /* padding_length     */ 0U,
+    /* id                 */ management_identifier,
+    /* type               */ FcgiType::kFCGI_UNKNOWN_TYPE,
+    /* version            */ FCGI_VERSION_1
+  };
+  const struct ManagementRequestData unknown_request
+  {
+    /* type */       static_cast<FcgiType>(
+      unknown_type_record_buffer[FCGI_HEADER_LEN]),
+    /* params_map */ {},
+    /* data */       {}
+  };
+
+  // Case 1 for FCGI_GET_VALUES_RESULT and FCGI_UNKNOWN_TYPE.
+  // Cases 2.a and 2.b for FCGI_GET_VALUES_RESULT.
+  {
+    // Case 1 for FCGI_GET_VALUES_RESULT.
+    std::uint8_t local_MPXS_record_buffer[MPXS_pair_record_length];
+    std::memcpy(local_MPXS_record_buffer, MPXS_record_buffer,
+      MPXS_pair_record_length);
+    struct ExpectedInvalidRecordValues local_MPXS_expected_invalid_values
+      {MPXS_expected_invalid_values};
+    // Update with the correct buffer pointer.
+    local_MPXS_expected_invalid_values.content_buffer_ptr =
+      local_MPXS_record_buffer + FCGI_HEADER_LEN;
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_MPXS_record_buffer,
+      MPXS_pair_record_length, local_MPXS_expected_invalid_values, __LINE__));
+
+    // Case 1 for FCGI_UNKNOWN_TYPE.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, unknown_type_record_buffer,
+      kTwoHeaderLength, unknown_type_expected_invalid_values, __LINE__));
+
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendGetValuesRequest(connection,
+      kMpxsNameMap)));
+    // Case 2.a for FCGI_GET_VALUES_RESULT.
+    local_MPXS_record_buffer[kHeaderVersionIndex] = 7U;
+    local_MPXS_expected_invalid_values.version    = 7U;
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_MPXS_record_buffer,
+      MPXS_pair_record_length, local_MPXS_expected_invalid_values, __LINE__));
+    // Case 2.b for FCGI_GET_VALUES_RESULT.
+    local_MPXS_record_buffer[kHeaderVersionIndex] = FCGI_VERSION_1;
+    local_MPXS_expected_invalid_values.version    = FCGI_VERSION_1;
+    local_MPXS_record_buffer[kHeaderRequestIDB1Index] = 0U;
+    local_MPXS_record_buffer[kHeaderRequestIDB0Index] = 10U;
+    local_MPXS_expected_invalid_values.id = {connection, 10U};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_MPXS_record_buffer,
+      MPXS_pair_record_length, local_MPXS_expected_invalid_values, __LINE__));
+    // Check for proper response processing.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalGetValuesRetrieveCompare(__LINE__));
+  }
+
+  auto GTestFatalProcessAndRetrieveUnknownRequest =
+  [&inter_uptr, &client_inter, &unknown_request, management_identifier]
+  (
+    int invocation_line
+  )->void
+  {
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      "lambda GTestFatalProcessAndRetrieveUnknownRequest"};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
+      __LINE__));
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    UnknownType* unknown_type_ptr
+      {dynamic_cast<UnknownType*>(event_uptr.get())};
+    ASSERT_NE(unknown_type_ptr, nullptr);
+    EXPECT_EQ(unknown_type_ptr->Request(), unknown_request);
+    EXPECT_EQ(unknown_type_ptr->Type(), unknown_request.type);
+    EXPECT_EQ(unknown_type_ptr->RequestId(), management_identifier);
+  };
+
+  // Case 2.c for FCGI_GET_VALUES_RESULT.
+  // Send an unknown management request so that reception of an
+  // FCGI_GET_VALUES_RESULT record is erroneous.
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
+    connection, unknown_request.type, nullptr, nullptr)));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+    &client_inter, server_connection, MPXS_record_buffer,
+    MPXS_pair_record_length, MPXS_expected_invalid_values, __LINE__));
+  // Allow the server to process the response.
+  ASSERT_NO_FATAL_FAILURE(GTestFatalProcessAndRetrieveUnknownRequest(
+    __LINE__));
+
+  // Cases 2.a, 2.b, and 2.c for FCGI_UNKNOWN_TYPE.
+  {
+    ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendBinaryManagementRequest(
+      connection, unknown_request.type, nullptr, nullptr)));
+    struct ExpectedInvalidRecordValues
+    local_unknown_type_expected_invalid_values
+      {unknown_type_expected_invalid_values};
+    std::uint8_t local_unknown_type_record_buffer[kThreeHeaderLength] = {};
+    // Update local_unknown_type_expected_invalid_values with the correct
+    // pointer to the local buffer!
+    local_unknown_type_expected_invalid_values.content_buffer_ptr =
+      local_unknown_type_record_buffer + FCGI_HEADER_LEN;
+    std::memcpy(local_unknown_type_record_buffer, unknown_type_record_buffer,
+      kTwoHeaderLength);
+
+    // Case 2.a
+    local_unknown_type_record_buffer[kHeaderVersionIndex] = 7U;
+    local_unknown_type_expected_invalid_values.version    = 7U;
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_unknown_type_record_buffer,
+      kTwoHeaderLength, local_unknown_type_expected_invalid_values, __LINE__));
+    // Case 2.b
+    local_unknown_type_record_buffer[kHeaderVersionIndex] = FCGI_VERSION_1;
+    local_unknown_type_expected_invalid_values.version    = FCGI_VERSION_1;
+    local_unknown_type_record_buffer[kHeaderRequestIDB1Index] = 0U;
+    local_unknown_type_record_buffer[kHeaderRequestIDB0Index] = 10U;
+    local_unknown_type_expected_invalid_values.id = {connection, 10U};
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_unknown_type_record_buffer,
+      kTwoHeaderLength, local_unknown_type_expected_invalid_values, __LINE__));
+    // Case 2.c.1 Zero content length.
+    local_unknown_type_expected_invalid_values.id = management_identifier;
+    local_unknown_type_expected_invalid_values.content_length = 0U;
+    PopulateHeader(local_unknown_type_record_buffer,
+      FcgiType::kFCGI_UNKNOWN_TYPE, FCGI_NULL_REQUEST_ID, 0U, 0U);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_unknown_type_record_buffer,
+      FCGI_HEADER_LEN, local_unknown_type_expected_invalid_values, __LINE__));
+    // Case 2.c.2 Content length greater than zero but less than 8.
+    local_unknown_type_expected_invalid_values.content_length = 3U;
+    local_unknown_type_expected_invalid_values.padding_length = 2U;
+    PopulateHeader(local_unknown_type_record_buffer,
+      FcgiType::kFCGI_UNKNOWN_TYPE, FCGI_NULL_REQUEST_ID, 3U, 2U);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_unknown_type_record_buffer,
+      FCGI_HEADER_LEN + 3 + 2, local_unknown_type_expected_invalid_values,
+      __LINE__));
+    // Case 2.c.3 Content length greater than 8 and a multiple of 8.
+    local_unknown_type_expected_invalid_values.content_length = 16U;
+    local_unknown_type_expected_invalid_values.padding_length = 0U;
+    PopulateHeader(local_unknown_type_record_buffer,
+      FcgiType::kFCGI_UNKNOWN_TYPE, FCGI_NULL_REQUEST_ID, 16U, 0U);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, local_unknown_type_record_buffer,
+      kThreeHeaderLength, local_unknown_type_expected_invalid_values,
+      __LINE__));
+    // Check the response.
+    ASSERT_NO_FATAL_FAILURE(GTestFatalProcessAndRetrieveUnknownRequest(
+      __LINE__));
+  }
+
+  // Case 2.d for FCGI_UNKNOWN_TYPE
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.SendGetValuesRequest(connection,
+    kMpxsMapWithValue)));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+    &client_inter, server_connection, unknown_type_record_buffer,
+    kTwoHeaderLength, unknown_type_expected_invalid_values, __LINE__));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalGetValuesRetrieveCompare(__LINE__));
 }
 
+TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // This call may block if the TestFcgiClientInterface instance does not
+  // throw as expected.
+  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
+  // Perform a request-response cycle to establish a completed-but-unreleased
+  // application request.
+  int connection {};
+  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
+    -1)) << std::strerror(errno);
+  FcgiRequestIdentifier request_identifier {};
+  ASSERT_NO_THROW(ASSERT_NE(request_identifier = client_inter.SendRequest(
+    connection, kExerciseDataRef), FcgiRequestIdentifier {}));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsRequestEcho(inter_uptr.get(),
+    *(kExerciseDataRef.params_map_ptr), FCGI_RESPONDER, true, __LINE__));
+  std::unique_ptr<ServerEvent> event_uptr {};
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+  ASSERT_NE(response_ptr, nullptr);
+  EXPECT_EQ(response_ptr->RequestId(), request_identifier);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
+    response_ptr, __LINE__));
+  ASSERT_EQ(client_inter.CompletedRequestCount(), 1U);
+  delete(inter_uptr.release());
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  ConnectionClosure* closure_ptr {dynamic_cast<ConnectionClosure*>(
+    event_uptr.get())};
+  ASSERT_NE(closure_ptr, nullptr);
+  EXPECT_EQ(closure_ptr->RequestId(), (FcgiRequestIdentifier {connection,
+    FCGI_NULL_REQUEST_ID}));
+  ASSERT_EQ(client_inter.ConnectionCount(), 0);
+  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
+  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
+}
 
 // SendAbortRequest
 // Examined properties:
