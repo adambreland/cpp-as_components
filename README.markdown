@@ -1,14 +1,15 @@
-# a_component: A Linux C++ library for the development and testing of FastCGI application servers
-The `a_component` namespace includes the `fcgi` namespace. It also includes
-namespaces for the dependencies of `fcgi`. A brief description of these
-namespaces and their constituent classes follows. See the class header files
-for more information.
+# `as_components` A Linux C++ library for the development and testing of FastCGI application servers.
+
+The `as_components` namespace includes the `fcgi` namespace. It also includes
+namespaces for the separately-useful components which were developed for
+`fcgi`. A brief description of these namespaces and their main constituent
+classes follows. See the class header files for more information.
 
 ## `fcgi`
 The classes of namespace `fcgi` provide components for the development and
 testing of FastCGI application servers.
 
-### FastCGI application server development
+### FastCGI application server development with `FcgiServerInterface`
 The primary development component of the library is `FcgiServerInterface`. It,
 together with its related classes, provides an implementation of the FastCGI
 protocol for application servers. This implementation is designed to facilitate
@@ -37,13 +38,48 @@ test development and interpretation.
 `test::TestFcgiClientInterface` is a component which implements the client-side
 of the FastCGI protocol! It is designed to facilitate the development of unit
 tests for FastCGI application servers by providing a high-level interface to
-the FastCGI request-response cycle and by exposing invalid FastCGI records.
+the FastCGI request-response cycle and by exposing invalid FastCGI response
+records.
 
 ## `id_manager`
+The FastCGI protocol identifies a request based on the socket connection over
+which the request was sent and an integral request identifier. For typical
+requests, the request identifier is a small integer greater than zero. The
+value of the request identifier is chosen by the FastCGI client.
 
+`id_manager::IdManager` is a class template which facilitates FastCGI request
+identifier selection and accounting by the provision of a simple interface for
+identifier operations. Let `I` be an integral type. `IdManager<I>` offers:
+```
+I    GetId()
+void ReleaseId(I i)
+bool IsUsed(I i)
+I    NumberOfUsedIds()
+```
+
+An `IdManager` instance keeps track of used identifiers efficiently by storing
+an interval representation of its dynamic set of used identifiers. This
+property was deemed to be important as the primary client of `IdManager` is
+`TestFcgiClientInterface`. Load testing of FastCGI application servers may
+require keeping track of both a large number of concurrent requests for a given
+connection and a large number of concurrent connections.
 
 ## `socket_functions`
+Utility functions for socket I/O.
 
+Features:
+* Automatic handling of short counts and interruptions due to signal receipt.
+* Support for gather writes.
+* The ability to write to a non-blocking socket with automatic blocking
+  and descriptor monitoring for write readiness. Available for regular and
+  gather writes.
 
 ## `testing`
+Namespace `testing` collects a small number of testing modules which are useful
+for testing several modules of `as_components`. `testing` also contains the
+`gtest` namespace. This namespace contains testing modules which are generally
+useful for testing the components of `as_components` and which depend on the
+Google Test testing framework.
 
+Of note is `testing::FileDescriptorLeakChecker`. This class offers a simple
+interface for file descriptor accounting during testing.

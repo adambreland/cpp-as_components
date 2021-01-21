@@ -38,6 +38,46 @@ namespace test {
 
 // TESTING DISCUSSION
 
+// Properties and features of the structure of TestFcgiClientInterface which
+// inform testing:
+//
+// Structural features of TestFcgiClientInterface
+// 1) A management request queue for each connection.
+// 2) The potential for pending application requests for each connection.
+// 3) The potential for completed but unreleased application requests for each
+//    connection.
+// 4) The persistence of completed and unreleased application requests for a
+//    connection across connection descriptor closure and reuse.
+// 5) The potential for multiple simultaneous connections to the same server.
+// 6) The potential for multiple simultaneous connections to distinct servers.
+// 7) The fact that TestFcgiClientInterface can monitor multiple connections
+//    with a call to RetrieveServerEvent. Data for multiple responses on
+//    distinct connections may be read during a single call to
+//    RetrieveServerEvent. Data receipt over a connection may involve multiple
+//    periods of reading due to read blocking, TestFcgiClientInterface data
+//    receipt multiplexing, and the availability of data on other connections.
+// 8) The possibility that a record may not be received in-full before its
+//    connection blocks for reading. Given that TestFcgiClientInterface can
+//    monitor multiple connections, the partial record data must be stored
+//    in a way that allows the record to be completed later.
+// 9) Invalid FastCGI records may be received at any time during response
+//    receipt. TestFcgiClientInterface must handle such records.
+//
+// Features of the FastCGI protocol and related notions:
+// 1) FastCGI record indivisibility for a given connection. Every record must
+//    be received in full. Receipt of a record over a connection cannot be
+//    interrupted by the receipt of other data on the connection.
+// 2) Record padding, with its several unintended but legal variations, must be
+//    handled by any FastCGI client.
+// 3) Application requests and responses are, in general, composed of multiple
+//    streams. Stream data may be received over multiple records.
+// 4) Stream data receipt and, more generally, request data receipt may be
+//    interrupted due to the FastCGI features of stream multiplexing and
+//    request multiplexing over a single socket connection.
+// 5) Connection closure can be performed by both the client
+//    (TestFcgiClientInterface) and the server. Closure may occur at any time
+//    relative to the receipt and transmission of data by the client and server.
+
 // Connection closure:
 //    The interface maintains state for each connection and for the interface
 // as a whole. When a connection transitions from being connected to being
@@ -94,6 +134,19 @@ namespace test {
 // reuses the descriptor of the previous connection should be made.
 // Application and management request-response cycles should be performed to
 // verify interface integrity.
+
+// Observable state inspection throughout testing:
+//    The majority of test cases are implemented in a way which is intended to
+// detect any deviations of the observables of TestFcgiClientInterface from
+// their expected values. This is done by invoking all class observers
+// (directly or by invocation of a wrapper) upon any occasion when either some
+// observable is expected to change or observable constancy is expected and it
+// seems reasonable that a class implementation error could result in a
+// violation of constancy. A precondition for such checks on observable values
+// is the exact specification of observable state upon an internal state
+// transition of TestFcgiClientInterface. Such a specification largely holds
+// for invocations of the methods of TestFcgiClientInterface.
+//    Several testing utility functions are present to support this technique.
 
 // TEST IMPLEMENTATION
 

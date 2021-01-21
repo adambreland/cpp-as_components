@@ -17,22 +17,23 @@ namespace testing {
 //
 // FileDescriptorLeakChecker offers:
 // 1) The ability to reinitialize the recorded set of descriptors.
-// 2) The ability to specify descriptors which were closed and which were opened
-//    during execution. Specified descriptors will not be counted as leaks when
-//    the appropriate call to Check is made.
+// 2) The ability to specify descriptors which were closed or opened during
+//    execution. Specified descriptors will not be counted as leaks when the
+//    appropriate call to Check is made.
 // 3) Safe use across forks. After a fork, checker instances share no state.
 //
 // Limitations:
 // 1) File description identity is not taken into account when checking for
-//    leaks. If a recorded file descriptor is closed and a subsequent open
+//    leaks. If a recorded file descriptor was closed and a subsequent open
 //    operation has reused the descriptor when a check is performed, then a
-//    leak is not reported.
+//    leak will not be reported.
 // 2) FileDescriptorLeakChecker depends on the /proc/<process id>/fd
-//    directories.
+//    directories. This dependency is not universally portable.
 // 3) FileDescriptorLeakChecker is not suitable for use in situations where
 //    file descriptors may be opened or closed by external modules during the
 //    execution of its methods. As such, it is likely unsuitable for use
-//    in multithreaded programs.
+//    in multithreaded programs where file descriptors are managed across
+//    multiple threads.
 class FileDescriptorLeakChecker
 {
  public:

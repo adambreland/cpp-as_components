@@ -26,6 +26,9 @@ void GTestFatalCreateBazelTemporaryFile(int* descriptor_ptr,
 
 extern "C" using CSignalHandlerType = void (*)(int);
 
+// Note that the special values SIG_IGN (ignore signal) and SIG_DFL (restore
+// default disposition) are of type CSignalHandlerType. Convenience wrappers
+// are provided for these values below.
 void GTestFatalSetSignalDisposition(int sig, CSignalHandlerType handler,
   int invocation_line);
 

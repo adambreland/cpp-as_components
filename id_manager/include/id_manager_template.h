@@ -4,8 +4,8 @@
 // Class Description:
 //    Let I be an integral type. Let I_max be the maximum value of this type.
 // The semantics of IdMananger<I> are determined by:
-// 1) The notion that a type instance holds a representation of a dynamic set 
-//    which is a subset of [1, I_max].
+// 1) The notion that an instance of IdMananger<I> holds a representation of a
+//    dynamic set which is a subset of [1, I_max].
 // 2) That an operation void ReleaseId(I) of IdManager<I> satisfies for each
 //    value i of I: 
 //    a) If at time t, i is in the dynamic set S(t) of a type instance, then,
@@ -120,7 +120,7 @@ class IdManager
   // Exceptions:
   // 1) Exceptions derived from std::exception may be thrown.
   // 2) Strong exception guarantee.
-  // 3) If all possible allowed IDs are in use, an exception is thrown.
+  // 3) If all allowed IDs are in use, an exception is thrown.
   //
   // Effects:
   // 1) If no IDs are in use, 1 is returned.
