@@ -4,8 +4,8 @@ cc_library(
         "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "//test:test_fcgi_client_interface",
-        "@a_component_testing//:a_component_testing_utilities",
-        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
+        "@as_components_testing//:as_components_testing_utilities",
+        "@as_components_testing//gtest:as_components_testing_gtest_utilities",
         "@googletest//:gtest"
     ],
     srcs          = ["//test/test:src/client_interface_testing_utilities.cc"],
@@ -52,7 +52,7 @@ cc_test(
     deps  = [
         "//:fcgi_utilities",
         "//test:fcgi_si_testing_utilities",
-        "@a_component_testing//gtest:a_component_testing_gtest_utilities",
+        "@as_components_testing//gtest:as_components_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],

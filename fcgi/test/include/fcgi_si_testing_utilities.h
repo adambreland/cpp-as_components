@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
-#define A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
+#ifndef AS_COMPONENTS_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
+#define AS_COMPONENTS_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
 
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -24,7 +24,7 @@
 //       depend on Google Test but whose names do not start with GTest are
 //       marked with the Google Test dependency flag defined above.
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 
@@ -230,6 +230,6 @@ class GTestNonFatalSingleProcessInterfaceAndClients
 
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif  // A_COMPONENT_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_
+#endif  // AS_COMPONENTS_FCGI_TEST_INCLUDE_FCGI_SI_TESTING_UTILITIES_H_

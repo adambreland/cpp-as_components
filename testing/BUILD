@@ -1,10 +1,10 @@
 cc_library(
-  name       = "a_component_testing_utilities",
+  name       = "as_components_testing_utilities",
   srcs       = [
-      "//:src/a_component_testing_utilities.cc",
-      "//:include/a_component_testing_utilities_templates.h"
+      "//:src/as_components_testing_utilities.cc",
+      "//:include/as_components_testing_utilities_templates.h"
   ],
-  hdrs       = ["//:include/a_component_testing_utilities.h"],
+  hdrs       = ["//:include/as_components_testing_utilities.h"],
   copts      = [
       "-std=c++17",
       "-g",

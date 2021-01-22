@@ -1,11 +1,11 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
 
 #include <cstdint>
 
 #include <utility>
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // A value class for identifying a FastCGI request by the connected socket
@@ -103,6 +103,6 @@ private:
 };
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_

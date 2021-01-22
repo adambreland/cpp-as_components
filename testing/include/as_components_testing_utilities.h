@@ -1,12 +1,12 @@
-#ifndef A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_H_
-#define A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_H_
+#ifndef AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_H_
+#define AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_H_
 
 #include <dirent.h>
 
 #include <utility>
 #include <vector>
 
-namespace a_component {
+namespace as_components {
 namespace testing {
 
 // FileDescriptorLeakChecker allows a recorded set of open file descriptors
@@ -135,8 +135,8 @@ class FileDescriptorLeakChecker
 };
 
 } // namespace testing
-} // namespace a_component
+} // namespace as_components
 
-#include "include/a_component_testing_utilities_templates.h"
+#include "include/as_components_testing_utilities_templates.h"
 
-#endif // A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_H_
+#endif // AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_H_

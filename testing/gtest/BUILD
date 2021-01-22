@@ -1,11 +1,11 @@
 cc_library(
-  name       = "a_component_testing_gtest_utilities",
+  name       = "as_components_testing_gtest_utilities",
   deps       = [
-      "//:a_component_testing_utilities",
+      "//:as_components_testing_utilities",
       "@googletest//:gtest"
   ],
-  srcs       = ["//gtest:src/a_component_testing_gtest_utilities.cc"],
-  hdrs       = ["//gtest:include/a_component_testing_gtest_utilities.h"],
+  srcs       = ["//gtest:src/as_components_testing_gtest_utilities.cc"],
+  hdrs       = ["//gtest:include/as_components_testing_gtest_utilities.h"],
   copts      = [
       "-std=c++17",
       "-g",

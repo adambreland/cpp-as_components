@@ -87,7 +87,7 @@
 //       of its data, the boolean value associated with the write mutex of the
 //       connection must be set under the protection of the mutex.
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // Initialize static class data members.
@@ -1365,7 +1365,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
   // 
   // Send record.
   struct timeval timeout {write_block_timeout, 0};
-  std::size_t number_written {a_component::socket_functions::
+  std::size_t number_written {as_components::socket_functions::
     WriteOnSelect(connection, buffer_ptr, count, &timeout)};
   
   // Check for errors which prevented a full write.
@@ -1411,11 +1411,11 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
     {
       std::error_code ec {errno, std::system_category()};
       throw std::system_error {ec, "An error from a call to "
-        "a_component::socket_functions::WriteOnSelect."};
+        "as_components::socket_functions::WriteOnSelect."};
     } 
   }
   return true;
 } // RELEASE the write mutex for the connection.
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

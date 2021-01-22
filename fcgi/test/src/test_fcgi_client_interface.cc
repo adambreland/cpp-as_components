@@ -32,7 +32,7 @@
 #include "include/fcgi_request_identifier.h"
 #include "include/fcgi_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 
@@ -182,7 +182,7 @@ bool TestFcgiClientInterface::CloseConnection(int connection)
     std::list<ManagementRequestData> empty_queue {};
     // Check that each ID which will be released is being tracked by the
     // id_manager.
-    a_component::IdManager<std::uint16_t>* id_manager_ptr
+    as_components::IdManager<std::uint16_t>* id_manager_ptr
       {&(state_ptr->id_manager)};
     for(std::map<FcgiRequestIdentifier, RequestData>::iterator
       pending_start_copy {pending_start};
@@ -1127,7 +1127,7 @@ bool TestFcgiClientInterface::ReleaseId(FcgiRequestIdentifier id)
   {
     std::set<FcgiRequestIdentifier>::iterator completed_end
       {completed_request_set_.end()};
-    a_component::IdManager<std::uint16_t>* id_manager_ptr
+    as_components::IdManager<std::uint16_t>* id_manager_ptr
       {&(connection_iter->second.id_manager)};
     std::uint16_t fcgi_id {id.Fcgi_id()};
 
@@ -1196,7 +1196,7 @@ bool TestFcgiClientInterface::ReleaseId(int connection)
     return false;
   }
   bool connected {connection_iter->second.connected};
-  a_component::IdManager<std::uint16_t>* id_manager_ptr
+  as_components::IdManager<std::uint16_t>* id_manager_ptr
     {&(connection_iter->second.id_manager)};
   std::set<FcgiRequestIdentifier>::iterator start
     {completed_request_set_.lower_bound({connection, FCGI_NULL_REQUEST_ID})};
@@ -1686,7 +1686,7 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
           // converted to EINVAL. This conversion is consistent with the
           // semantics of a false value for std::get<0>(params_encoding).
           FailedWrite(connection_iter, EINVAL, false, false,
-            "::a_component::fcgi::EncodeNameValuePairs");
+            "::as_components::fcgi::EncodeNameValuePairs");
           return FcgiRequestIdentifier {};
         }
         std::tuple<struct iovec*, int, std::size_t> params_write
@@ -1911,4 +1911,4 @@ TestFcgiClientInterface::UpdateOnHeaderCompletion(
 
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

@@ -30,9 +30,9 @@ extern "C" int connect(int sockfd, const struct sockaddr* addr,
     exit(EXIT_FAILURE);
   }
 
-  if(a_component::fcgi::test::test::shared_connect_EINTR_return_flag)
+  if(as_components::fcgi::test::test::shared_connect_EINTR_return_flag)
   {
-    a_component::fcgi::test::test::shared_connect_EINTR_return_flag = false;
+    as_components::fcgi::test::test::shared_connect_EINTR_return_flag = false;
     std::cout << "Returning -1 and setting errno to EINTR from\n" <<
       __FILE__ << '\n';
     errno = EINTR;

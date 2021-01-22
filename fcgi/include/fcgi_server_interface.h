@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
 
 #include <cstdint>
 #include <cstdlib>
@@ -12,7 +12,7 @@
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request_identifier.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // A forward declaration to break the cyclic dependency between FcgiRequest
@@ -1285,10 +1285,10 @@ class FcgiServerInterface {
 };
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
 // The definition of FcgiRequest must be present to allow proper instantiation
 // of some of the template state of FcgiServerInterface.
 #include "include/fcgi_request.h"
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_

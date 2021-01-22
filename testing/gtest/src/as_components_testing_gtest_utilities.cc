@@ -1,4 +1,4 @@
-#include "gtest/include/a_component_testing_gtest_utilities.h"
+#include "gtest/include/as_components_testing_gtest_utilities.h"
 
 #include <stdlib.h>
 #include <sys/signal.h>
@@ -13,7 +13,7 @@
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-namespace a_component {
+namespace as_components {
 namespace testing {
 namespace gtest {
 
@@ -114,4 +114,4 @@ bool GTestNonFatalPrepareTemporaryFile(int descriptor, int invocation_line)
 
 } // namespace gtest
 } // namespace testing
-} // namespace a_component
+} // namespace as_components

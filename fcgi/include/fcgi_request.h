@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_
 
 #include <sys/types.h>     // For ssize_t.
 #include <sys/uio.h>
@@ -16,7 +16,7 @@
 #include "include/fcgi_request_identifier.h"
 #include "include/fcgi_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // FcgiRequest objects are produced by an instance of FcgiServerInterface. 
@@ -533,8 +533,8 @@ class FcgiRequest {
 };
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
 #include "include/fcgi_request_templates.h"
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_

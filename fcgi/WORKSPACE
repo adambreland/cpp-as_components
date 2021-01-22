@@ -1,6 +1,6 @@
 local_repository(
-    name = "a_component_testing",
-    path = "external/a_component_testing"
+    name = "as_components_testing",
+    path = "external/as_components_testing"
 )
 
 local_repository(

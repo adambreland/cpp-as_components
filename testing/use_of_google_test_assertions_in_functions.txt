@@ -1,5 +1,5 @@
-Use of Google Test assertions in a_component:
-   Google Test is used as the testing framework for a_component. It is often
+Use of Google Test assertions in as_components:
+   Google Test is used as the testing framework for as_components. It is often
 desirable to modularize several Google Test assertions and related logic into
 a function. Doing so presents several problems. First, assertion failure line
 numbers are reported relative to the lines of the function and not relative to

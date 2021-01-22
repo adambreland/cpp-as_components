@@ -34,7 +34,7 @@
 //       used by the FcgiRequest constructor to generate a request from the
 //       data of the request.
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 FcgiServerInterface::RecordStatus::
@@ -471,7 +471,7 @@ FcgiServerInterface::RecordStatus::ReadRecords()
     //
     // Note that reading does not require synchronization as only the
     // interface reads from the connected sockets.
-    std::int_fast32_t number_bytes_received(a_component::socket_functions::
+    std::int_fast32_t number_bytes_received(as_components::socket_functions::
       SocketRead(connection_, read_buffer, kBufferSize));
 
     // Check for a disconnected socket or an unrecoverable error.
@@ -904,4 +904,4 @@ void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion(
 } // RELEASE interface_state_mutex_.
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

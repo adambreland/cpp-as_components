@@ -231,7 +231,7 @@
 //       a pointer to the interface is available and FcgiRequest is a friend.
 //    i) Terminating the program when invariants cannot be maintained.
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 FcgiRequest::FcgiRequest()
@@ -903,7 +903,7 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
       interface_state_lock.unlock();
 
     std::tuple<struct iovec*, int, std::size_t> write_return
-      {a_component::socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr,
+      {as_components::socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr,
         iovec_count, working_number_to_write)};
     // Start return processing if-else-if ladder.
     if(std::get<2>(write_return) == 0) // All data was written.
@@ -1027,4 +1027,4 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
 }
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

@@ -1,14 +1,14 @@
-#ifndef A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_
-#define A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_
+#ifndef AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_TEMPLATES_H_
+#define AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_TEMPLATES_H_
 
-#include "include/a_component_testing_utilities.h"
+#include "include/as_components_testing_utilities.h"
 
 #include <algorithm>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-namespace a_component {
+namespace as_components {
 namespace testing {
 
 template<typename It>
@@ -76,6 +76,6 @@ Check(It1 removed_begin, It1 removed_end, It2 added_begin, It2 added_end)
 }
 
 } // namespace testing
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_TESTING_INCLUDE_A_COMPONENT_TESTING_UTILITIES_TEMPLATES_H_
+#endif // AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_TEMPLATES_H_

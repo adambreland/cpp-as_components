@@ -17,7 +17,7 @@
 #include "test/test/include/client_interface_testing_utilities.h"
 #include "test/test/include/shared_interpositioning_state.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 namespace test {
@@ -158,4 +158,4 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
 } // namespace test
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

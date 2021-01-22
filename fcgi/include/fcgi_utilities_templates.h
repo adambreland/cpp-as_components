@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
 
 #include "include/fcgi_utilities.h"
 
@@ -17,7 +17,7 @@
 
 #include "include/fcgi_protocol_constants.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 template<typename ByteIter>
@@ -514,6 +514,6 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
 }
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_

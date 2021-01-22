@@ -25,13 +25,13 @@
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 #include "external/socket_functions/include/socket_functions.h"
-#include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
+#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
 
 #include "server_interface_combined.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 #include "test/test/include/client_interface_testing_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 namespace test {
@@ -144,8 +144,8 @@ namespace test {
 // seems reasonable that a class implementation error could result in a
 // violation of constancy. A precondition for such checks on observable values
 // is the exact specification of observable state upon an internal state
-// transition of TestFcgiClientInterface. Such a specification largely holds
-// for invocations of the methods of TestFcgiClientInterface.
+// transition of TestFcgiClientInterface. Such specification largely holds for
+// the methods of TestFcgiClientInterface.
 //    Several testing utility functions are present to support this technique.
 
 // TEST IMPLEMENTATION
@@ -3738,11 +3738,11 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendAbortRequestTestCaseSet3)
 //     a single process.
 //  Server interface behavior:
 //  3) Receipt of and response to FCGI_GET_VALUES requests by
-//     ::a_component::fcgi::FcgiServerInterface.
+//     ::as_components::fcgi::FcgiServerInterface.
 //  4) FcgiRequest object production through calls to
-//     ::a_component::fcgi::FcgiServerInterface::AcceptRequests
+//     ::as_components::fcgi::FcgiServerInterface::AcceptRequests
 //     and correct transmission of terminal stream records and an
-//     FCGI_END_REQUEST record by ::a_component::fcgi::FcgiRequest::Complete.
+//     FCGI_END_REQUEST record by ::as_components::fcgi::FcgiRequest::Complete.
 // Other modules whose testing depends on this module: none.
 
 TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet1)
@@ -5849,4 +5849,4 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet4)
 } // namespace test
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

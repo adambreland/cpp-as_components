@@ -39,7 +39,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
 
   // No information written (as in an initial blocking error).
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(0, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(0, iovec_array, 5)),
     (std::pair<struct iovec*, int> {iovec_array, 5}));
   EXPECT_EQ(
     iovec_array[0].iov_base,
@@ -51,7 +51,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
   // Less than the first iov_len.
   set_test_array(&(iovec_array[0]));
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(4, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(4, iovec_array, 5)),
     (std::pair<struct iovec*, int> {&iovec_array[0], 5}));
   EXPECT_EQ(
     (iovec_array[0].iov_base),
@@ -63,7 +63,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
   // Multiple iovec instances terminating with a partial read or write.
   set_test_array(&(iovec_array[0]));
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(18, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(18, iovec_array, 5)),
     (std::pair<struct iovec*, int> {&iovec_array[2], 3}));
   EXPECT_EQ(
     (iovec_array[2].iov_base),
@@ -76,7 +76,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
   // Include the zero length argument.
   set_test_array(&(iovec_array[0]));
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(25, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(25, iovec_array, 5)),
     (std::pair<struct iovec*, int> {&iovec_array[4], 1}));
   EXPECT_EQ(
     (iovec_array[4].iov_base),
@@ -88,7 +88,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
   // Multiple iovec instances terminating on a boundary.
   set_test_array(&(iovec_array[0]));
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(17, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(17, iovec_array, 5)),
     (std::pair<struct iovec*, int> {&iovec_array[2], 3}));
   EXPECT_EQ(
     (iovec_array[2].iov_base),
@@ -101,7 +101,7 @@ TEST(SocketFunctions, ScatterGatherHelper)
   // Stop at the boundary of the zero length argument and then skip ahead.
   set_test_array(&(iovec_array[0]));
   EXPECT_EQ(
-    (a_component::socket_functions::ScatterGatherHelper(19, iovec_array, 5)),
+    (as_components::socket_functions::ScatterGatherHelper(19, iovec_array, 5)),
     (std::pair<struct iovec*, int> {&iovec_array[4], 1}));
   EXPECT_EQ(
     (iovec_array[4].iov_base),

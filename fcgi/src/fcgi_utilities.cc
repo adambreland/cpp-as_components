@@ -8,7 +8,7 @@
 
 #include "include/fcgi_protocol_constants.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 std::vector<std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>>
@@ -182,4 +182,4 @@ std::size_t NeededLocalData(std::size_t m)
 } // namespace partition_byte_sequence_internal
 
 } // namspace fcgi
-} // namespace a_component
+} // namespace as_components

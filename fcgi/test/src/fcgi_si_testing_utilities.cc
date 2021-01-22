@@ -30,7 +30,7 @@
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_server_interface.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 
@@ -627,4 +627,4 @@ CleanUp(int invocation_line)
 
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

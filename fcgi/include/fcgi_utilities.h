@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_H_
 
 #include <sys/uio.h>
 #include <unistd.h>
@@ -12,7 +12,7 @@
 
 #include "include/fcgi_protocol_constants.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // The system-dependent maximum struct iovec array length for scatter-gatter
@@ -361,8 +361,8 @@ std::size_t NeededLocalData(std::size_t m);
 } // namespace partition_byte_sequence_internal
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
 #include "include/fcgi_utilities_templates.h"
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_UTILITIES_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_H_

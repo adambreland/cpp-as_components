@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_
-#define A_COMPONENT_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_
+#ifndef AS_COMPONENTS_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_
+#define AS_COMPONENTS_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_
 
 // Class Description:
 //    Let I be an integral type. Let I_max be the maximum value of this type.
@@ -107,7 +107,7 @@
 #include <map>
 #include <type_traits>
 
-namespace a_component {
+namespace as_components {
 
 template<typename I>
 class IdManager
@@ -407,6 +407,6 @@ void IdManager<I>::ReleaseId(I id)
   --size_;
 }
 
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_
+#endif // AS_COMPONENTS_ID_MANAGER_INCLUDE_ID_MANAGER_TEMPLATE_H_

@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
-#define A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#ifndef AS_COMPONENTS_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#define AS_COMPONENTS_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
 
 #include <sys/select.h>
 #include <netinet/in.h>
@@ -20,7 +20,7 @@
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request_identifier.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 
@@ -729,7 +729,7 @@ class TestFcgiClientInterface
   std::size_t PendingRequestCount(int connection) const;
 
   // Returns the number of objects which are derived from
-  // ::a_component::fcgi::test::ServerEvent which are in the ready event queue.
+  // ::as_components::fcgi::test::ServerEvent which are in the ready event queue.
   // Note that an object which was returned by a call to RetrieveServerEvent is
   // no longer in the ready event queue.
   inline std::size_t ReadyEventCount() const noexcept
@@ -850,7 +850,7 @@ class TestFcgiClientInterface
   //       queue.
   //    c) Two cases cause an empty result map to be returned and the
   //       corruption flag of the GetValuesResult instance to be set.
-  //       1) A call to ::a_component::fcgi::ExtractBinaryNameValuePairs
+  //       1) A call to ::as_components::fcgi::ExtractBinaryNameValuePairs
   //          indicated that an encoding error was present.
   //       2) A duplicate name was detected among the name-value pairs.
   //    d) In the case that the FCGI_GET_VALUES record corresponding to the
@@ -956,7 +956,7 @@ class TestFcgiClientInterface
   //    a) connection was not a connected socket descriptor which was opened by
   //       the interface.
   //    b) std::distance(begin, end) was larger than
-  //       ::a_component::fcgi::kMaxRecordContentByteLength.
+  //       ::as_components::fcgi::kMaxRecordContentByteLength.
   //    c) It was discovered that the server closed the connection. When
   //       connection closure was discovered, a ConnectionClosure instance was
   //       added to the micro server event queue.
@@ -1007,7 +1007,7 @@ class TestFcgiClientInterface
   //       the interface.
   //    b) The names of params_map and empty values required more than one
   //       FastCGI record when they were encoded with a call to
-  //       ::a_component::fcgi::EncodeNameValuePairs.
+  //       ::as_components::fcgi::EncodeNameValuePairs.
   //    c) It was discovered that the server closed the connection. When
   //       connection closure was discovered, a ConnectionClosure instance was
   //       added to the micro server event queue.
@@ -1142,15 +1142,15 @@ class TestFcgiClientInterface
   struct ConnectionState
   {
     bool                                  connected;
-    a_component::IdManager<std::uint16_t> id_manager;
+    as_components::IdManager<std::uint16_t> id_manager;
     RecordState                           record_state;
     std::list<ManagementRequestData>      management_queue;
   };
 
-  // a_component::IdManager<std::uint16_t>
-  static_assert(std::is_nothrow_default_constructible<a_component::IdManager<std::uint16_t>>::value);
-  static_assert(std::is_nothrow_move_constructible<a_component::IdManager<std::uint16_t>>::value);
-  static_assert(std::is_nothrow_move_assignable<a_component::IdManager<std::uint16_t>>::value);
+  // as_components::IdManager<std::uint16_t>
+  static_assert(std::is_nothrow_default_constructible<as_components::IdManager<std::uint16_t>>::value);
+  static_assert(std::is_nothrow_move_constructible<as_components::IdManager<std::uint16_t>>::value);
+  static_assert(std::is_nothrow_move_assignable<as_components::IdManager<std::uint16_t>>::value);
   // ConnectionState
   static_assert(std::is_nothrow_default_constructible<TestFcgiClientInterface::ConnectionState>::value);
   static_assert(std::is_nothrow_move_constructible<TestFcgiClientInterface::ConnectionState>::value);
@@ -1351,7 +1351,7 @@ class TestFcgiClientInterface
   //    instance which was added to the ready event queue.
   //       Two cases cause an empty map to be returned and the corruption flag
   //    of the GetValuesResult instance to be set.
-  //    a) A call to ::a_component::fcgi::ExtractBinaryNameValuePairs indicated
+  //    a) A call to ::as_components::fcgi::ExtractBinaryNameValuePairs indicated
   //       that an encoding error was present.
   //    b) A duplicate name was detected among the name-value pairs.
   // 4) If the type of the record was FCGI_END_REQUEST and the record was valid,
@@ -1462,6 +1462,6 @@ class TestFcgiClientInterface
 
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_
+#endif // AS_COMPONENTS_FCGI_TEST_INCLUDE_TEST_FCGI_CLIENT_INTERFACE_H_

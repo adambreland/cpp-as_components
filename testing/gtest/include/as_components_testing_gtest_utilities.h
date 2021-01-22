@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_TESTING_GTEST_INCLUDE_A_COMPONENT_TESTING_GTEST_UTILITIES_H_
-#define A_COMPONENT_TESTING_GTEST_INCLUDE_A_COMPONENT_TESTING_GTEST_UTILITIES_H_
+#ifndef AS_COMPONENTS_TESTING_GTEST_INCLUDE_AS_COMPONENTS_TESTING_GTEST_UTILITIES_H_
+#define AS_COMPONENTS_TESTING_GTEST_INCLUDE_AS_COMPONENTS_TESTING_GTEST_UTILITIES_H_
 
 #include <sys/signal.h>
 
@@ -7,9 +7,9 @@
 
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "include/a_component_testing_utilities.h"
+#include "include/as_components_testing_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace testing {
 namespace gtest {
 
@@ -57,6 +57,6 @@ bool GTestNonFatalPrepareTemporaryFile(int descriptor, int invocation_line);
 
 } // namespace gtest
 } // namespace testing
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_TESTING_GTEST_INCLUDE_A_COMPONENT_TESTING_GTEST_UTILITIES_H_
+#endif // AS_COMPONENTS_TESTING_GTEST_INCLUDE_AS_COMPONENTS_TESTING_GTEST_UTILITIES_H_

@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
-#define A_COMPONENT_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
+#ifndef AS_COMPONENTS_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
+#define AS_COMPONENTS_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
 
 #include <signal.h>
 #include <sys/socket.h>
@@ -13,14 +13,14 @@
 #include <map>
 #include <vector>
 
-#include "external/a_component_testing/include/a_component_testing_utilities.h"
+#include "external/as_components_testing/include/as_components_testing_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
 #include "server_interface_combined.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 #include "test/include/test_fcgi_client_interface.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 namespace test {
@@ -113,7 +113,7 @@ class TestFcgiClientInterfaceTestFixture : public ::testing::Test
 
 // Default state for testing:
 //    kDefaultInterfaceArguments is used with
-// ::a_component::fcgi::test::GTestNonFatalCreateInterface to construct an
+// ::as_components::fcgi::test::GTestNonFatalCreateInterface to construct an
 // FcgiServerInstance.
 //    Note that this constant is meant to be used to initialize an
 // InterfaceCreationArguments instance. The domain field of this instance must
@@ -540,6 +540,6 @@ void GTestFatalServerDestructionClosureMeta(
 } // namespace test
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_
+#endif // AS_COMPONENTS_FCGI_TEST_TEST_INCLUDE_CLIENT_INTERFACE_TESTING_UTILITIES_H_

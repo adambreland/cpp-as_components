@@ -1,4 +1,4 @@
-#include "include/a_component_testing_utilities.h"
+#include "include/as_components_testing_utilities.h"
 
 #include <dirent.h>
 #include <sys/types.h>
@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace a_component {
+namespace as_components {
 namespace testing {
 
 static_assert(std::is_nothrow_swappable<std::vector<int>>::value);
@@ -134,4 +134,4 @@ void FileDescriptorLeakChecker::Reinitialize()
 }
 
 } // namespace testing
-} // namespace a_component
+} // namespace as_components

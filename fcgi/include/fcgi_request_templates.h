@@ -1,8 +1,8 @@
 // Template definitions for FcgiRequest. This file is included as
 // a template definition header by the FcgiRequest header.
 
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 
 #include "include/fcgi_request.h"
 
@@ -18,7 +18,7 @@
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 template<typename ByteIter>
@@ -60,6 +60,6 @@ bool FcgiRequest::WriteError(ByteIter begin_iter, ByteIter end_iter)
 }
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_

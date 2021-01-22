@@ -6,7 +6,7 @@
 #include "include/fcgi_server_interface.h"
 #include "include/fcgi_utilities.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 FcgiServerInterface::RequestData::
@@ -115,4 +115,4 @@ bool FcgiServerInterface::RequestData::ProcessFCGI_PARAMS()
 }
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

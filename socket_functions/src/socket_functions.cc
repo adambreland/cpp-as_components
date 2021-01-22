@@ -10,7 +10,7 @@
 
 #include "include/socket_functions.h"
 
-namespace a_component {
+namespace as_components {
 namespace socket_functions {
 
 std::size_t
@@ -210,4 +210,4 @@ std::size_t WriteOnSelect(int fd, const std::uint8_t* buffer_ptr,
 }
 
 } // namespace socket_functions
-} // namepsace a_component
+} // namepsace as_components

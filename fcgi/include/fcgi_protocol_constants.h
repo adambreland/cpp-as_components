@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_
-#define A_COMPONENT_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_
+#ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_
+#define AS_COMPONENTS_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_
 
 #include <sys/time.h>
 #include <sys/select.h>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 
 // Protocol Constants
@@ -81,6 +81,6 @@ enum class FcgiType : std::uint8_t
 };
 
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_
+#endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_PROTOCOL_CONSTANTS_H_

@@ -1,5 +1,5 @@
-#ifndef A_COMPONENT_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_
-#define A_COMPONENT_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_
+#ifndef AS_COMPONENTS_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_
+#define AS_COMPONENTS_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_
 
 #include <sys/select.h>
 #include <sys/time.h>
@@ -10,7 +10,7 @@
 #include <cstdlib>         // For std::size_t.
 #include <utility>
 
-namespace a_component {
+namespace as_components {
 namespace socket_functions {
 
 // A utility wrapper for write which handles EINTR errors. A short count
@@ -165,6 +165,6 @@ std::size_t WriteOnSelect(int fd, const std::uint8_t* buffer_ptr,
   std::size_t count, struct timeval* timeout_ptr = nullptr) noexcept;
 
 } // namespace socket_functions
-} // namespace a_component
+} // namespace as_components
 
-#endif // A_COMPONENT_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_
+#endif // AS_COMPONENTS_SOCKET_FUNCTIONS_INCLUDE_SOCKET_FUNCTIONS_H_

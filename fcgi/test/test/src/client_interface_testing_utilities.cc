@@ -15,14 +15,14 @@
 #include <utility>
 #include <vector>
 
-#include "external/a_component_testing/gtest/include/a_component_testing_gtest_utilities.h"
+#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 #include "external/socket_functions/include/socket_functions.h"
 
 #include "server_interface_combined.h"
 #include "test/include/test_fcgi_client_interface.h"
 
-namespace a_component {
+namespace as_components {
 namespace fcgi {
 namespace test {
 namespace test {
@@ -847,4 +847,4 @@ void GTestFatalServerDestructionClosureMeta(
 } // namespace test
 } // namespace test
 } // namespace fcgi
-} // namespace a_component
+} // namespace as_components

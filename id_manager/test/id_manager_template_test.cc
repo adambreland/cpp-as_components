@@ -177,7 +177,7 @@ void IdTracker::RegisterReleasedId(int id)
 
 TEST(IdManager, NewInstanceIsUsed)
 {
-  a_component::IdManager<int> id_manager {};
+  as_components::IdManager<int> id_manager {};
 
   EXPECT_EQ(id_manager.NumberOfUsedIds(), 0);
   EXPECT_FALSE(id_manager.IsUsed(-1));
@@ -188,7 +188,7 @@ TEST(IdManager, NewInstanceIsUsed)
 
 TEST(IdManager, NewInstanceMinimalUse)
 {
-  a_component::IdManager<int> id_manager {};
+  as_components::IdManager<int> id_manager {};
 
   int new_id {};
   ASSERT_NO_THROW(new_id = id_manager.GetId());
@@ -209,7 +209,7 @@ TEST(IdManager, NewInstanceUseAndEmpty)
 {
   std::vector<int> get_returns {};
   IdTracker id_tracker {};
-  a_component::IdManager<int> id_manager {};
+  as_components::IdManager<int> id_manager {};
 
   auto GTestFatalGetCheckRecord = [&get_returns, &id_tracker, &id_manager]
   (
@@ -274,7 +274,7 @@ TEST(IdManager, NewInstanceUseAndEmpty)
 
 // TEST(IdManager, MaxIdException)
 // {
-//   a_component::IdManager<int> id_manager {};
+//   as_components::IdManager<int> id_manager {};
 //   for(int i {0}; i < std::numeric_limits<int>::max(); ++i)
 //   {
 //     id_manager.GetId();
