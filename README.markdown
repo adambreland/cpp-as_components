@@ -1,11 +1,19 @@
 # `as_components` A Linux C++ library for the development and testing of concurrent FastCGI application servers.
 
+## News and status
+**Version: pre-release.**
+
+Testing of `as_components` is currently underway before its initial release.
+This includes synchronization testing of `fcgi::FcgiServerInterface`.
+
+## Introduction
+
 The `as_components` namespace includes the `fcgi` namespace. It also includes
 namespaces for the separately-useful components which were developed for
 `fcgi`. Brief descriptions of these namespaces and their main constituent
 classes follow. See the class header files for more information.
 
-## `fcgi`
+## Namespace `fcgi`
 The classes of namespace `fcgi` provide components for the development and
 testing of FastCGI application servers.
 
@@ -16,7 +24,7 @@ implementation of the FastCGI protocol for application servers. This
 implementation is designed to facilitate the development of multithreaded
 application servers.
 
-FastCGI requests are represented as `FcgiRequest` objects. `FcgiRequest`
+FastCGI requests are represented as `FcgiRequest` instances. `FcgiRequest`
 instances are constructed by `FcgiServerInterface` as it accepts FastCGI data.
 `FcgiRequest` provides a high-level interface to FastCGI response actions such
 as writing to the `FCGI_STDOUT` stream and completing a request. This interface
@@ -43,7 +51,7 @@ protocol! It facilitates the development of unit tests for FastCGI application
 servers by providing a high-level interface to the FastCGI request-response
 cycle. It also handles and exposes invalid FastCGI response records.
 
-## `id_manager`
+## Namespace `id_manager`
 The FastCGI protocol identifies a request based on the socket connection over
 which the request was sent and an integral request identifier. For typical
 requests, the request identifier is a small integer greater than zero. The
@@ -66,7 +74,7 @@ deemed to be important as the primary client of `IdManager` is
 require keeping track of both a large number of concurrent requests for a given
 connection and a large number of concurrent connections.
 
-## `socket_functions`
+## Namespace `socket_functions`
 Utility functions for socket I/O.
 
 Features:
@@ -76,7 +84,7 @@ Features:
   and descriptor monitoring for write readiness. This is available for both
   regular and gather writes.
 
-## `testing`
+## Namespace `testing`
 Namespace `testing` collects a small number of testing modules which are useful
 for testing several modules of `as_components`. `testing` also contains the
 `gtest` namespace. This namespace contains the testing modules of `testing`

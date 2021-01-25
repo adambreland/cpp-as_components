@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2021 Adam J. Breland
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include "server_interface_combined.h"
 
 #include <arpa/inet.h>
@@ -39,83 +61,81 @@ namespace as_components {
 namespace fcgi {
 namespace test {
 
+// ConstructionExceptionsAndDirectlyObservableEffects
+// Examined properties:
+// (Let "positive" mean an exception was thrown.)
+// Properties which should cause a throw during construction:
+// ("true positive" or "false negative" determination: EXPECT_THROW)
+// 1) Invalid socket properties:
+//    a) listening_descriptor does not refer to a socket.
+//    b) The socket type is not SOCK_STREAM.
+//    c) The socket is not listening.
+// 2) Invalid properties related to FCGI_WEB_SERVER_ADDRS.
+//    a) FCGI_WEB_SERVER_ADDRS is bound and non-empty, the domain of the
+//       socket is an internet domain, and no valid internet addresses are
+//       present after the value of FCGI_WEB_SERVER_ADDRS was processed as
+//       a comma-separated list of the appropriate internet addresses.
+// 3) Invalid value of max_connections: less than zero, zero.
+// 4) Invalid value of max_requests: less than zero, zero.
+// 5) Singleton violation: an interface is present and a call to construct
+//    another interface is made.
+//
+// Properties which should not cause a throw:
+// ("false positive" or "true negative" determination: EXPECT_NO_THROW)
+// 1) Maximum value of max_connections.
+// 2) Maximum value of max_requests.
+// 3) A non-default value for app_status_on_abort.
+// 4) An internet domain socket which either has FCGI_WEB_SERVER_ADDRS
+//    unbound or bound and empty.
+// 5) A Unix domain socket:
+//    a) Where FCGI_WEB_SERVER_ADDRS is unbound.
+//    b) Where FCGI_WEB_SERVER_ADDRS is bound to i-nternet addresses.
+//
+// Additional properties for valid cases:
+// 1) Non-blocking status of file description after use for interface
+//    construction.
+// 2) Initial value returned by connection_count: zero.
+// 3) Initial value returned by get_overload: false.
+// 4) Initial value returned by interface_status: true.
+// 5) Action of set_overload: After the call set_overload(true), a call to
+//    get_overload should return true.
+//
+// Test cases:
+// Throw expected:
+//  1) listening_descriptor refers to a file which is not a socket.
+//  2) listening_descriptor refers to a datagram socket (SOCK_DGRAM).
+//  3) listening_descriotor refers to a socket which not set to the listening
+//     state.
+//  4) The socket is of domain AF_INET and only IPv6 addresses are present.
+//  5) The socket is of domain AF_INET6 and only IPv4 addresses are present.
+//  6) The socket is of domain AF_INET and a combination of invalid IPv4
+//     addresses and valid IPv6 addresses are present. "Invalid" means
+//     malformed.
+//  7) The socket is of domain AF_INET and only a comma is present.
+//  8) max_connections == -1.
+//  9) max_connections == 0.
+// 10) max_requests == -1.
+// 11) max_requests == 0.
+// 12) An interface already exists and another call to the constructor is
+//     made. The arguments to the second call are the same as the first.
+//
+// Throw not expected:
+// 13) FCGI_WEB_SERVER_ADDRS is unbound. The descriptor is a valid socket.
+// 14) FCGI_WEB_SERVER_ADDRS is bound and empty. The descriptor is a valid
+//     socket.
+// 15) max_connections == std::numeric_limits<int>::max() &&
+//     max_requests    == std::numeric_limits<int>::max()
+//     Also, a non-default value is provided for app_status_on_abort.
+// 16) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is unbound.
+// 17) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is bound and has
+//     IPv4 address 127.0.0.1.
+//
+// Modules which testing depends on:
+// 1) GTestNonFatalSingleProcessInterfaceAndClients
+//
+// Other modules whose testing depends on this module: none.
 TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
 {
-  // Testing explanation
-  // Examined properties:
-  // (Let "positive" mean an exception was thrown.)
-  // Properties which should cause a throw during construction:
-  // ("true positive" or "false negative" determination: EXPECT_THROW)
-  // 1) Invalid socket properties:
-  //    a) listening_descriptor does not refer to a socket.
-  //    b) The socket type is not SOCK_STREAM.
-  //    c) The socket is not listening.
-  // 2) Invalid properties related to FCGI_WEB_SERVER_ADDRS.
-  //    a) FCGI_WEB_SERVER_ADDRS is bound and non-empty, the domain of the
-  //       socket is an internet domain, and no valid internet addresses are
-  //       present after the value of FCGI_WEB_SERVER_ADDRS was processed as
-  //       a comma-separated list of the appropriate internet addresses.
-  // 3) Invalid value of max_connections: less than zero, zero.
-  // 4) Invalid value of max_requests: less than zero, zero.
-  // 5) Singleton violation: an interface is present and a call to construct
-  //    another interface is made.
-  // 
-  // Properties which should not cause a throw:
-  // ("false positive" or "true negative" determination: EXPECT_NO_THROW)
-  // 1) Maximum value of max_connections.
-  // 2) Maximum value of max_requests.
-  // 3) A non-default value for app_status_on_abort.
-  // 4) An internet domain socket which either has FCGI_WEB_SERVER_ADDRS
-  //    unbound or bound and empty.
-  // 5) A Unix domain socket:
-  //    a) Where FCGI_WEB_SERVER_ADDRS is unbound.
-  //    b) Where FCGI_WEB_SERVER_ADDRS is bound to i-nternet addresses.
-  //
-  // Additional properties for valid cases:
-  // 1) Non-blocking status of file description after use for interface
-  //    construction.
-  // 2) Initial value returned by connection_count: zero.
-  // 3) Initial value returned by get_overload: false.
-  // 4) Initial value returned by interface_status: true.
-  // 5) Action of set_overload: After the call set_overload(true), a call to
-  //    get_overload should return true.
-  //
-  // Test cases:
-  // Throw expected:
-  //  1) listening_descriptor refers to a file which is not a socket.
-  //  2) listening_descriptor refers to a datagram socket (SOCK_DGRAM).
-  //  3) listening_descriotor refers to a socket which not set to the listening
-  //     state.
-  //  4) The socket is of domain AF_INET and only IPv6 addresses are present.
-  //  5) The socket is of domain AF_INET6 and only IPv4 addresses are present.
-  //  6) The socket is of domain AF_INET and a combination of invalid IPv4
-  //     addresses and valid IPv6 addresses are present. "Invalid" means
-  //     malformed.
-  //  7) The socket is of domain AF_INET and only a comma is present.
-  //  8) max_connections == -1.
-  //  9) max_connections == 0.
-  // 10) max_requests == -1.
-  // 11) max_requests == 0. 
-  // 12) An interface already exists and another call to the constructor is
-  //     made. The arguments to the second call are the same as the first.
-  //
-  // Throw not expected:
-  // 13) FCGI_WEB_SERVER_ADDRS is unbound. The descriptor is a valid socket.
-  // 14) FCGI_WEB_SERVER_ADDRS is bound and empty. The descriptor is a valid
-  //     socket.
-  // 15) max_connections == std::numeric_limits<int>::max() &&
-  //     max_requests    == std::numeric_limits<int>::max()
-  //     Also, a non-default value is provided for app_status_on_abort.
-  // 16) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is unbound.
-  // 17) A Unix-domain socket is used. FCGI_WEB_SERVER_ADDRS is bound and has
-  //     IPv4 address 127.0.0.1.
-  //
-  // Modules which testing depends on:
-  // 1) GTestNonFatalSingleProcessInterfaceAndClients
-  //
-  // Other modules whose testing depends on this module: none.
-
-  // Leak checker
   testing::FileDescriptorLeakChecker fdlc {};
 
   auto GTestFatalClearFcgiWebServerAddrs = [](int invocation_line)->void
@@ -497,59 +517,58 @@ TEST(FcgiServerInterface, ConstructionExceptionsAndDirectlyObservableEffects)
     "ConstructionExceptionsAndDirectlyObservableEffects", __LINE__);
 }
 
+// FcgiGetValues
+//    The FastCGI protocol requires applications to respond to
+// FCGI_GET_VALUES management requests. Such a request includes a collection
+// of name-value pairs which are encoded in the FastCGI name-value pair
+// encoding. The values of these names are empty. Three names are defined by
+// the protocol: FCGI_MAX_CONNS, FCGI_MAX_REQUESTS, and FCGI_MPXS_CONNS. Any
+// name that is included in a request which is not understood by the
+// application should be omitted in the application's response.
+//    FCGI_GET_VALUES will usually occur immediately after a connection is
+// made. This test examines the behavior of the interface in that situation.
+//
+// Examined properties:
+// 1) Presence of unknown names.
+// 2) Position of unknown names in the FastCGI name-value pair byte sequence.
+//    a) In the beginning.
+//    b) In the middle with a known name after an unknown name.
+// 3) Unknown name which requires four bytes to be encoded in the FastCGI
+//    name-value pair encoding.
+// 4) Subsets of the known names.
+// 5) An empty request.
+// 6) Presence of an empty name.
+// 7) An erroneous request body.
+//
+// Test cases: All cases use an interface which accepts a single request
+// and a single connection at a time.
+// 1) An empty request.
+// 2) Only known names. All three known names.
+// 3) Only known names. A single known name. The three variations given that
+//    there are three known names.
+// 4) Unknown name present. A single-byte unknown name in the first position.
+//    All three known names follow. Then an empty name.
+// 5) Unknown name present. A four-byte unknown name in the first position.
+//    All three known names follow.
+// 6) Unknown name present. A known name, then a single-byte unknown name,
+//    then a known name.
+// 7) Unknown name present. A known name, then a four-byte unknown name, then
+//    a known name.
+// 8) All unknown names.
+// 9) A request with a known name and a terminal name-value pair encoding
+//    error where more bytes are specified than are actually present.
+//
+// Modules which testing depends on:
+// 1) EncodeNameValuePairs
+// 2) ExtractBinaryNameValuePairs
+// 3) PopulateHeader
+// 4) as_components::socket_functions::ScatterGatherSocketWrite
+// 5) as_components::socket_functions::SocketRead
+// 6) GTestNonFatalSingleProcessInterfaceAndClients
+//
+// Other modules whose testing depends on this module: none.
 TEST(FcgiServerInterface, FcgiGetValues)
 {
-  // Testing explanation
-  //    The FastCGI protocol requires applications to respond to
-  // FCGI_GET_VALUES management requests. Such a request includes a collection
-  // of name-value pairs which are encoded in the FastCGI name-value pair
-  // encoding. The values of these names are empty. Three names are defined by
-  // the protocol: FCGI_MAX_CONNS, FCGI_MAX_REQUESTS, and FCGI_MPXS_CONNS. Any
-  // name that is included in a request which is not understood by the
-  // application should be omitted in the application's response.
-  //    FCGI_GET_VALUES will usually occur immediately after a connection is
-  // made. This test examines the behavior of the interface in that situation.
-  //
-  // Examined properties:
-  // 1) Presence of unknown names.
-  // 2) Position of unknown names in the FastCGI name-value pair byte sequence.
-  //    a) In the beginning.
-  //    b) In the middle with a known name after an unknown name.
-  // 3) Unknown name which requires four bytes to be encoded in the FastCGI
-  //    name-value pair encoding.
-  // 4) Subsets of the known names.
-  // 5) An empty request.
-  // 6) Presence of an empty name.
-  // 7) An erroneous request body.
-  //
-  // Test cases: All cases use an interface which accepts a single request
-  // and a single connection at a time.
-  // 1) An empty request.
-  // 2) Only known names. All three known names.
-  // 3) Only known names. A single known name. The three variations given that
-  //    there are three known names.
-  // 4) Unknown name present. A single-byte unknown name in the first position.
-  //    All three known names follow. Then an empty name.
-  // 5) Unknown name present. A four-byte unknown name in the first position.
-  //    All three known names follow.
-  // 6) Unknown name present. A known name, then a single-byte unknown name,
-  //    then a known name.
-  // 7) Unknown name present. A known name, then a four-byte unknown name, then
-  //    a known name.
-  // 8) All unknown names.
-  // 9) A request with a known name and a terminal name-value pair encoding
-  //    error where more bytes are specified than are actually present.
-  // 
-  // Modules which testing depends on:
-  // 1) EncodeNameValuePairs
-  // 2) ExtractBinaryNameValuePairs
-  // 3) PopulateHeader
-  // 4) as_components::socket_functions::ScatterGatherSocketWrite
-  // 5) as_components::socket_functions::SocketRead
-  // 6) GTestNonFatalSingleProcessInterfaceAndClients
-  //
-  // Other modules whose testing depends on this module: none.
-
   testing::FileDescriptorLeakChecker fdlc {};
 
   // Ensure that SIGALRM has its default disposition.
@@ -877,38 +896,37 @@ TEST(FcgiServerInterface, FcgiGetValues)
     "FcgiGetValues", __LINE__);
 }
 
+// UnknownManagementRequests
+// This test examines the behavior of a new interface to unknown management
+// requests.
+//
+// Examined properties:
+// 1) The type of the management request is not FCGI_GET_VALUES and either
+//    is one of the defined types or not.
+// 2) The unknown management request has content or not.
+// 3) The alignment of the request is on an 8-byte boundary or not.
+// 4) The presence or absence of padding in the request.
+//
+// Test cases:
+// 1) The management request type is FCGI_STDIN. No content is present.
+// 2) The management request type has value 25. No content is present.
+// 3) The management request type has value 100. A body of bytes where
+//    each byte has value 1 when interpreted as std::uint8_t is present.
+//    The content is aligned on an 8-byte boundary.
+// 4) As in 3, but the content is not aligned on an 8-byte boundary and
+//    padding is used.
+// 5) As in 3, but content is not aligned on an 8-byte boundary and no
+//    padding is used.
+//
+// Modules which testing depends on:
+// 1) as_components::socket_functions::SocketRead
+// 2) as_components::socket_functions::SocketWrite
+// 3) PopulateHeader
+// 4) GTestNonFatalSingleProcessInterfaceAndClients
+//
+// Other modules whose testing depends on this module: none.
 TEST(FcgiServerInterface, UnknownManagementRequests)
 {
-  // Testing explanation
-  // This test examines the behavior of a new interface to unknown management
-  // requests.
-  //
-  // Examined properties:
-  // 1) The type of the management request is not FCGI_GET_VALUES and either
-  //    is one of the defined types or not.
-  // 2) The unknown management request has content or not.
-  // 3) The alignment of the request is on an 8-byte boundary or not.
-  // 4) The presence or absence of padding in the request.
-  //
-  // Test cases:
-  // 1) The management request type is FCGI_STDIN. No content is present.
-  // 2) The management request type has value 25. No content is present.
-  // 3) The management request type has value 100. A body of bytes where
-  //    each byte has value 1 when interpreted as std::uint8_t is present.
-  //    The content is aligned on an 8-byte boundary.
-  // 4) As in 3, but the content is not aligned on an 8-byte boundary and
-  //    padding is used.
-  // 5) As in 3, but content is not aligned on an 8-byte boundary and no
-  //    padding is used.
-  //
-  // Modules which testing depends on:
-  // 1) as_components::socket_functions::SocketRead
-  // 2) as_components::socket_functions::SocketWrite
-  // 3) PopulateHeader
-  // 4) GTestNonFatalSingleProcessInterfaceAndClients
-  // 
-  // Other modules whose testing depends on this module: none.
-
   testing::FileDescriptorLeakChecker fdlc {};
 
   auto UnknownManagementRecordTester = [](
@@ -1590,54 +1608,53 @@ RunTest()
 
 } // namespace
 
+// ConnectionAcceptanceAndRejection
+//    This test examines the behavior of a newly-created FcgiServerInterface
+// in relation to accepting and rejecting connections. No FastCGI requests
+// are made of the interfaces constructed in this test.
+//
+// Examined properties:
+// 1) Socket domain: AF_UNIX, AF_INET, and AF_INET6
+// 2) Rejection of connections in excess of the limit set by the
+//    max_connections constructor argument.
+// 3) Rejection of connections when the interface was put into an overloaded
+//    state.
+// 4) Rejection of connections based on the presence of the address of the
+//    client in the list of addresses given by FCGI_WEB_SERVER_ADDRS:
+//    Both AF_INET and AF_INET6.
+//
+// Test cases:
+// 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
+//    The second connection should be rejected.
+// 2) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+//    The second connection should be rejected.
+// 3) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+//    The second connection should be rejected.
+// 4) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
+//    The sixth connection should be rejected.
+// 5) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
+//    connection was made, and the interface was placed in an overloaded
+//    state. The second connection should be rejected.
+// 6) FCGI_WEB_SERVER_ADDRS contains the IPv4 loopback address 127.0.0.1.
+//    A client with address 127.0.0.1 attempts to make a connection and it
+//    succeeds. A client with address 127.0.0.2 attempts to make a connection
+//    and it fails.
+// 7) FCGI_WEB_SERVER_ADDRS contains the IPv6 loopback address fd00::1.
+//    A client with IPv6 loopback address ::1 tries to make a connection
+//    and it fails.
+//
+// Modules which testing depends on:
+// 1) as_components::socket_functions::SocketRead
+// 2) as_components::socker_functions::SocketWrite
+//
+// Modules whose testing depends on this module: none.
+//
+// Test side-effects relevant to other tests:
+// SIGPIPE will be ignored. The default disposition is restored at the end
+// of the test. Only non-fatal failures are used in the implementation
+// of TestCaseRunner to ensure that restoration takes place.
 TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
 {
-  // Testing explanation
-  //    This test examines the behavior of a newly-created FcgiServerInterface
-  // in relation to accepting and rejecting connections. No FastCGI requests
-  // are made of the interfaces constructed in this test.
-  //
-  // Examined properties:
-  // 1) Socket domain: AF_UNIX, AF_INET, and AF_INET6
-  // 2) Rejection of connections in excess of the limit set by the
-  //    max_connections constructor argument.
-  // 3) Rejection of connections when the interface was put into an overloaded
-  //    state.
-  // 4) Rejection of connections based on the presence of the address of the
-  //    client in the list of addresses given by FCGI_WEB_SERVER_ADDRS:
-  //    Both AF_INET and AF_INET6.
-  //
-  // Test cases:
-  // 1) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_UNIX.
-  //    The second connection should be rejected.
-  // 2) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
-  //    The second connection should be rejected.
-  // 3) max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
-  //    The second connection should be rejected.
-  // 4) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty. AF_INET.
-  //    The sixth connection should be rejected.
-  // 5) max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty, a previous
-  //    connection was made, and the interface was placed in an overloaded
-  //    state. The second connection should be rejected.
-  // 6) FCGI_WEB_SERVER_ADDRS contains the IPv4 loopback address 127.0.0.1. 
-  //    A client with address 127.0.0.1 attempts to make a connection and it
-  //    succeeds. A client with address 127.0.0.2 attempts to make a connection
-  //    and it fails.
-  // 7) FCGI_WEB_SERVER_ADDRS contains the IPv6 loopback address fd00::1.
-  //    A client with IPv6 loopback address ::1 tries to make a connection
-  //    and it fails.
-  // 
-  // Modules which testing depends on:
-  // 1) as_components::socket_functions::SocketRead
-  // 2) as_components::socker_functions::SocketWrite
-  //
-  // Modules whose testing depends on this module: none.
-  //
-  // Test side-effects relevant to other tests:
-  // SIGPIPE will be ignored. The default disposition is restored at the end
-  // of the test. Only non-fatal failures are used in the implementation
-  // of TestCaseRunner to ensure that restoration takes place.
-
   // Ensure that SIGALRM has its default disposition.
   ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGALRM,
     __LINE__));
@@ -1819,161 +1836,159 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
     __LINE__));
 }
 
+// FcgiRequestGeneration
+// Test space discussion:
+// Notions related to sequences of received records:
+// 1) Partial record receipt:
+//    a) FastCGI records must be transmitted as complete units. In the
+//       discussion of the concurrent transmission of FastCGI request data
+//       below, individual FastCGI records are the indivisible units of data
+//       whose transmission on a connection cannot be "interrupted" by the
+//       transmission of other data on that connection.
+//    b) A read operation on a connection may block. When blocking occurs,
+//       a record may be in an incomplete state. In this case, while the
+//       connection is blocked, the record remains in an incomplete or
+//       partially-received state.
+// 2) Interleaving of records can occur with respect to several record
+//    properties. For example, records on a single connection could be
+//    interleaved with respect to record type but not with respect to
+//    request identity.
+// 3) Record subsequences: Record receipt on a given connection defines a
+//    sequence of records S. We can imagine a subsequence T of records of
+//    sequence S where T is defined as the sequence of all records of S
+//    that possess a given property. For example, we can define the
+//    subsequence of records with a given request identity.
+//
+// Examined properties:
+// 1) Broadly, connection multiplexing: Will the interface correctly read
+//    FastCGI records when multiple clients are concurrently sending them?
+//    a) All records for one or more requests are received on a given
+//       connection before a read from the connection would block. In other
+//       words, requests are received as whole units across connections.
+//    b) Records for requests are interleaved in the sense that periods of
+//       read blocking interrupt record receipt for a request on a given
+//       connection and records are received on another connection during
+//       these periods.
+// 2) Broadly, request multiplexing: will the interface correctly read
+//    FastCGI records when records for multiple requests are being
+//    concurrently sent over the same connection?
+// 3) Intra-request record type order and interleaving: Will a request object
+//    be constructed correctly for each of the many variations in the record
+//    sequence which may be used to convey the data of the request? While the
+//    order of record receipt for a given record type is an invariant of
+//    correct record transmission, differences in the order of the
+//    transmission of records of different types and the potential for the
+//    interleaving of record types allows many possible variations in the
+//    record sequence which is used to transmit the data of a request.
+// 4) Stream record type data paritioning: The data associated with a stream
+//    record type can be arbitrarily partitioned between records provided
+//    that an empty record only occurs as the terminal record of the stream.
+// 5) Padding: Most records may have padding. Padding may be present
+//    regardless of whether the record is aligned on an 8-byte boundary or
+//    not.
+// 6) Partial request receipt: multiple cycles of data transmission and
+//    data processing are required to receive the request data in full.
+// 7) Partial record receipt and connection blocking when no other
+//    connections are ready for reading.
+// 8) The occurrence of partial record receipt when the connection of the
+//    record would block and another connection is ready.
+//
+// Test cases:
+// Single connection:
+// Note: Unless specified otherwise, the FCGI_KEEP_CONN flag is not set in
+// the FCGI_BEGIN_REQUEST record of a request.
+// 1) Minimal requests: No data is present for any of the streams.
+//    a) Role: Responder. FCGI_PARAMS and FCGI_STDIN are terminated with
+//       empty records. No record of type FCGI_DATA is sent.
+//    b) Role: Responder. As a, but the FCGI_KEEP_CONN flag is set.
+//    c) Role: Responder. A terminal FCGI_DATA record is sent before the
+//       request is completed given the special completion logic for the
+//       Responder role. Terminal FCGI_PARAMS and FCGI_STDIN records are then
+//       sent.
+//    d) Role: Responder. As a, but a terminal FCGI_DATA record which should
+//       be ignored is sent after the request is completed.
+//    e) Role: Authorizer. FCGI_PARAMS is terminated with an empty record.
+//       No other records are sent.
+//    f) Role: Authorizer. FCGI_STDIN is terminated before FCGI_PARAMS. Then
+//       a terminal FCGI_PARAMS records is sent.
+//    g) Role: Authorizer. FCGI_PARAMS is terminated with an empty record.
+//       Then a terminal FCGI_STDIN record which should be ignored is sent.
+//    h) Role: Filter. All three data streams are terminated with empty
+//       records. The FCGI_DATA record is sent after the other records.
+//       A request object should not be generated until it is received
+//       according to the specified request completion logic for FCGI_DATA.
+//    i) Role: Unknown: The role field has value 10. Otherwise as h.
+// 2) Partial request data receipt on a call of AcceptRequests.
+//    a) Role: Responder. No partial records. Several cycles of request data
+//       transmission by a client and data processing by the interface are
+//       to needed receive the request.
+//    b) Role: Responder. Partial records.
+// 3) Single request with varying record type orderings: Records of
+//    different types are not interleaved. Rather, the record type order is
+//    varied across requests.
+//    a) Role: Responder. Data is present for FCGI_PARAMS and absent for
+//       FCGI_STDIN. No record with type FCGI_DATA is sent. The FCGI_PARAMS
+//       records are sent first.
+//    b) As a, but the completing, empty FCGI_STDIN record is sent first.
+//    c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
+//       No records of type FCGI_DATA are sent. The records for FCGI_PARAMS
+//       are sent before those for FCGI_STDIN.
+//    d) As c, but arbitrary amounts of padding are present in the records
+//       of both streams.
+//    e) As c, but a different partitioning of the data among records is used
+//       for the streams.
+//    f) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
+//    g) Role: Filter. Data is present for all of the streams. Data is sent
+//       in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA. keep_conn is
+//       true.
+//    h) As g, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
+// 4) Single request with record type interleavings:
+//    a) Role: Responder. Data is present for FCGI_PARAMS and FCGI_STDIN.
+//       No records of type FCGI_DATA are sent. The records of FCGI_PARAMS
+//       and FCGI_STDIN are interleaved before the streams are completed.
+// 5) Multiple requests with record interleaving:
+//    a) A Responder request, an Authorizer request, and a Filter request are
+//       sent on the same connection. Records for the requests are
+//       interleaved arbitrarily. "Partial records" in the sense that data
+//       receipt is interrupted with periods where reading would block and
+//       the current record was not received in full are present. As multiple
+//       requests are present, keep_conn is true.
+//
+// Multiple connections:
+// 1) (No interleaving of request data receipt between connections;
+//    homogenous request type; single request on each connection.)
+//    Five connections. A Responder request is sent on each connection to the
+//    interface. Each request contains unique FCGI_PARAMS and FCGI_STDIN
+//    data. Activity is synchronized such that all data for the requests is
+//    sent to the interface before a call to AcceptRequests is made on the
+//    interface. This means that a request should be received in full for
+//    each connection before the interface moves on to the next connection.
+// 2) (No interleaving of request data receipt between connections; mixed
+//    request type; single request on each connection.)
+//    Five connections: A mix of Responder, Authorizer, and Filter requests
+//    are sent. A single request is sent on each connection. As in 1, the
+//    data for each request is sent in full before the interface begins
+//    processing the requests.
+// 3) (No interleaving of request data receipt between connections;
+//    homogenous request type; multiple requests on a connection.)
+//    Ten connections. Responder requests are sent on each connection. As in
+//    1, each request has unique FCGI_PARAMS and FCGI_STDIN data. However,
+//    for at least one of the connections, multiple requests are sent on the
+//    same connection. As in 1, all data for each request is sent before the
+//    interface begins processing data.
+// 4) (Interleaving of request data receipt between connections. Partial
+//    records. Mixed request types. Multiple requests on a connection.)
+//    Two connections. Multiple Responder requests are sent on one
+//    connections. A Filter request is sent on the other connection. Request
+//    data is sent with partial records. Multiple cylces of data
+//    transmission and data processing are required. Multiple Responder
+//    requests are sent on one of the connections.
+//
+// Modules which testing depends on:
+//
+// Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, FcgiRequestGeneration)
 {
-  // Testing explanation
-  //  
-  // Test space discussion:
-  // Notions related to sequences of received records:
-  // 1) Partial record receipt: 
-  //    a) FastCGI records must be transmitted as complete units. In the
-  //       discussion of the concurrent transmission of FastCGI request data
-  //       below, individual FastCGI records are the indivisible units of data
-  //       whose transmission on a connection cannot be "interrupted" by the
-  //       transmission of other data on that connection. 
-  //    b) A read operation on a connection may block. When blocking occurs,
-  //       a record may be in an incomplete state. In this case, while the
-  //       connection is blocked, the record remains in an incomplete or
-  //       partially-received state.
-  // 2) Interleaving of records can occur with respect to several record
-  //    properties. For example, records on a single connection could be
-  //    interleaved with respect to record type but not with respect to 
-  //    request identity.
-  // 3) Record subsequences: Record receipt on a given connection defines a
-  //    sequence of records S. We can imagine a subsequence T of records of
-  //    sequence S where T is defined as the sequence of all records of S
-  //    that possess a given property. For example, we can define the
-  //    subsequence of records with a given request identity.
-  //    
-  // Examined properties:
-  // 1) Broadly, connection multiplexing: Will the interface correctly read
-  //    FastCGI records when multiple clients are concurrently sending them?
-  //    a) All records for one or more requests are received on a given
-  //       connection before a read from the connection would block. In other
-  //       words, requests are received as whole units across connections.
-  //    b) Records for requests are interleaved in the sense that periods of
-  //       read blocking interrupt record receipt for a request on a given
-  //       connection and records are received on another connection during
-  //       these periods.
-  // 2) Broadly, request multiplexing: will the interface correctly read
-  //    FastCGI records when records for multiple requests are being 
-  //    concurrently sent over the same connection?
-  // 3) Intra-request record type order and interleaving: Will a request object
-  //    be constructed correctly for each of the many variations in the record
-  //    sequence which may be used to convey the data of the request? While the
-  //    order of record receipt for a given record type is an invariant of 
-  //    correct record transmission, differences in the order of the
-  //    transmission of records of different types and the potential for the
-  //    interleaving of record types allows many possible variations in the
-  //    record sequence which is used to transmit the data of a request.
-  // 4) Stream record type data paritioning: The data associated with a stream
-  //    record type can be arbitrarily partitioned between records provided
-  //    that an empty record only occurs as the terminal record of the stream.
-  // 5) Padding: Most records may have padding. Padding may be present
-  //    regardless of whether the record is aligned on an 8-byte boundary or
-  //    not.
-  // 6) Partial request receipt: multiple cycles of data transmission and
-  //    data processing are required to receive the request data in full.
-  // 7) Partial record receipt and connection blocking when no other
-  //    connections are ready for reading.
-  // 8) The occurrence of partial record receipt when the connection of the
-  //    record would block and another connection is ready.
-  //
-  // Test cases:
-  // Single connection:
-  // Note: Unless specified otherwise, the FCGI_KEEP_CONN flag is not set in
-  // the FCGI_BEGIN_REQUEST record of a request. 
-  // 1) Minimal requests: No data is present for any of the streams.
-  //    a) Role: Responder. FCGI_PARAMS and FCGI_STDIN are terminated with
-  //       empty records. No record of type FCGI_DATA is sent.
-  //    b) Role: Responder. As a, but the FCGI_KEEP_CONN flag is set.
-  //    c) Role: Responder. A terminal FCGI_DATA record is sent before the
-  //       request is completed given the special completion logic for the
-  //       Responder role. Terminal FCGI_PARAMS and FCGI_STDIN records are then
-  //       sent.
-  //    d) Role: Responder. As a, but a terminal FCGI_DATA record which should
-  //       be ignored is sent after the request is completed.
-  //    e) Role: Authorizer. FCGI_PARAMS is terminated with an empty record.
-  //       No other records are sent.
-  //    f) Role: Authorizer. FCGI_STDIN is terminated before FCGI_PARAMS. Then
-  //       a terminal FCGI_PARAMS records is sent.
-  //    g) Role: Authorizer. FCGI_PARAMS is terminated with an empty record.
-  //       Then a terminal FCGI_STDIN record which should be ignored is sent.
-  //    h) Role: Filter. All three data streams are terminated with empty
-  //       records. The FCGI_DATA record is sent after the other records.
-  //       A request object should not be generated until it is received
-  //       according to the specified request completion logic for FCGI_DATA.
-  //    i) Role: Unknown: The role field has value 10. Otherwise as h.
-  // 2) Partial request data receipt on a call of AcceptRequests. 
-  //    a) Role: Responder. No partial records. Several cycles of request data
-  //       transmission by a client and data processing by the interface are
-  //       to needed receive the request.
-  //    b) Role: Responder. Partial records.
-  // 3) Single request with varying record type orderings: Records of
-  //    different types are not interleaved. Rather, the record type order is
-  //    varied across requests.
-  //    a) Role: Responder. Data is present for FCGI_PARAMS and absent for
-  //       FCGI_STDIN. No record with type FCGI_DATA is sent. The FCGI_PARAMS
-  //       records are sent first.
-  //    b) As a, but the completing, empty FCGI_STDIN record is sent first.
-  //    c) Role: Responder. Data is present for both FCGI_PARAMS and FCGI_STDIN.
-  //       No records of type FCGI_DATA are sent. The records for FCGI_PARAMS
-  //       are sent before those for FCGI_STDIN.
-  //    d) As c, but arbitrary amounts of padding are present in the records
-  //       of both streams.
-  //    e) As c, but a different partitioning of the data among records is used
-  //       for the streams.
-  //    f) As c, but the order of FCGI_PARAMS and FCGI_STDIN is switched.
-  //    g) Role: Filter. Data is present for all of the streams. Data is sent
-  //       in the order: FCGI_PARAMS, FCGI_STDIN, and FCGI_DATA. keep_conn is 
-  //       true.
-  //    h) As g, but the order is: FCGI_DATA, FCGI_PARAMS, FCGI_STDIN.
-  // 4) Single request with record type interleavings:
-  //    a) Role: Responder. Data is present for FCGI_PARAMS and FCGI_STDIN.
-  //       No records of type FCGI_DATA are sent. The records of FCGI_PARAMS
-  //       and FCGI_STDIN are interleaved before the streams are completed.
-  // 5) Multiple requests with record interleaving:
-  //    a) A Responder request, an Authorizer request, and a Filter request are
-  //       sent on the same connection. Records for the requests are
-  //       interleaved arbitrarily. "Partial records" in the sense that data
-  //       receipt is interrupted with periods where reading would block and
-  //       the current record was not received in full are present. As multiple
-  //       requests are present, keep_conn is true.
-  //
-  // Multiple connections:
-  // 1) (No interleaving of request data receipt between connections; 
-  //    homogenous request type; single request on each connection.) 
-  //    Five connections. A Responder request is sent on each connection to the
-  //    interface. Each request contains unique FCGI_PARAMS and FCGI_STDIN
-  //    data. Activity is synchronized such that all data for the requests is
-  //    sent to the interface before a call to AcceptRequests is made on the
-  //    interface. This means that a request should be received in full for
-  //    each connection before the interface moves on to the next connection.
-  // 2) (No interleaving of request data receipt between connections; mixed
-  //    request type; single request on each connection.) 
-  //    Five connections: A mix of Responder, Authorizer, and Filter requests
-  //    are sent. A single request is sent on each connection. As in 1, the
-  //    data for each request is sent in full before the interface begins
-  //    processing the requests.
-  // 3) (No interleaving of request data receipt between connections; 
-  //    homogenous request type; multiple requests on a connection.)
-  //    Ten connections. Responder requests are sent on each connection. As in
-  //    1, each request has unique FCGI_PARAMS and FCGI_STDIN data. However,
-  //    for at least one of the connections, multiple requests are sent on the
-  //    same connection. As in 1, all data for each request is sent before the
-  //    interface begins processing data.
-  // 4) (Interleaving of request data receipt between connections. Partial
-  //    records. Mixed request types. Multiple requests on a connection.)
-  //    Two connections. Multiple Responder requests are sent on one 
-  //    connections. A Filter request is sent on the other connection. Request
-  //    data is sent with partial records. Multiple cylces of data
-  //    transmission and data processing are required. Multiple Responder
-  //    requests are sent on one of the connections.
-  //
-  // Modules which testing depends on:
-  //
-  // Other modules whose testing depends on this module:
-
   // Type aliases, user-defined types, and lambda functions for general use
   // and the first case.
   using map_type = std::map<std::vector<std::uint8_t>, 
@@ -4291,69 +4306,68 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
     __LINE__));
 }
 
+// RequestAcceptanceAndRejection
+// Examined properties:
+// 1) Request limit (value of max_requests passed to the interface
+//    constructor): 1 or greater than 1.
+// 2) Presence of previous connections when the interface is placed into an
+//    overloaded state: requests are present or not.
+// 3) Incomplete requests vs. requests for which an FcgiRequest object
+//    has been produced.
+// 4) Multiple connections and separate request tallies.
+// 5) Request number tracking as requests are sent and completed.
+//
+// Test Cases:
+// Single connection:
+// 1) max_connections == 1, max_requests == 1. A single request has been
+//    received in full. A new application request should be rejected with:
+//    protocol_status == FCGI_CANT_MPX_CONN and
+//    application_status == EXIT_FAILURE. A management request should
+//    receive an appropriate response.
+// 2) As 1, but the previous request has not been received in full.
+// 3) As 2, but the interface was put into an overloaded state before the
+//    FCGI_BEGIN_REQUEST record of the request was received. The
+//    protocol_status of the FCGI_END_REQUEST record sent in response should
+//    be equal to FCGI_CANT_MPX_CONN as this status can apply. The
+//    application_status of the response should be EXIT_FAILURE. Data for
+//    the partially-received request should be accepted.
+// 4) max_connection == 1, max_requests == 1. The interface is put into an
+//    overloaded state. No requests have been received. A request should be
+//    rejected with protocol_status == FCGI_OVERLOADED and
+//    application_status == EXIT_FAILURE. A management request should be
+//    handled normally.
+//
+// Multiple connections:
+//    The protcol_status in all cases should be FCGI_OVERLOADED.
+//    The application_status in all cases should be EXIT_FAILURE.
+// 5) max_connections == 10, max_requests = 5. Two connections are present.
+//    One connection has received no requests. The other connection has
+//    received 5 requests in full. A request sent to the connection at the
+//    request limit should be rejected. A request sent to the connection
+//    without requests should be accepted. A management request sent to the
+//    connection at the request limit should be handled normally.
+// 6) As 6, but the connection at the request limit has a combination of
+//    partially-received requests and fully-received requests.
+// 7) As 7, but the interface is placed into an overloaded state. New
+//    requests on both connections should be rejected. Management requests
+//    on both connections should be handled normally. Data for partially-
+//    received requests should be accepted.
+// 8) max_connections == 10, max_requests = 5. Two connections are present.
+//    Neither connection has received requests. The interface is placed into
+//    an overloaded state. New requests on either connection should be
+//    rejected. Management requests should be handled normally.
+//
+// Request number tracking:
+// 9) max_connections = 10, max_requests = 2. One connection is idle.
+//    Another connections receives two requests. A third request should then
+//    be rejected. One of the two requests is completed. A fourth request
+//    should then be accepted.
+//
+// Modules which testing depends on:
+//
+// Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
 {
-  // Testing explanation
-  // Examined properties:
-  // 1) Request limit (value of max_requests passed to the interface
-  //    constructor): 1 or greater than 1.
-  // 2) Presence of previous connections when the interface is placed into an
-  //    overloaded state: requests are present or not.
-  // 3) Incomplete requests vs. requests for which an FcgiRequest object
-  //    has been produced.
-  // 4) Multiple connections and separate request tallies.
-  // 5) Request number tracking as requests are sent and completed.
-  //
-  // Test Cases:
-  // Single connection:
-  // 1) max_connections == 1, max_requests == 1. A single request has been
-  //    received in full. A new application request should be rejected with:
-  //    protocol_status == FCGI_CANT_MPX_CONN and 
-  //    application_status == EXIT_FAILURE. A management request should
-  //    receive an appropriate response.
-  // 2) As 1, but the previous request has not been received in full.
-  // 3) As 2, but the interface was put into an overloaded state before the
-  //    FCGI_BEGIN_REQUEST record of the request was received. The
-  //    protocol_status of the FCGI_END_REQUEST record sent in response should
-  //    be equal to FCGI_CANT_MPX_CONN as this status can apply. The 
-  //    application_status of the response should be EXIT_FAILURE. Data for
-  //    the partially-received request should be accepted.
-  // 4) max_connection == 1, max_requests == 1. The interface is put into an
-  //    overloaded state. No requests have been received. A request should be
-  //    rejected with protocol_status == FCGI_OVERLOADED and 
-  //    application_status == EXIT_FAILURE. A management request should be 
-  //    handled normally.
-  //
-  // Multiple connections:
-  //    The protcol_status in all cases should be FCGI_OVERLOADED. 
-  //    The application_status in all cases should be EXIT_FAILURE.
-  // 5) max_connections == 10, max_requests = 5. Two connections are present.
-  //    One connection has received no requests. The other connection has
-  //    received 5 requests in full. A request sent to the connection at the
-  //    request limit should be rejected. A request sent to the connection
-  //    without requests should be accepted. A management request sent to the
-  //    connection at the request limit should be handled normally.
-  // 6) As 6, but the connection at the request limit has a combination of
-  //    partially-received requests and fully-received requests.
-  // 7) As 7, but the interface is placed into an overloaded state. New
-  //    requests on both connections should be rejected. Management requests
-  //    on both connections should be handled normally. Data for partially-
-  //    received requests should be accepted.
-  // 8) max_connections == 10, max_requests = 5. Two connections are present.
-  //    Neither connection has received requests. The interface is placed into
-  //    an overloaded state. New requests on either connection should be
-  //    rejected. Management requests should be handled normally.
-  //
-  // Request number tracking:
-  // 9) max_connections = 10, max_requests = 2. One connection is idle.
-  //    Another connections receives two requests. A third request should then
-  //    be rejected. One of the two requests is completed. A fourth request
-  //    should then be accepted.
-  //
-  // Modules which testing depends on:
-  //
-  // Other modules whose testing depends on this module:
-
   ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
     __LINE__));
 
@@ -4368,135 +4382,135 @@ TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
     __LINE__));
 }
 
+// ConnectionClosureAndAbortRequests
+// Examined properties:
+// 1) Proper behavior when it is discovered that a client closed a
+//    connection. After reacting to the closure:
+//    a) The value returned by a call to connection_count should be one less
+//       than the value returned by an immediately-preceding call.
+//    b) If the interface was at its connection limit, a new connection
+//       should be accepted.
+//    c) FcgiRequest objects should be updated appropriately.
+//       1) A call to AbortStatus should return true.
+//       2) Calls to Complete, RejectRole, Write, and WriteError should
+//          return false.
+//       3) A call to get_completion should return true.
+// 2) Proper behavior reacting to connection closure by a client when the
+//    interface is in an overloaded state.
+// 3) Proper behavior when a request is completed.
+//    a) The completion of a request whose FCGI_BEGIN_REQUEST record did not
+//       have its FCGI_KEEP_CONN flag set should cause the interface to close
+//       the connection when the request is completed. In this case:
+//       1) A call to connection_count should return the appropriate number.
+//       2) If the interface was at its connection limit, a new connection
+//          should be accepted.
+//       3) If other FCGIRequest objects are present, their state should be
+//          updated to reflect connection closure.
+//           a) A call to AbortStatus should return true.
+//           b) Calls to Complete, RejectRole, Write, and WriteError should
+//              return false.
+// 4) Proper behavior reacting to request completion in an overloaded state.
+// 5) Proper behavior reacting to FCGI_ABORT_REQUEST records.
+//    a) If a partially-received request had the FCGI_KEEP_CONN flag set in
+//       its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST record
+//       was received for the request, then:
+//       1) The request should be removed from the interface. An observation
+//          of this change, such as the acceptance of a request when others
+//          were previously rejected due to the connection being at its
+//          request limit, should be made.
+//       2) An FCGI_END_REQUEST record should be sent by the interface to the
+//          client. The application status of the record should be that given
+//          by the value of app_status_on_abort when the interface was
+//          constructed.
+//    b) If a partially-received request did not have the FCGI_KEEP_CONN
+//       flag set in its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST
+//       record was received for the request, then the connection should be
+//       closed. In this case:
+//       1) An FCGI_END_REQUEST record should be sent to the client before
+//          connection closure. The application status of the record should
+//          be that given by the value of app_status_on_abort when the
+//          interface was constructed.
+//    c) If a request was completely received and an FCGI_ABORT_STATUS record
+//       was received for the request, the state of the FcgiRequest object
+//       for the request should be appropriately updated.
+//       1) A call to AbortStatus should return true.
+//       2) Calls to Complete, RejectRole, Write, and WriteError should
+//          function as normal.
+//       3) A call to get_completion should return false.
+//
+// Test cases:
+//
+// Modules which testing depends on:
+//
+// Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)
 {
-  // Testing explanation
-  // Examined properties:
-  // 1) Proper behavior when it is discovered that a client closed a
-  //    connection. After reacting to the closure:
-  //    a) The value returned by a call to connection_count should be one less
-  //       than the value returned by an immediately-preceding call.
-  //    b) If the interface was at its connection limit, a new connection
-  //       should be accepted.
-  //    c) FcgiRequest objects should be updated appropriately.
-  //       1) A call to AbortStatus should return true. 
-  //       2) Calls to Complete, RejectRole, Write, and WriteError should
-  //          return false.
-  //       3) A call to get_completion should return true.
-  // 2) Proper behavior reacting to connection closure by a client when the
-  //    interface is in an overloaded state.
-  // 3) Proper behavior when a request is completed.
-  //    a) The completion of a request whose FCGI_BEGIN_REQUEST record did not
-  //       have its FCGI_KEEP_CONN flag set should cause the interface to close
-  //       the connection when the request is completed. In this case:
-  //       1) A call to connection_count should return the appropriate number.
-  //       2) If the interface was at its connection limit, a new connection
-  //          should be accepted.
-  //       3) If other FCGIRequest objects are present, their state should be
-  //          updated to reflect connection closure.
-  //           a) A call to AbortStatus should return true. 
-  //           b) Calls to Complete, RejectRole, Write, and WriteError should
-  //              return false.
-  // 4) Proper behavior reacting to request completion in an overloaded state.
-  // 5) Proper behavior reacting to FCGI_ABORT_REQUEST records.
-  //    a) If a partially-received request had the FCGI_KEEP_CONN flag set in
-  //       its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST record
-  //       was received for the request, then:
-  //       1) The request should be removed from the interface. An observation
-  //          of this change, such as the acceptance of a request when others
-  //          were previously rejected due to the connection being at its
-  //          request limit, should be made.
-  //       2) An FCGI_END_REQUEST record should be sent by the interface to the
-  //          client. The application status of the record should be that given
-  //          by the value of app_status_on_abort when the interface was
-  //          constructed.
-  //    b) If a partially-received request did not have the FCGI_KEEP_CONN
-  //       flag set in its FCGI_BEGIN_REQUEST record and an FCGI_ABORT_REQUEST
-  //       record was received for the request, then the connection should be
-  //       closed. In this case:
-  //       1) An FCGI_END_REQUEST record should be sent to the client before
-  //          connection closure. The application status of the record should
-  //          be that given by the value of app_status_on_abort when the 
-  //          interface was constructed.
-  //    c) If a request was completely received and an FCGI_ABORT_STATUS record
-  //       was received for the request, the state of the FcgiRequest object
-  //       for the request should be appropriately updated.
-  //       1) A call to AbortStatus should return true.
-  //       2) Calls to Complete, RejectRole, Write, and WriteError should
-  //          function as normal.
-  //       3) A call to get_completion should return false.
-  //
-  // Test cases:
-  // 
-  // Modules which testing depends on:
-  //
-  // Other modules whose testing depends on this module:
-
-
+  
 }
 
+// FcgiRequestDataTransmissionAndCompletion
+// Examined properties:
+// 1) Behavior of Complete and RejectRole in several cases:
+//    a) When no data has been sent with an output function.
+//    b) When data has been sent by calls to Write and WriteError.
+//    c) The occurrence of one or more than one call to Write and
+//       WriteError.
+//    Behavior of the FcgiRequest object and interface pair includes:
+//    a) The transmission of terminal records for FCGI_STDIN and FCGI_STDOUT.
+//    b) The transmission of an FCGI_END_REQUEST record with the
+//       provided value of app_status and the specified value for the
+//       protocol status.
+//    c) Changes to interface state.
+//       1) The ConnectionClosureAndAbortRequests test examines connection
+//          closure related to request completion.
+//       2) The RequestAcceptanceAndRejection test examines updates to the
+//          request tally upon request completion by observing how the
+//          interface behaves relative to request acceptance or rejection
+//          when the request limit was reached for a connection and a request
+//          was completed on that connection.
+// 2) Behavior of output methods when multiple requests are present
+//    on the same connection and when multiple connections with requests
+//    are present. Does interleaving of method calls across request identity
+//    or connection identity affect the behavior of the calls?
+// 3) Behavior of non-output methods before request completion. In
+//    particular, AbortStatus.
+// 4) Behavior of FcgiRequest methods after the completion of the request
+//    by a call to Complete or RejectRole. This includes output methods and
+//    other methods.
+//
+// Test cases:
+//
+// Modules which testing depends on:
+//
+// Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, FcgiRequestDataTransmissionAndCompletion)
 {
-  // Testing explanation
-  // Examined properties:
-  // 1) Behavior of Complete and RejectRole in several cases:
-  //    a) When no data has been sent with an output function.
-  //    b) When data has been sent by calls to Write and WriteError.
-  //    c) The occurrence of one or more than one call to Write and
-  //       WriteError.
-  //    Behavior of the FcgiRequest object and interface pair includes:
-  //    a) The transmission of terminal records for FCGI_STDIN and FCGI_STDOUT.
-  //    b) The transmission of an FCGI_END_REQUEST record with the
-  //       provided value of app_status and the specified value for the
-  //       protocol status.
-  //    c) Changes to interface state. 
-  //       1) The ConnectionClosureAndAbortRequests test examines connection
-  //          closure related to request completion.
-  //       2) The RequestAcceptanceAndRejection test examines updates to the
-  //          request tally upon request completion by observing how the
-  //          interface behaves relative to request acceptance or rejection
-  //          when the request limit was reached for a connection and a request
-  //          was completed on that connection.
-  // 2) Behavior of output methods when multiple requests are present
-  //    on the same connection and when multiple connections with requests
-  //    are present. Does interleaving of method calls across request identity
-  //    or connection identity affect the behavior of the calls?
-  // 3) Behavior of non-output methods before request completion. In
-  //    particular, AbortStatus.
-  // 4) Behavior of FcgiRequest methods after the completion of the request
-  //    by a call to Complete or RejectRole. This includes output methods and
-  //    other methods.
-  //
-  // Test cases:
-  // 
-  // Modules which testing depends on:
-  //
-  // Other modules whose testing depends on this module:
-
-
+  
 }
 
+// FcgiServerInterfaceDestructionNotSynchronization
+// Testing explanation
+// Examined properties:
+// 1) Destruction of completed and uncompleted FcgiRequest objects followed
+//    by destruction of the interface.
+// 2) Destruction of the interface while completed and uncompleted
+//    FcgiRequest objects are present. Method calls on FcgiRequest objects
+//    should behave as specified.
+// 3) Creation of a new interface which creates new requests while completed
+//    and uncompleted requests from the previous interface are present.
+//    Method calls on all requests should function as specified. In
+//    particular, the clients which sent the new requests should be able to
+//    receive correct responses.
+//
+// Test cases:
+//
+//
+// Modules which testing depends on:
+//
+// Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
 {
-  // Testing explanation
-  // Examined properties:
-  // 1) Destruction of completed and uncompleted FcgiRequest objects followed
-  //    by destruction of the interface.
-  // 2) Destruction of the interface while completed and uncompleted
-  //    FcgiRequest objects are present. Method calls on FcgiRequest objects
-  //    should behave as specified.
-  // 3) Creation of a new interface which creates new requests while completed
-  //    and uncompleted requests from the previous interface are present.
-  //    Method calls on all requests should function as specified. In
-  //    particular, the clients which sent the new requests should be able to
-  //    receive correct responses.
-  //
-  // Test cases:
-  //    
-  // 
-  // Modules which testing depends on:
-  //
-  // Other modules whose testing depends on this module:
+
 }
 
 } // namespace test
