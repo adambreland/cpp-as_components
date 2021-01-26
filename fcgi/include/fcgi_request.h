@@ -23,11 +23,11 @@
 #ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_
 
-#include <sys/types.h>     // For ssize_t.
+#include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
-#include <cstdint>         // For uint8_t.
+#include <cstdint>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -41,46 +41,7 @@
 namespace as_components {
 namespace fcgi {
 
-// FcgiRequest objects are produced by an instance of FcgiServerInterface. 
-// A request object contains all of the information given to the interface by a
-// client for a FastCGI request. Requests are serviced by inspecting this 
-// information, writing to the FCGI_STDOUT and FCGI_STDERR streams with
-// calls to Write and WriteError, respectively, and completing the request by 
-// a call to Complete.
-//
-// Requests may be implicitly aborted in three cases: 
-// 1) The client sends an FCGI_ABORT_REQUEST record for the request.
-// 2) The client closes the connection of the request.
-// 3) The interface is forced to close the connection of the request.
-// AbortStatus allows the current abort status of a request to be inspected.
-//
-// When connection closure is detected from a call:
-// 1) Write, WriteError, and Complete return false. 
-// 2) AbortStatus returns true.
-// 3) The request is completed.
-//
-// Requests can be moved but not copied.
-//
-// Exceptions:
-// 1) Calls to AbortStatus, Complete, Write, and WriteError may throw
-//    exceptions derived from std::exception.
-// 2) In the event of a throw, it must be assumed that an underlying error
-//    prevents further servicing of the request. The request object should be
-//    destroyed.
-//
-// Synchronization:
-// 1) All calls on a particular request must be made in the same thread.
-// 2) Calls on distinct requests in separate threads do not require
-//    synchronization. This is true whether or not requests share
-//    underlying socket connections.
-// 3) An application does not need to enforce a particular order of destruction
-//    for FcgiRequest objects and the FcgiServerInterface object with which
-//    they are associated. 
-//    a) It is safe to have FcgiRequest objects which were produced from
-//       distinct FcgiServerInterface objects present at the same time.
-//    b) In general, output method calls on FcgiRequest objects whose interface
-//       has been destroyed fail as if the connection of the request was found
-//       to be closed.
+// See the fcgi namespace README for a discussion of FcgiRequest.
 class FcgiRequest {
  public:
 

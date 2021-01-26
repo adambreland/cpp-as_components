@@ -819,7 +819,8 @@ class TestFcgiClientInterface
   // 1) A call may throw exceptions derived from std::exception.
   // 2) Locally-unrecoverable errors from calls which set errno are represented
   //    by std::system_error instances with the corresponding errno value.
-  // 3) std::logic_error is thrown when a call is made and:
+  // 3) std::logic_error is thrown when a call is made and both of the
+  //    following conditions are true:
   //    a) A call to ConnectionCount would return zero.
   //    b) A call to ReadyEventCount would return zero.
   //    The strong exception guarantee is satisfied in this case.

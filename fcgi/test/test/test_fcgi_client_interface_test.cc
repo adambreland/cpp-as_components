@@ -1955,8 +1955,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //          present and response data receipt from these connections is
 //          interleaved.
 //    c) For responses which use multiple records and distinct streams
-//       (application request responses), the order (or interleaving) of record
-//       receipt for distinct streams.
+//       (responses to application requests), the order and interleaving of
+//       record receipt for distinct streams.
 //    d) Padding: The use of padding to cause the total byte length of a
 //       FastCGI record to be a multiple of eight is recommended by the FastCGI
 //       standard. Several unusual cases are possible given this recommendation:
@@ -1986,6 +1986,9 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //          ConnectionCount() returns zero but at least one connection is
 //          disconnected and associated with completed but unreleased
 //          application requests.
+//    Note: Testing that an invocation of RetrieveServerEvent which should not
+//          throw does not throw occurs throughout the testing of
+//          TestFcgiClientInterface.
 // 4) Tests based on types derived from ServerEvent:
 //    ConnectionClosure:
 //       See the description of connection closure handling above.
@@ -2107,11 +2110,24 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //          FCGI_GET_VALUES request. The record is not malformed.
 //
 //    Unexpected, but known types; unknown types.
-//    1) No application or management requests have been made.
-//    2) Application and management requests have been made.
-//       a) The FastCGI request identifier is equal to FCGI_NULL_REQUEST_ID.
-//       b) The FastCGI request identifier is equal to that of a pending
-//          application request.
+//    1) The following cases were identified as potentially interesting based
+//       on the semantics of the FastCGI record types:
+//       a) A record is received with a FastCGI identifier which does not
+//          correspond to a pending or completed-but-unreleased request. Types:
+//          1) FCGI_BEGIN_REQUEST
+//       b) A record is received with a FastCGI identifier which corresponds to
+//          a pending application request. Types:
+//          1) FCGI_PARAMS
+//          2) FCGI_STDIN
+//          3) FCGI_DATA
+//          4) FCGI_ABORT_REQUEST
+//          5) An unknown type, e.g. the type with a FastCGI identifier value
+//             of 27U.
+//       c) A record is received with the management request identifier for the
+//          connection. An FCGI_GET_VALUES request is pending on the connection.
+//          Types:
+//          1) FCGI_GET_VALUES
+//
 //
 //
 //
@@ -2178,7 +2194,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
   int connection {};
   ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
     -1) << std::strerror(errno));
-  // Allows the server to process the connection.
+  // Allows the server to process the connection so that connection + 1
+  // is a used file descriptor whose file description is the appropriate socket.
   ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsExpectNone(inter_uptr.get(),
     __LINE__));
   int server_connection {connection + 1};
@@ -2889,7 +2906,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     );
   }
 
-  // Cases 2.c.1 and 2.c.2 for FCGI_STDOUT anf FCGI_STDERR.
+  // Cases 2.c.1 and 2.c.2 for FCGI_STDOUT and FCGI_STDERR.
   {
     std::uint8_t record_buffer[kTwoHeaderLength] {};
     FcgiRequestIdentifier id {};
@@ -3189,6 +3206,31 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     &client_inter, server_connection, unknown_type_record_buffer,
     kTwoHeaderLength, unknown_type_expected_invalid_values, __LINE__));
   ASSERT_NO_FATAL_FAILURE(GTestFatalGetValuesRetrieveCompare(__LINE__));
+
+  // Tests for unexpected but known record types and for unknown record types.
+  {
+    std::uint8_t record_buffer[kTwoHeaderLength] = {};
+    // The FastCGI request identifier of the invalid record is unused and not
+    // associated with a completed-but-unreleased record.
+    // Type: FCGI_BEGIN_REQUEST
+    std::uint16_t unused_id {static_cast<std::uint16_t>(2U)};
+    PopulateBeginRequestRecord(record_buffer, unused_id, FCGI_RESPONDER, true);
+    struct ExpectedInvalidRecordValues expected_invalid_values
+    {
+      /* content_buffer_ptr */ record_buffer + FCGI_HEADER_LEN,
+      /* content_length     */ 8U,
+      /* padding_length     */ 0U,
+      /* id                 */ {connection, unused_id},
+      /* type               */ FcgiType::kFCGI_BEGIN_REQUEST,
+      /* version            */ FCGI_VERSION_1
+    };
+    ASSERT_NO_FATAL_FAILURE(GTestFatalSendRecordAndExpectInvalidRecord(
+      &client_inter, server_connection, record_buffer, kTwoHeaderLength,
+      expected_invalid_values, __LINE__));
+    
+    // A pending application request is present for the default identifier and
+    // 
+  }
 }
 
 TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
@@ -3211,6 +3253,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
   TestFcgiClientInterface client_inter {};
   // This call may block if the TestFcgiClientInterface instance does not
   // throw as expected.
+  ASSERT_EQ(client_inter.ConnectionCount(), 0U);
+  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
   EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
   // Perform a request-response cycle to establish a completed-but-unreleased
   // application request.
