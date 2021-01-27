@@ -1714,7 +1714,8 @@ FcgiRequestIdentifier TestFcgiClientInterface::SendRequest(int connection,
         std::tuple<struct iovec*, int, std::size_t> params_write
           {socket_functions::ScatterGatherSocketWrite(connection,
             std::get<2>(params_encoding).data(),
-            std::get<2>(params_encoding).size(), true, nullptr)};
+            std::get<2>(params_encoding).size(), std::get<1>(params_encoding),
+            true, nullptr)};
         if(std::get<2>(params_write))
         {
           // Something has been written overall. id release is not required.

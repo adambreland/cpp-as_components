@@ -1,7 +1,7 @@
 # Namespace `fcgi`
-This document proivdes a description of the main classes and functions of
+This document provides a description of the main classes and functions of
 `fcgi`. Interface information and information on the modules not covered here
-is present in the appropriate header file.
+is present in the appropriate header files.
 
 ## `FcgiServerInterface`
 ### Introduction
@@ -26,25 +26,29 @@ connection requests or request data are present.
 ### Request content validation relative to role expectations
 `FcgiServerInterface` does not validate request information relative to
 FastCGI role expectations. For example, the equality of the number of bytes
-of `FCGI_STDIN` input and the `CONTENT_LENGTH `environment variable represented
+of `FCGI_STDIN` input and the `CONTENT_LENGTH` environment variable represented
 as a `FCGI_PARAMS` name-value pair is not verified for the Responder role.
 Moreover, the presence of expected environment variables for a request as
 defined by the `FCGI_PARAMS` stream is not verified by `FcgiServerInterface`.
+If desired, verification of the conformance of a request to such role
+expectations must be performed by the application.
 
 ### Request completion and roles:
-Three separate conditions are used to determine when a request is first
-completed. The role of the request determines which conditions is used.
+Three conditions are used to determine when reception of a request is
+complete. The role of a request determines which condition is used. When a
+request has been received in-full, an `FcgiRequest` object is constructed
+from the request data and exposed to the application.
 
 **Responder**: (`FCGI_PARAMS`, `FCFI_STDIN` needed; `FCGI_DATA` optional.)
 
-A Responder request is considerd complete when either:
+A Responder request is considered to be complete when either:
 * No `FCGI_DATA` records have been received and `FCGI_PARAMS` and `FCGI_STDIN`
   are complete.
 * Each of `FCGI_PARAMS`, `FCGI_STDIN`, and `FCGI_DATA` is complete.
 
 **Authorizer**: (`FCGI_PARAMS needed`; `FCGI_STDIN` and `FCGI_DATA` optional.)
 
-An Authorizer request is considered complete when either:
+An Authorizer request is considered to be complete when either:
 * No `FCGI_STDIN` or `FCGI_DATA` records have been received and `FCGI_PARAMS`
   is complete.
 * No `FCGI_DATA` records have been received and `FCGI_STDIN` and `FCGI_PARAMS`
@@ -55,8 +59,9 @@ An Authorizer request is considered complete when either:
 
 **Filter and unknown roles**: (All streams needed.)
 
-A Filter request and an unknown request are considered completed when
-each of `FCGI_PARAMS`, `FCGI_STDIN`, and `FCGI_DATA` are complete.
+Filter requests and any request with an unknown role are considered to be
+complete when each of `FCGI_PARAMS`, `FCGI_STDIN`, and `FCGI_DATA` are
+complete.
 
 ### Configuration
 `FCGI_LISTENSOCK_FILENO`: The FastCGI protocol specifies that the listening
@@ -64,24 +69,25 @@ socket descriptor of an interface (`FCGI_LISTENSOCK_FILENO`) be equal to
 `STDIN_FILENO` (`STDIN_FILENO == 0`). This requirement is not enforced by
 `FcgiServerInterface`. The descriptor of the listening socket is provided to
 the interface constructor as an argument. This descriptor and the file
-description it is associated with are not managed by the interface (though it
-will be made non-blocking).
+description it is associated with are not managed by the interface (though the
+description will be made non-blocking).
 
 The interface is configured with:
 * A maximum number of concurrent connections.
 * A maximum number of active requests for a connection.
-* A default response if a request is aborted by a client before notice of
-  receipt of the request was given by the interface to the application.
-* For internet domain sockets (`AF_INET` and `AF_INET6`), the environment
-  variable `FCGI_WEB_SERVER_ADDRS` is inspected during interface construction
-  to generate a list of authorized IP addresses.
+* A default response if a request is aborted by its client before an
+  `FcgiRequest` object has been constructed for the request.
+* For internet domain sockets (`AF_INET` and `AF_INET6`), an optional list of
+  authorized IP addresses.
 
-  When `FCGI_WEB_SERVER_ADDRS` is unbound or bound with an empty value,
-  address validation does not occur. The internet "any address" special
-  address values (`0.0.0.0` for IPv4 and `::` for IPv6) have no special meaning
-  to `FcgiServerInterface`. If a client connection from any address should
-  be accepted, `FCGI_WEB_SERVER_ADDRS` should be unbound or bound with an
-  empty value.
+  The environment variable `FCGI_WEB_SERVER_ADDRS` is inspected
+  during interface construction to generate this list. When
+  `FCGI_WEB_SERVER_ADDRS` is unbound or bound with an empty value, all
+  addresses are allowed; address validation does not occur. The internet "any
+  address" special address values (`0.0.0.0` for IPv4 and `::` for IPv6) have
+  no special meaning to `FcgiServerInterface`. If a client connection from any
+  address should be accepted, `FCGI_WEB_SERVER_ADDRS` should be unbound or
+  bound with an empty value.
 
 ### Overloaded state
 The interface may be put into and removed from an overloaded state. This
@@ -96,9 +102,9 @@ interface may be queried by calling `interface_status`. Once in a bad state,
 the interface should be destroyed.
 
 ### Synchronization
-It is expected that all public methods of `FcgiServerInterface` are called
-on the interface from the same thread which houses the interface. In other
-words, interface method calls are not thread safe. In particular, putting
+It is expected that all of the public methods of `FcgiServerInterface` are
+called on the interface from the thread which houses the interface. In
+other words, interface method calls are not thread safe. In particular, putting
 the interface into or removing the interface from an overloaded state
 should be performed synchronously with the thread which houses the interface.
 
@@ -113,21 +119,23 @@ interface.
 
 ## `FcgiRequest`
 ### Introduction
-`FcgiRequest objects` are produced by an instance of `FcgiServerInterface`.
+`FcgiRequest` objects are produced by an instance of `FcgiServerInterface`.
 A request object contains all of the information given to the interface by a
 client for a FastCGI request. Requests can be moved but not copied.
 
-Requests are serviced by:
-* inspecting this information
-* writing to the `FCGI_STDOUT` and `FCGI_STDERR` streams with calls to `Write`
-  and `WriteError`, respectively
-* completing the request by a call to `Complete`.
+Typically, a request is serviced by:
+* Inspecting request information through the observers `get_environment_map`,
+  `get_role`, and `get_STDIN`.
+* Writing to the `FCGI_STDOUT` and `FCGI_STDERR` streams with calls to `Write`
+  and `WriteError`, respectively.
+* Completing the request by a call to `Complete`.
 
 ### Request connection closure and request abortion
 Requests may be implicitly aborted in three cases:
 * The client sends an `FCGI_ABORT_REQUEST` record for the request.
 * The client closes the connection of the request.
 * The interface is forced to close the connection of the request.
+
 `AbortStatus` allows the current abort status of a request to be inspected.
 
 When connection closure by the client is detected during a call:
@@ -160,8 +168,8 @@ When connection closure by the client is detected during a call:
 Several functions which may be useful to multiple classes which implement the
 FastCGI protocol are collected in `fcgi_utilities.h`.
 
-## Using the modules of `fcgi`
-### On handling large data byte sequences and performing file buffering when using `FcgiServerInterface`
+## Notes on using the modules of `fcgi`
+### Handling large data byte sequences and performing file buffering when using `FcgiServerInterface`
 #### Request receipt
 `FcgiServerInterface` represents application requests through `FcgiRequest`
 objects. In the interface of `FcgiRequest`, the data which was received for the
@@ -205,16 +213,17 @@ for `FcgiResponse`. Such a method would be conceptually equivalent to the
 
 ### Write blocking
 The interface of `FcgiRequest` is synchronous. Concurrency is supported as
-distinct `FcgiRequest` objects can be moved to distinct threads and can then be
-serviced independently of other requests by their respective thread. The
-synchronous interface of `FcgiRequest` implies that it is possible that most or
-all of the threads which are allocated for request processing become blocked in
-calls to methods of `FcgiRequest` which write data. In the usual case where
-writes mediated by `FcgiRequest` objects are writes to endpoints which are
-controlled by web servers, write blocking is influenced by the behavior towards
-data reception of the controlling web server. Currently, no mechanism is
-present in `FcgiRequest` to allow a response duration or write inactivity limit
-to be set by an application. Given the influence of web servers on write
-blocking and this limitation in `FcgiRequest`, client web servers should be
-configured so that connection closure occurs when a desired response duration
-or write inactivity limit has been reached for a connection.
+distinct `FcgiRequest` objects can be moved to distinct threads. Each request
+can then be serviced independently of other requests by its respective thread.
+
+The synchronous interface of `FcgiRequest` allows the possibility that
+most or all of the threads which are allocated for request processing become
+blocked in calls to methods of `FcgiRequest` which write data. In the usual
+case where writes mediated by `FcgiRequest` objects are writes to endpoints
+which are controlled by web servers, write blocking is influenced by the
+behavior towards data reception of the controlling web server. Currently, no
+mechanism is present in `FcgiRequest` to allow a response duration or write
+inactivity limit to be set by an application. Given the influence of web
+servers on write blocking and this limitation in `FcgiRequest`, client web
+servers should be configured so that connection closure occurs when the desired
+response duration or write inactivity limit has been reached for a connection.

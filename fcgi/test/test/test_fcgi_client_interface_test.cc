@@ -1998,21 +1998,27 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    instances occurs throughout testing. The following discussion addresses
 //    properties which were determined to potentially not be covered in testing
 //    code which is not specific to the testing of RetrieveServerEvent.
-//       FcgiResponse is the only event which contains information which will
-//    have been received from a server over multiple FastCGI records. This is
-//    because at least an empty FCGI_STDOUT record and an FCGI_END_REQUEST
-//    record must be received for a response. All other responses are responses
-//    to management requests and use one FastCGI record. Given this property
-//    for FcgiResponse, the order of record receipt is a relevant property for
-//    testing. Also, given this property, record type interleaving is a
-//    relevant property for testing. Finally, all responses to FastCGI
-//    application requests share the property that the transmission of a
-//    terminal record for FCGI_STDERR is optional if no data was transmitted
-//    over this stream. All of these properties should be addressed when
-//    testing the generation of FcgiResponse instances from data received from
-//    a server upon the invocation of RetrieveServerEvent. Some of these
-//    properties are also mentioned when the properties which are revelant for
-//    record receipt are discussed.
+//    a) FcgiResponse is the only event type which contains information which
+//       will was received from a server over multiple FastCGI records.
+//       This is because at least an empty FCGI_STDOUT record and an
+//       FCGI_END_REQUEST record must be received. All other responses are
+//       responses to management requests and use one FastCGI record.
+//       1) Given this property for FcgiResponse, the order of the types of
+//          received records is a relevant property for testing.
+//       2) Also, given this property, record type interleaving (concurrent
+//          transmission of data for distinct streams) is a relevant property
+//          for testing.
+//       3) Finally, all responses to FastCGI application requests share the
+//          property that the transmission of a terminal record for FCGI_STDERR
+//          is optional if no data was transmitted over this stream. Proper
+//          behavior given this optional status should be verified.
+//       Note: Some of these properties are also mentioned when the properties
+//       which are revelant for record receipt are discussed.
+//    b) The response to an application request includes an application status.
+//       This status is accessed through the AppStatus observer of FcgiResponse.
+//       The behavior of the interface should be tested when it must handle
+//       values for a request application status which are drawn from an
+//       appropriate test partition of std::int32_t.
 //
 //    GetValuesResult:
 //       Generation of GetValuesResult instances is tested in the testing of
@@ -2110,8 +2116,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //          FCGI_GET_VALUES request. The record is not malformed.
 //
 //    Unexpected, but known types; unknown types.
-//    1) The following cases were identified as potentially interesting based
-//       on the semantics of the FastCGI record types:
+//    1) The following cases were identified as being potentially interesting
+//       based on the semantics of the FastCGI record types:
 //       a) A record is received with a FastCGI identifier which does not
 //          correspond to a pending or completed-but-unreleased request. Types:
 //          1) FCGI_BEGIN_REQUEST
@@ -3213,14 +3219,16 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     // The FastCGI request identifier of the invalid record is unused and not
     // associated with a completed-but-unreleased record.
     // Type: FCGI_BEGIN_REQUEST
-    std::uint16_t unused_id {static_cast<std::uint16_t>(2U)};
-    PopulateBeginRequestRecord(record_buffer, unused_id, FCGI_RESPONDER, true);
+    ASSERT_EQ(client_inter.PendingRequestCount(), 0U);
+    ASSERT_EQ(client_inter.CompletedRequestCount(), 0U);
+    PopulateBeginRequestRecord(record_buffer, default_request_id,
+      FCGI_RESPONDER, true);
     struct ExpectedInvalidRecordValues expected_invalid_values
     {
       /* content_buffer_ptr */ record_buffer + FCGI_HEADER_LEN,
       /* content_length     */ 8U,
       /* padding_length     */ 0U,
-      /* id                 */ {connection, unused_id},
+      /* id                 */ default_identifier,
       /* type               */ FcgiType::kFCGI_BEGIN_REQUEST,
       /* version            */ FCGI_VERSION_1
     };
@@ -3253,7 +3261,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
   TestFcgiClientInterface client_inter {};
   // This call may block if the TestFcgiClientInterface instance does not
   // throw as expected.
-  ASSERT_EQ(client_inter.ConnectionCount(), 0U);
+  ASSERT_EQ(client_inter.ConnectionCount(), 0);
   ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
   EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
   // Perform a request-response cycle to establish a completed-but-unreleased
@@ -5243,7 +5251,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
 // SendRequest
 // Discussion:
 //    SendRequest is used throughout testing. Only the properties that may not
-// be explicitly or implicitly examined in other tests are examined here.
+// be examined in other tests are examined here.
 //
 // Examined properties:
 // 1) FcgiRequestDataReference values:
@@ -5251,11 +5259,29 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
 //       FCGI_FILTER. Tests should include standard and non-standard stream
 //       data. For example, FCGI_STDIN data for an FCGI_AUTHORIZER
 //       request is non-standard data for the request type.
-//    b) A non-standard role.
+//    b) A non-standard role. A role with a value which is larger than 255
+//       should be used. This allows verification of proper FastCGI record
+//       generation in the case that the role high-order byte of the
+//       FCGI_BEGIN_REQUEST record should be non-zero.
 //    c) A null value for params_map_ptr.
 //    d) When params_map_ptr points to an empty map.
 //    e) Null values for the stream pointers.
 //    f) Non-null values for the stream pointers which give empty streams.
+//    g) Two conditions which can be tested together. First, a data stream with
+//       a content length which requires the high-order byte of the content
+//       length of a stream record to be non-zero. Second, a data stream with a
+//       content length which requires the use of more than one FastCGI record
+//       for the stream to be encoded.
+//       1) The FCGI_PARAMS stream is a special case. In addition to the above
+//          properties, a name or value whose length requires more than one
+//          byte when it is encoded in the FastCGI name-value pair format
+//          should be used for testing. This implies that the name or value
+//          length is greater than 127.
+//    h) Though not included in struct FcgiRequestDataReference, the FastCGI
+//       request identifier of a request is included in all application
+//       records. This 16-bit identifier is encoded as two bytes. For small
+//       identifier values, the high-order is zero. It should be verified that
+//       values which require a non-zero high order byte are encoded properly.
 // 2) Default-constructed identifier return case: The connection argument did
 //    not refer to a connection which was currently connected and managed by
 //    the interface.
@@ -5272,10 +5298,19 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
 // 1) A request for each of FCGI_AUTHORIZER and FCGI_FILTER is made with
 //    standard data.
 // 2) As 1, but non-standard data is present.
-// 3) A request with a non-standard role is made.
-//
+// 3) A request with a non-standard, large role is made.
+// 4) 300 requests are sent in a request-transmission/response-retrieval
+//    loop to verify that request identifiers which require a non-zero high-
+//    order byte are properly encoded in the FastCGI records produced by
+//    SendRecord.
 // SendRequestCaseSet2
-// 4) Seventeen test cases which exercise SendRequest with a variety of
+// 5) a) A request where a parameter with a large value (e.g. 70,000 bytes) is
+//       present. This value will require more than one record to be used for
+//       the FCGI_PARAMS stream.
+//    b) A request with a FCGI_STDIN and FCGI_DATA streams which must be sent
+//       over more than one record.
+// SendRequestCaseSet3
+// 6)    Seventeen test cases which exercise SendRequest with a variety of
 //    combinations of null, empty, and non-empty states for the params_map_ptr
 //    and the stream pointers of struct FcgiRequestDataReference.
 //
@@ -5299,8 +5334,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
 //    16   non-empty        empty         non-empty
 //    17   non-empty        non-empty     null
 //
-// SendRequestCaseSet3 (Default-constructed FcgiRequestIdentifier return)
-// 5) a) It is verified that false is returned by a call to SendRequest for a
+// SendRequestCaseSet4 (Default-constructed FcgiRequestIdentifier return)
+// 7) a) It is verified that false is returned by a call to SendRequest for a
 //       negative connection.
 //    b) It is verified that false is returned by a call to SendRequest for a
 //       connection which is not connected and does not have completed but
@@ -5310,11 +5345,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ManagementRequestsTestCaseSet5)
 //       to SendRequest for the connection.
 //    d) The requests are released for the previous connection. It is verified
 //       that false is returned for a call to SendRequest for the connection.
-// 6) Proper detection and handling of connection closure by the peer is
+// 8) Proper detection and handling of connection closure by the peer is
 //    verified.
-//
-// SendRequestCaseSet4
-// 7) The connection was found to be closed by GTestFatalConnectionClosureCheck
+// SendRequestCaseSet5
+// 9) The connection was found to be closed by GTestFatalConnectionClosureCheck
 //    and GTestFatalServerDestructionClosureMeta with a call to SendRequest.
 //
 // Modules and features which testing depends on:
@@ -5377,9 +5411,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
     /* data_begin     = */  nullptr,
     /* data_end       = */  nullptr
   };
-  struct FcgiRequestDataReference unknown_role {kExerciseDataRef};
-  unknown_role.role = 100U;
-
   constexpr const int known_role_request_count {4};
   struct FcgiRequestDataReference* request_array[known_role_request_count] =
     {&standard_authorizer, &non_standard_authorizer, &standard_filter,
@@ -5409,6 +5440,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(client_inter,
     observer, __LINE__));
 
+  // TEST CASES 1 and 2
   for(int i {0}; i != known_role_request_count; ++i)
   {
     FcgiRequestIdentifier id {};
@@ -5442,9 +5474,12 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
     ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(*request_array[i],
       response_ptr, __LINE__));
   }
+  // TEST CASE 3
+  struct FcgiRequestDataReference unknown_role_request_ref {kExerciseDataRef};
+  unknown_role_request_ref.role = 1000U; // 1000 > 255
   FcgiRequestIdentifier id {};
   ASSERT_NO_THROW(id = client_inter.SendRequest(local_connection,
-    unknown_role));
+    unknown_role_request_ref));
   ASSERT_NE(id, FcgiRequestIdentifier {});
   ++(observer.co.connection_pending_request_count);
   ++(observer.in.total_pending_request_count);
@@ -5457,7 +5492,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
   }
   EXPECT_EQ(accept_buffer.size(), 1U);
   EXPECT_EQ(accept_buffer[0].get_environment_map(), kSharedExerciseParams);
-  EXPECT_EQ(accept_buffer[0].get_role(), unknown_role.role);
+  EXPECT_EQ(accept_buffer[0].get_role(), unknown_role_request_ref.role);
   EXPECT_TRUE(accept_buffer[0].get_keep_conn());
   EXPECT_EQ(accept_buffer[0].get_STDIN(), kStdinDataForClientExercise);
   EXPECT_EQ(accept_buffer[0].get_DATA(), kFcgiDataForClientExercise);
@@ -5476,12 +5511,176 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet1)
   EXPECT_EQ(response_ptr->RequestId(), id);
   EXPECT_EQ(response_ptr->AppStatus(), EXIT_FAILURE);
   EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_UNKNOWN_ROLE);
-  EXPECT_EQ(response_ptr->Request(), unknown_role);
+  EXPECT_EQ(response_ptr->Request(), unknown_role_request_ref);
   EXPECT_EQ(response_ptr->FcgiStdout().size(), 0U);
   EXPECT_EQ(response_ptr->FcgiStderr().size(), 0U);
+
+  // TEST CASE 4
+  ASSERT_NO_THROW(ASSERT_TRUE(client_inter.ReleaseId(local_connection)));
+  ASSERT_EQ(client_inter.PendingRequestCount(), 0U);
+  ASSERT_EQ(client_inter.CompletedRequestCount(), 0U);
+  constexpr const int kRequestCount {300};
+  bool large_id_used {false};
+  for(int i {0}; i < kRequestCount; ++i)
+  {
+    FcgiRequestIdentifier local_id {};
+    ASSERT_NO_THROW(ASSERT_NE(local_id = client_inter.SendRequest(
+      local_connection, kExerciseDataRef), FcgiRequestIdentifier {}));
+    if(!large_id_used)
+    {
+      if(local_id.Fcgi_id() > 255U)
+      {
+        large_id_used = true;
+      }
+    }
+    accept_buffer.clear();
+    while(!(accept_buffer.size()))
+    {
+      accept_buffer = inter_uptr->AcceptRequests();
+    }
+    ASSERT_EQ(accept_buffer.size(), 1U);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalOperationForRequestEcho(&accept_buffer,
+      *(kExerciseDataRef.params_map_ptr), kExerciseDataRef.role,
+      kExerciseDataRef.keep_conn, __LINE__));
+    EXPECT_EQ(accept_buffer[0].get_request_identifier().Fcgi_id(),
+      local_id.Fcgi_id());
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    response_ptr = dynamic_cast<FcgiResponse*>(event_uptr.get());
+    ASSERT_NE(response_ptr, nullptr);
+    EXPECT_EQ(response_ptr->RequestId(), local_id);
+    ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(
+      kExerciseDataRef, response_ptr, __LINE__));
+  }
+  EXPECT_TRUE(large_id_used);
 }
 
 TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet2)
+{
+  // The server must be located in a separate process to prevent write
+  // blocking due to the presence of some large data streams.
+  std::vector<std::uint8_t> name_for_long_data {'b','i','g'};
+  std::vector<std::uint8_t> long_params_data_sequence(70000U, 1U);
+  ParamsMap long_data_params_map
+  {
+    {std::move(name_for_long_data), std::move(long_params_data_sequence)}
+  };
+  struct FcgiRequestDataReference long_params_data_request_ref
+    {kExerciseDataRef};
+  long_params_data_request_ref.params_map_ptr = &long_data_params_map;
+  int pipe_descriptor_array[2] {};
+  ASSERT_NE(pipe(pipe_descriptor_array), -1) << std::strerror(errno);
+  pid_t fork_return {fork()};
+  if(fork_return == -1)
+  {
+    FAIL() << std::strerror(errno);
+  }
+  else if(fork_return == 0)
+  {
+    // In child.
+    ChildServerAlrmRestoreAndSelfKillSet();
+    close(pipe_descriptor_array[0]);
+    struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+    inter_args.domain          = AF_UNIX;
+    inter_args.unix_path       = kUnixPath1;
+    std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+    inter_return {GTestNonFatalCreateInterface(inter_args, __LINE__)};
+    std::unique_ptr<FcgiServerInterface>& inter_uptr
+      {std::get<0>(inter_return)};
+    if(!inter_uptr.get())
+    {
+      _exit(EXIT_FAILURE);
+    }
+    // Inform the parent that interface construction succeeded.
+    std::uint8_t byte_buffer[1] {};
+    if(socket_functions::SocketWrite(pipe_descriptor_array[1], byte_buffer,
+      1U) != 1U)
+    {
+      _exit(EXIT_FAILURE);
+    }
+    // Accept requests in a loop. Every request is assumed to have the
+    // ParamsMap with the long value.
+    std::vector<FcgiRequest> accept_buffer {};
+    while(true)
+    {
+      accept_buffer = inter_uptr->AcceptRequests();
+      GTestFatalOperationForRequestEcho(&accept_buffer,
+        *(long_params_data_request_ref.params_map_ptr),
+        long_params_data_request_ref.role,
+        long_params_data_request_ref.keep_conn, __LINE__);
+    }
+  }
+  // else, in parent.
+
+  // Resource management related to the child:
+  // Inform the test fixture that it should attempt to remove the AF_UNIX file
+  // associated with kUnixPath1. This file is used by the server.
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+  // Kill the child when the test exits.
+  struct Terminator
+  {
+    ~Terminator()
+    {
+      GTestFatalTerminateChild(child_id, __LINE__);
+    };
+
+    pid_t child_id;
+  };
+  struct Terminator child_manager {fork_return};
+
+  TestFcgiClientInterface client_inter {};
+  // Wait for the child to signal that the server interface has been
+  // constructed.
+  close(pipe_descriptor_array[1]);
+  std::uint8_t byte_buffer[1] {};
+  if(socket_functions::SocketRead(pipe_descriptor_array[0], byte_buffer,
+    1U) != 1U)
+  {
+    int saved_errno {errno};
+    close(pipe_descriptor_array[0]);
+    FAIL() << std::strerror(saved_errno);
+  }
+  close(pipe_descriptor_array[0]);
+  int connection {};
+  ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U), -1);
+  // TEST CASE 5.a
+  FcgiRequestIdentifier long_params_data_request_id {};
+  ASSERT_NO_THROW(ASSERT_NE(long_params_data_request_id =
+    client_inter.SendRequest(connection, long_params_data_request_ref),
+    FcgiRequestIdentifier {}));
+  std::unique_ptr<ServerEvent> event_uptr {};
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+  ASSERT_NE(response_ptr, nullptr);
+  EXPECT_EQ(response_ptr->RequestId(), long_params_data_request_id);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(
+    long_params_data_request_ref, response_ptr, __LINE__));
+  // TEST CASE 5.b
+  std::vector<std::uint8_t> long_stdin_sequence(100000U, 2U);
+  std::vector<std::uint8_t> long_data_sequence(80000U, 3U);
+  struct FcgiRequestDataReference long_streams_request_ref
+    {long_params_data_request_ref};
+  long_streams_request_ref.stdin_begin = long_stdin_sequence.data();
+  long_streams_request_ref.stdin_end   = long_stdin_sequence.data() +
+    long_stdin_sequence.size();
+  long_streams_request_ref.data_begin  = long_data_sequence.data();
+  long_streams_request_ref.data_end    = long_data_sequence.data() +
+    long_data_sequence.size();
+  FcgiRequestIdentifier long_streams_request_id {};
+  ASSERT_NO_THROW(ASSERT_NE(long_streams_request_id =
+    client_inter.SendRequest(connection, long_streams_request_ref),
+    FcgiRequestIdentifier {}));
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  response_ptr = dynamic_cast<FcgiResponse*>(event_uptr.get());
+  ASSERT_NE(response_ptr, nullptr);
+  EXPECT_EQ(response_ptr->RequestId(), long_streams_request_id);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(
+    long_streams_request_ref, response_ptr, __LINE__));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
 {
   // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
@@ -5698,7 +5897,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet2)
       client_inter, observer, __LINE__));
 }
 
-TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
+TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet4)
 {
   // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
@@ -5717,7 +5916,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
 
   TestFcgiClientInterface client_inter {};
 
-  // TEST CASE 5
+  // TEST CASE 7
   struct ClientInterfaceObserverValues observer
   {
     /* co = */
@@ -5806,7 +6005,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
   ASSERT_NO_FATAL_FAILURE(GTestFatalClientInterfaceObserverCheck(
     client_inter, observer, __LINE__));
 
-  // TEST CASE 6
+  // TEST CASE 8
   int new_connection {};
   ASSERT_NO_THROW(new_connection = client_inter.Connect(kUnixPath1, 0U));
   ASSERT_NE(new_connection, -1) << std::strerror(errno);
@@ -5864,7 +6063,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet3)
     0U}));
 }
 
-TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet4)
+TEST_F(TestFcgiClientInterfaceTestFixture, SendRequestCaseSet5)
 {
   // Creates the server interface.
   struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};

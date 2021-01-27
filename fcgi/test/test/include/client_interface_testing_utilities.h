@@ -242,10 +242,10 @@ const struct FcgiRequestDataReference kExerciseDataRef
   /* params_map_ptr = */ &kSharedExerciseParams,
   /* stdin_begin    = */  kStdinDataForClientExercise.data(),
   /* stdin_end      = */  kStdinDataForClientExercise.data() +
-                          kStdinDataForClientExercise.size(),
+                            kStdinDataForClientExercise.size(),
   /* data_begin     = */  kFcgiDataForClientExercise.data(),
   /* data_end       = */  kFcgiDataForClientExercise.data() +
-                          kFcgiDataForClientExercise.size()
+                            kFcgiDataForClientExercise.size()
 };
 
 // Constant state which is used in the implementation of
@@ -422,6 +422,7 @@ void GTestFatalRequestEcho(FcgiRequest* request_ptr, int invocation_line);
 // 2) The sent_environ parameter is used to allow the utility to check that the
 //    expected FCGI_PARAMS map was received.
 // 3) role and keep_conn values are compared to those of the FcgiRequest object.
+// 4) *accept_buffer_ptr is not cleared of requests.
 void GTestFatalOperationForRequestEcho(
   std::vector<FcgiRequest>* accept_buffer_ptr,
   const ParamsMap& sent_environ,

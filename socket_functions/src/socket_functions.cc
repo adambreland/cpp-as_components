@@ -61,11 +61,15 @@ ScatterGatherSocketWrite(int fd, struct iovec* iovec_ptr, int iovec_count,
   std::size_t number_remaining, bool wait_on_select,
   struct timeval* timeout_ptr) noexcept
 {
+  int max_for_select {fd + 1};
   ssize_t number_returned {0};
 
   while(number_remaining > 0)
   {
     number_returned = writev(fd, iovec_ptr, iovec_count);
+    // If the below if block is entered, then control either breaks out of the
+    // while loop or continues past the statements below this if block. In
+    // either case, the statements below this if block are not executed.
     if(number_returned == -1)
     {
       // Check if an error occurred which doesn't permit recalling writev.
@@ -88,8 +92,8 @@ ScatterGatherSocketWrite(int fd, struct iovec* iovec_ptr, int iovec_count,
           fd_set select_on {};
           FD_ZERO(&select_on);
           FD_SET(fd, &select_on);
-          int select_return {select(fd, nullptr, &select_on, nullptr,
-            local_timeout_ptr)};
+          int select_return {select(max_for_select, nullptr, &select_on,
+            nullptr, local_timeout_ptr)};
           if(select_return == -1)
           {
             if(errno == EINTR)
