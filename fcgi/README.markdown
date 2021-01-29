@@ -164,6 +164,155 @@ When connection closure by the client is detected during a call:
     has been destroyed fail as if the connection of the request was found
     to be closed.
 
+## `test::TestFcgiClientInterface`
+### Introduction
+`TestFcgiClientInterface` provides an implementation of the FastCGI
+protocol for programs which make requests of FastCGI application servers.
+Such programs may be called clients or client servers from the perspective
+of FastCGI.
+
+`TestFcgiClientInterface` is intended to be used to test FastCGI
+application servers. It allows FastCGI requests to be sent to application
+servers without the use of an HTTP server intermediary. For example,
+application server unit tests may be implemented by:
+1. Having a `TestFcgiClientInterface` instance submit FastCGI requests to an
+   application server.
+2. Inspecting the application server's responses to the requests.
+3. Inspecting any side effects which were caused by the application server
+   during its processing of the requests.
+See below for a description of the features of `TestFcgiClientInterface` which
+are relevant to the testing of FastCGI application servers.
+
+The interface allows simultaneous connections to be made to distinct
+FastCGI application servers. Simultaneous connections to the same server
+are also allowed. Different socket domains may be used. All connections
+are stream-based as FastCGI utilizes stream-based sockets.
+
+### Response completion and roles
+* For all roles, a terminal `FCGI_STDOUT` record must be received before the
+  receipt of a `FCGI_END_REQUEST` record.
+* For all roles, receipt of a terminal `FCGI_STDERR` record is optional if no
+  data was received over `FCGI_STDERR`. If data was received over
+  `FCGI_STDERR`, then a terminal `FCGI_STDERR` record must be received before
+  the receipt of a `FCGI_END_REQUEST` record.
+
+### Properties of `TestFcgiClientInterface`
+#### Management requests and responses
+The interface has a management request queue for each connection. As all
+management requests on a given connection *c* share the same request
+identifier (*c*, 0), management request order is preserved by the queue.
+Responses to management requests are associated with management requests
+according to request order.
+
+The interface assumes that `FCGI_GET_VALUES` is the only defined type of
+management request. No facilities exist to handle management responses
+which are not of type `FCGI_GET_VALUES_RESULT` or `FCGI_UNKNOWN_TYPE`. In the
+case that a management request of another type is received, an `InvalidRecord`
+instance is generated.
+
+#### Request identifiers, identifier allocation and release, and pending and completed request statuses
+The interface uses the notions of allocated and released request
+identifiers. All request identifiers are initially unallocated. This is
+equivalent to being released. When a request is made over a connection with
+descriptor value *c*, a FastCGI identifier is chosen by the interface. Let
+this identifier be *ID*. The pair (*c*, *ID*) is used to construct an
+`FcgiRequestIdentifier` instance. This value within `FcgiRequestIdentifier`
+identifies the request. Once the request is made, this value transitions
+from being released to being allocated. Only released values are used for
+new requests. Once a response has been received for a request identified by
+value *v* = (*c*, *ID*), *v* is not released until a call to `ReleaseId(v)`
+or `ReleaseId(c)` is made. This is true regardless of intervening closures of
+the connection by an application server or through calls of
+`CloseConnection(c)`.
+
+A request, which is identified with an allocated request identifier, is
+regarded as pending until the response to the request is received in-full.
+Once the response to a request is complete, the request is regarded as
+completed. The notions of pending and completed responses relate to the
+handling of request identifiers as described above. These notions are also
+used in the specifications of the methods of `TestFcgiClientInterface`.
+
+Note that the behavior of the interface relative to allocated and
+released request identifiers for requests which received a response
+(completed requests) prevents the reuse of a request identifier before it is
+explicitly released by the user of the interface. This property allows
+processing of responses to requests to be deferred while preventing
+request identifier value reuse in situations which could result in request
+identity ambiguity.
+
+Management requests are also described as either pending or completed.
+However, management requests are not subject to request identifier
+allocation and release.
+
+#### Server responses
+`TestFcgiClientInterface` uses instances of types derived from the abstract
+type `ServerEvent` to represent information which was received from
+application servers. `ServerEvent` was defined for this purpose. An internal
+ready event queue is used to store ready events. `RetrieveServerEvent` is used
+to retrieve a `std::unique_ptr<ServerEvent>` instance. `dynamic_cast` may be
+used to cast the contained `ServerEvent*` to a pointer to one of the types
+derived from `ServerEvent`.
+
+#### Connection closure and its influence on interface state
+A user can manually close a connection through a call to `CloseConnection`.
+When this is done, all pending application requests and pending management
+requests are lost.
+
+The interface informs a user that an application server closed a
+connection by returning an appropriate `ConnectionClosure` instance from a
+call to `RetrieveServerEvent`. As for manual closure, all pending application
+and management requests are lost when this occurs.
+
+The event queue is also used by `SendAbortRequest`,
+`SendBinaryManagementRequest`, `SendGetValuesRequest`, and `SendRequest` to
+report the detection during their invocation of the closure of a connection by
+its peer.
+
+When a connection is closed, no attempt is made to read unread data which
+was sent by a server. In other words, unread server writes are lost when a
+connection is closed. For example, closure by the peer may be detected when
+a write is attempted. This detection leads to local connection closure with
+subsequent loss of any unread data which was written by the server (in
+addition to other state changes).
+
+### The interface as a component for testing
+Several features of the interface make it suited for programs which
+either test implementations of the FastCGI protocol for application servers
+or which test application servers.
+* The interface is not concurrent (though I/O multiplexing on connections
+  is performed).
+  * Interface methods may not be safely called from multiple threads.
+  * Only a single server event may be retrieved at a time. Calls to
+    `RetrieveServerEvent` block until an event is ready.
+  * Methods which do not read incoming data may add events to the common
+    event queue.
+  * Data processing and internal state transitions only occur through
+    user invocations of type methods. Interface state update does not
+    occur asynchronously.
+* `InvalidRecord` is used to expose invalid records received from application
+  servers. This behavior is performed instead of dropping the record.
+* Encoding errors in the content of `FCGI_GET_VALUES_RESULT` records are
+  exposed through the `IsCorrupt` method of `GetValuesResult`.
+* A reference type is used to represent request values when requests are
+  submitted to the interface by a user. Copies of request data are not made
+  by the interface. This allows a reduction of the memory footprint of
+  the internal state used to represent and track requests while still
+  allowing request data identity to be returned with the response to a
+  request. It also allows the data of a single request to be reused with
+  low overhead in the case where many requests with the same data are
+  submitted to an application server.
+* Management requests with types other than `FCGI_GET_VALUES` can be sent.
+  The content of such requests is not constrained.
+* Errors and exceptions are handled simply. This is appropriate and
+  acceptable for testing code.
+  * In some cases, program termination by the interface is allowed.
+  * Though methods have clearly defined exception specifications,
+    exceptions are propagated with little expectation of or support for
+    recovery.
+* I/O multiplexing may not be performed with a mechanism which efficiently
+  handles a large number of connections such as the `epoll` system call of
+  Linux.
+
 ## Utilities
 Several functions which may be useful to multiple classes which implement the
 FastCGI protocol are collected in `fcgi_utilities.h`.

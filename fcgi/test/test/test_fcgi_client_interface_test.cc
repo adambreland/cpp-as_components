@@ -60,6 +60,9 @@ namespace test {
 
 // TESTING DISCUSSION
 
+// A few test cases are currently not implemented. These are marked with:
+// *** UNTESTED ***
+
 // Properties and features of the structure of TestFcgiClientInterface which
 // inform testing:
 //
@@ -1929,6 +1932,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 
 // RetrieveServerEvent
 // Examined properties:
+// *** UNTESTED *** (All of 1.)
 // 1) Properties related to record receipt:
 //    a) Concurrent response information receipt. A major feature of the
 //       FastCGI protocol is the ability of clients and servers to use a single
@@ -1996,41 +2000,66 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ReleaseId)
 //    FcgiResponse:
 //       Use of RetrieveServerEvent with concomitant generation of FcgiResponse
 //    instances occurs throughout testing. The following discussion addresses
-//    properties which were determined to potentially not be covered in testing
-//    code which is not specific to the testing of RetrieveServerEvent.
-//    a) FcgiResponse is the only event type which contains information which
-//       was received from a server over multiple FastCGI records. This is
-//       because at least a terminal FCGI_STDOUT record and an FCGI_END_REQUEST
-//       record must be received to complete an application response. All other
-//       responses are responses to management requests and use one FastCGI
-//       record.
+//    properties which were determined to potentially not be covered in other
+//    testing.
+//    a) Record receipt:
+//       FcgiResponse is the only event type whose instances contain
+//       information which was received from a server over multiple FastCGI
+//       records. This is because at least a terminal FCGI_STDOUT record and an
+//       FCGI_END_REQUEST record must be received to complete an application
+//       response. All other responses are responses to management requests and
+//       use one FastCGI record.
+//       *** UNTESTED ***
 //       1) Given this property for FcgiResponse, the order of the types of
 //          received records is a relevant property for testing.
+//       *** UNTESTED ***
 //       2) Also, record type interleaving (concurrent transmission of data for
 //          distinct streams) is a relevant property for testing.
 //       3) Finally, all responses to FastCGI application requests share the
 //          property that the transmission of a terminal record for FCGI_STDERR
 //          is optional if no data was transmitted over this stream. Proper
 //          behavior given this optional status should be verified. In
-//          particular, the interface should accept a terminal FCGI_STDERR
-//          when no data has been received over FCGI_STDERR, and the interface
-//          should accept an FCGI_END_REQUEST record when no data has been
-//          over FCGI_STDERR and the FCGI_STDERR stream has not been terminated.
-//       Note: Some of these properties are mentioned in the discussion of
-//       properties which are relevant for record receipt.
+//          particular:
+//          *** UNTESTED ***
+//          a) The interface should accept a terminal FCGI_STDERR record when
+//             no data has been received over FCGI_STDERR.
+//          *** UNTESTED ***
+//          b) The interface should accept an FCGI_END_REQUEST record when no
+//             data has been received over FCGI_STDERR and the FCGI_STDERR
+//             stream has not been terminated.
+//          c)    The interface should reject an FCGI_END_REQUEST record when
+//             data has been received over FCGI_STDERR and the stream has not
+//             been terminated.
+//                Note: This test case is covered in the test cases for the
+//             generation of InvalidRecord instances due to the receipt of
+//             FCGI_END_REQUEST records.
+//       Note: Some of these properties are mentioned in the discussion of the
+//       general properties which are relevant when considering record receipt.
 //    b) The response to an application request includes an application status.
 //       This status is accessed through the AppStatus observer of FcgiResponse.
 //       The behavior of the interface should be tested when it must handle
-//       values for a request application status which are drawn from an
-//       appropriate test partition of std::int32_t.
-//    c) The interface should correctly process FastCGI records which contain
-//       request identifier values or content length values that require a
-//       non-zero high-order byte when they are encoded over two bytes.
-//       Note: Correct behavior in these cases is currently tested in the tests
-//       for SendRequest. The tests which test that SendRequest causes correct
-//       FastCGI records to be sent to a FastCGI application server in the
-//       cases of large request identifier values and content lengths also test
-//       that the interface can receive such records through invocation of
+//       values for a request application status which are drawn from a
+//       comprehensive test partition of std::int32_t.
+//    *** UNTESTED ***
+//    c) The response to a request includes a protocol status. There are four
+//       allowed status values. Although specific semantics are associated with
+//       each of the allowed values, the FastCGI protocol does not specify
+//       relations between the state of response stream data and the allowed
+//       protocol status values. TestFcgiClientInterface does not specify
+//       response rejection due to a particular relation between response
+//       stream state and the allowed protocol status values. As such,
+//       any response which has one of the allowed values should be accepted.
+//       Such acceptance should be verified with responses which cover a
+//       variety of response stream states.
+//    d)    The interface should correctly process FastCGI records which
+//       contain request identifier values or content length values that
+//       require a non-zero high-order byte when they are encoded over two
+//       bytes.
+//          Note: Correct behavior in these cases is currently tested in the
+//       tests for SendRequest. The tests which test that SendRequest causes
+//       correct FastCGI records to be sent to a FastCGI application server in
+//       the cases of large request identifier values and content lengths also
+//       test that the interface can receive such records through invocation of
 //       RetrieveServerEvent.
 //
 //    GetValuesResult:
@@ -2189,6 +2218,149 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveSeverEventConnectionClosure)
 
   ASSERT_NO_FATAL_FAILURE(ASSERT_NO_THROW(GTestFatalConnectionClosureCheck(
     kUnixPath1, 0U, &client_inter, inter_uptr.get(), disconnector, __LINE__)));
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  // This call may block if the TestFcgiClientInterface instance does not
+  // throw as expected.
+  ASSERT_EQ(client_inter.ConnectionCount(), 0);
+  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
+  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
+  // Perform a request-response cycle to establish a completed-but-unreleased
+  // application request.
+  int connection {};
+  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
+    -1)) << std::strerror(errno);
+  FcgiRequestIdentifier request_identifier {};
+  ASSERT_NO_THROW(ASSERT_NE(request_identifier = client_inter.SendRequest(
+    connection, kExerciseDataRef), FcgiRequestIdentifier {}));
+  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsRequestEcho(inter_uptr.get(),
+    *(kExerciseDataRef.params_map_ptr), FCGI_RESPONDER, true, __LINE__));
+  std::unique_ptr<ServerEvent> event_uptr {};
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+  ASSERT_NE(response_ptr, nullptr);
+  EXPECT_EQ(response_ptr->RequestId(), request_identifier);
+  ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
+    response_ptr, __LINE__));
+  ASSERT_EQ(client_inter.CompletedRequestCount(), 1U);
+  delete(inter_uptr.release());
+  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+  ASSERT_NE(event_uptr.get(), nullptr);
+  ConnectionClosure* closure_ptr {dynamic_cast<ConnectionClosure*>(
+    event_uptr.get())};
+  ASSERT_NE(closure_ptr, nullptr);
+  EXPECT_EQ(closure_ptr->RequestId(), (FcgiRequestIdentifier {connection,
+    FCGI_NULL_REQUEST_ID}));
+  ASSERT_EQ(client_inter.ConnectionCount(), 0);
+  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
+  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
+}
+
+TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventAppStatus)
+{
+  // Creates the server interface.
+  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
+  inter_args.domain          = AF_UNIX;
+  inter_args.unix_path       = kUnixPath1;
+  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+  inter_return {};
+  ASSERT_NO_THROW(inter_return =
+    GTestNonFatalCreateInterface(inter_args, __LINE__));
+  std::unique_ptr<FcgiServerInterface>& inter_uptr
+    {std::get<0>(inter_return)};
+  ASSERT_NE(inter_uptr.get(), nullptr);
+  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
+      std::get<1>(inter_return)));
+  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
+
+  TestFcgiClientInterface client_inter {};
+  int connection {};
+  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
+    -1) << std::strerror(errno));
+  struct FcgiRequestDataReference empty_request_ref
+  {
+    /* role           */ FCGI_RESPONDER,
+    /* keep_conn      */ true,
+    /* params_map_ptr */ nullptr,
+    /* stdin_begin    */ nullptr,
+    /* stdin_end      */ nullptr,
+    /* data_begin     */ nullptr,
+    /* data_end       */ nullptr,
+  };
+  std::vector<std::int32_t> app_status_partition
+    {std::numeric_limits<std::int32_t>::min(), -2, -1, 0, 1, 2, 256,
+     std::numeric_limits<std::int32_t>::max()};
+
+  auto GTestFatalAppStatusRequestCycle =
+  [
+    &inter_uptr,
+    &client_inter,
+     connection,
+    &empty_request_ref
+  ]
+  (
+    std::int32_t current_app_status,
+    int          invocation_line
+  )->void
+  {
+    std::string tracer_message {"lambda GTestFatalAppStatusRequestCycle, "
+      "application status argument: "};
+    tracer_message += std::to_string(current_app_status);
+    ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+      tracer_message};
+    FcgiRequestIdentifier local_id {};
+    ASSERT_NO_THROW(ASSERT_NE(local_id = client_inter.SendRequest(connection,
+      empty_request_ref), FcgiRequestIdentifier {}));
+    std::vector<FcgiRequest> accept_buffer {};
+    ASSERT_NO_THROW
+    (
+      while(!(accept_buffer.size()))
+      {
+        accept_buffer = inter_uptr->AcceptRequests();
+      }
+      ASSERT_EQ(accept_buffer.size(), 1U);
+      accept_buffer[0].Complete(current_app_status);
+      accept_buffer.clear();
+    );
+    std::unique_ptr<ServerEvent> event_uptr {};
+    ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
+    ASSERT_NE(event_uptr.get(), nullptr);
+    FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
+    ASSERT_NE(response_ptr, nullptr);
+    EXPECT_EQ(response_ptr->AppStatus(), current_app_status);
+    EXPECT_EQ(response_ptr->FcgiStderr().size(), 0U);
+    EXPECT_EQ(response_ptr->FcgiStdout().size(), 0U);
+    EXPECT_EQ(response_ptr->ProtocolStatus(), FCGI_REQUEST_COMPLETE);
+    EXPECT_EQ(response_ptr->Request(), empty_request_ref);
+    EXPECT_EQ(response_ptr->RequestId(), local_id);
+  };
+
+  for(std::vector<std::int32_t>::iterator app_status_iter
+    {app_status_partition.begin()};
+    app_status_iter != app_status_partition.end(); ++app_status_iter)
+  {
+    ASSERT_NO_FATAL_FAILURE(GTestFatalAppStatusRequestCycle(*app_status_iter,
+      __LINE__));
+  }
 }
 
 TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
@@ -3348,61 +3520,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventInvalidRecordSet)
     &client_inter, server_connection, mpxs_get_values_buffer,
     kMpxsGetValuesRecordLength, get_values_result_invalid_values, __LINE__));
   ASSERT_NO_FATAL_FAILURE(GTestFatalGetValuesRetrieveCompare(__LINE__));
-}
-
-TEST_F(TestFcgiClientInterfaceTestFixture, RetrieveServerEventExceptions)
-{
-  // Creates the server interface.
-  struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
-  inter_args.domain          = AF_UNIX;
-  inter_args.unix_path       = kUnixPath1;
-  std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
-  inter_return {};
-  ASSERT_NO_THROW(inter_return =
-    GTestNonFatalCreateInterface(inter_args, __LINE__));
-  std::unique_ptr<FcgiServerInterface>& inter_uptr
-    {std::get<0>(inter_return)};
-  ASSERT_NE(inter_uptr.get(), nullptr);
-  ASSERT_NO_THROW(descriptor_resource_list_.push_back(
-      std::get<1>(inter_return)));
-  ASSERT_NO_THROW(path_resource_list_.push_back(kUnixPath1));
-
-  TestFcgiClientInterface client_inter {};
-  // This call may block if the TestFcgiClientInterface instance does not
-  // throw as expected.
-  ASSERT_EQ(client_inter.ConnectionCount(), 0);
-  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
-  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
-  // Perform a request-response cycle to establish a completed-but-unreleased
-  // application request.
-  int connection {};
-  ASSERT_NO_THROW(ASSERT_NE(connection = client_inter.Connect(kUnixPath1, 0U),
-    -1)) << std::strerror(errno);
-  FcgiRequestIdentifier request_identifier {};
-  ASSERT_NO_THROW(ASSERT_NE(request_identifier = client_inter.SendRequest(
-    connection, kExerciseDataRef), FcgiRequestIdentifier {}));
-  ASSERT_NO_FATAL_FAILURE(GTestFatalAcceptRequestsRequestEcho(inter_uptr.get(),
-    *(kExerciseDataRef.params_map_ptr), FCGI_RESPONDER, true, __LINE__));
-  std::unique_ptr<ServerEvent> event_uptr {};
-  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NE(event_uptr.get(), nullptr);
-  FcgiResponse* response_ptr {dynamic_cast<FcgiResponse*>(event_uptr.get())};
-  ASSERT_NE(response_ptr, nullptr);
-  EXPECT_EQ(response_ptr->RequestId(), request_identifier);
-  ASSERT_NO_FATAL_FAILURE(GTestFatalEchoResponseCompare(kExerciseDataRef,
-    response_ptr, __LINE__));
-  ASSERT_EQ(client_inter.CompletedRequestCount(), 1U);
-  delete(inter_uptr.release());
-  ASSERT_NO_THROW(event_uptr = client_inter.RetrieveServerEvent());
-  ASSERT_NE(event_uptr.get(), nullptr);
-  ConnectionClosure* closure_ptr {dynamic_cast<ConnectionClosure*>(
-    event_uptr.get())};
-  ASSERT_NE(closure_ptr, nullptr);
-  EXPECT_EQ(closure_ptr->RequestId(), (FcgiRequestIdentifier {connection,
-    FCGI_NULL_REQUEST_ID}));
-  ASSERT_EQ(client_inter.ConnectionCount(), 0);
-  ASSERT_EQ(client_inter.ReadyEventCount(), 0U);
-  EXPECT_THROW(client_inter.RetrieveServerEvent(), std::logic_error);
 }
 
 // SendAbortRequest
