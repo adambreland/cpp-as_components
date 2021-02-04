@@ -5,23 +5,35 @@ is present in the appropriate header files.
 
 ## `FcgiServerInterface`
 ### Introduction
-`FcgiServerInterface` is a singleton class which implements the majority of
-the [FastCGI protocol](https://github.com/FastCGI-Archives/fastcgi-archives.github.io/blob/master/FastCGI_Specification.md)
-for application servers. This class and its associated class `FcgiRequest`
-support multithreaded applications. `FcgiRequest` objects are produced by the
-`AcceptRequests` method of `FcgiServerInterface`. The thread which houses the
-instance of `FcgiServerInterface` is intended to execute calls to
-`AcceptRequests` in a loop. A request object produced by a call may be moved to
-a worker thread and serviced from it. The methods of `FcgiRequest` allow the
-response to a request to be made without explicit synchronization between
-threads.
-
-As specified by the FastCGI protocol, the interface fully supports:
-* multiple client connections
+`FcgiServerInterface` is a singleton class which implements the
+[FastCGI protocol](https://github.com/FastCGI-Archives/fastcgi-archives.github.io/blob/master/FastCGI_Specification.md)
+for application servers. The interface fully supports:
+* simultaneous client connections
 * request multiplexing over a single connection
 
-`AcceptRequests` uses I/O multiplexing on connections and will block until new
-connection requests or request data are present.
+In addition, `FcgiServerInterface` and its associated class `FcgiRequest`
+support the development of concurrent and multithreaded application servers.
+Note, however, that `FcgiServerInterface` and its related classes are not
+intended to be used with a concurrent server design which is based on the
+production of child processes to handle client requests.
+
+`FcgiRequest` objects represent FastCGI requests. They are produced by the
+`AcceptRequests` method of `FcgiServerInterface`. The thread which houses the
+`FcgiServerInterface` instance is intended to execute calls to
+`AcceptRequests` in a loop. A request object produced by a call may be moved to
+another thread (for example, to a member of a pool of worker threads) and
+serviced from it. The methods of `FcgiRequest` allow the response to a request
+to be made without explicit synchronization between threads. These features
+support a producer-consumer architecture with one producer and one or more
+consumers.
+
+`AcceptRequests` is characterized by:
+* I/O multiplexing over the connections of the `FcgiServerInterface` instance.
+* Synchronous execution where waiting for connection read readiness can be
+  interrupted by the receipt of a signal. In other words, a call to
+  `AcceptRequests` blocks until either:
+  * a new connection can be accepted or request data is present
+  * a signal is received by the interface thread
 
 ### Request content validation relative to role expectations
 `FcgiServerInterface` does not validate request information relative to
@@ -97,9 +109,11 @@ new requests or connections from being accepted.
 ### Bad state
 During use, the interface or `FcgiRequest` objects produced by the
 interface may encounter errors which corrupt the state of the interface.
-When this occurs, the interface assumes a bad state. The current state of the
-interface may be queried by calling `interface_status`. Once in a bad state,
-the interface should be destroyed.
+When this occurs, the interface assumes the "bad" state. The current state of
+the interface may be queried by calling `interface_status`. Once in the bad
+state, the interface should be destroyed. A transition to the bad state is
+associated with the throw of an exception from either the `FcgiServerInterface`
+instance or one of the `FcgiRequest` instances which it constructed.
 
 ### Synchronization
 It is expected that all of the public methods of `FcgiServerInterface` are

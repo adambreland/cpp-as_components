@@ -11,7 +11,8 @@ This includes synchronization testing of `fcgi::FcgiServerInterface`.
 The `as_components` namespace includes the `fcgi` namespace. It also includes
 namespaces for the separately-useful components which were developed for
 `fcgi`. Brief descriptions of these namespaces and their main constituent
-classes follow. See the class header files for more information.
+classes follow. See header files and namespace README files for more
+information.
 
 ## Namespace `fcgi`
 The classes of namespace `fcgi` provide components for the development and
@@ -67,9 +68,9 @@ bool IsUsed(I i)
 I    NumberOfUsedIds()
 ```
 
-An `IdManager` stores identifier information efficiently by using an interval
-representation of its dynamic set of used identifiers. Efficient storage was
-deemed to be important as the primary client of `IdManager` is
+An `IdManager` instance stores identifier information efficiently by using an
+interval representation of its dynamic set of used identifiers. Efficient
+storage was deemed to be important as the primary client of `IdManager` is
 `TestFcgiClientInterface`. Load testing of FastCGI application servers may
 require keeping track of both a large number of concurrent requests for a given
 connection and a large number of concurrent connections.
