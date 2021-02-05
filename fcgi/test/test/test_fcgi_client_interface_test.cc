@@ -60,6 +60,14 @@ namespace test {
 
 // TESTING DISCUSSION
 
+// Environment variable use:
+// NO_IPV6 When set, this environment variable causes tests which rely on the
+//         presence of IPv6 networking to be skipped. This was added to support
+//         testing in docker containers which lack working IPv6 by default.
+namespace {
+  bool test_ipv6 {!(std::getenv("NO_IPV6"))};
+} // namespace
+
 // A few test cases are currently not implemented. These are marked with:
 // *** UNTESTED ***
 
@@ -921,13 +929,22 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       struct InterfaceCreationArguments inter_args {kDefaultInterfaceArguments};
       inter_args.domain          = kDomainArray[server_index];
       inter_args.unix_path       = kUnixPath1; // Ignored for internet servers.
-      std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
-      inter_return {GTestNonFatalCreateInterface(inter_args, __LINE__)};
-      std::unique_ptr<FcgiServerInterface> inter_uptr
-        {std::move(std::get<0>(inter_return))};
-      if(inter_uptr.get() == nullptr)
+      bool dont_skip_due_to_ipv6 {(inter_args.domain != AF_INET6) || test_ipv6};
+      in_port_t dummy_port {};
+      std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
+        &dummy_port))};
+      std::unique_ptr<FcgiServerInterface> inter_uptr {};
+      if(dont_skip_due_to_ipv6)
       {
-        _exit(EXIT_FAILURE);
+        std::tuple<std::unique_ptr<FcgiServerInterface>, int, in_port_t>
+        inter_return {GTestNonFatalCreateInterface(inter_args, __LINE__)};
+        inter_uptr = std::move(std::get<0>(inter_return));
+        if(inter_uptr.get() == nullptr)
+        {
+          _exit(EXIT_FAILURE);
+        }
+        port_ptr = static_cast<std::uint8_t*>(static_cast<void*>(
+          &std::get<2>(inter_return)));
       }
       //    All servers should write the ephemeral port back to the parent
       // process. The port is in network byte order. It can be byte-serialized
@@ -939,8 +956,6 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       {
         close(pipes[i][0]);
       }
-      std::uint8_t* port_ptr {static_cast<std::uint8_t*>(static_cast<void*>(
-        &std::get<2>(inter_return)))};
       if(socket_functions::SocketWrite(pipes[server_index][1], port_ptr,
         sizeof(in_port_t)) < sizeof(in_port_t))
       {
@@ -951,36 +966,43 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       {
         close(pipes[i][1]);
       }
-      std::vector<FcgiRequest> requests {};
-      while(true)
+      if(dont_skip_due_to_ipv6)
       {
-        // A server will block in a call to AcceptRequests before it is killed.
-        requests = inter_uptr->AcceptRequests();
-        for(std::vector<FcgiRequest>::iterator iter {requests.begin()};
-          iter != requests.end(); ++iter)
+        std::vector<FcgiRequest> requests {};
+        while(true)
         {
-          if(iter->get_environment_map() != kSharedExerciseParams)
+          // A server will block in a call to AcceptRequests before it is killed.
+          requests = inter_uptr->AcceptRequests();
+          for(std::vector<FcgiRequest>::iterator iter {requests.begin()};
+            iter != requests.end(); ++iter)
           {
-            _exit(EXIT_FAILURE);
-          }
-          if(iter->get_role() != FCGI_RESPONDER)
-          {
-            _exit(EXIT_FAILURE);
-          }
-          // Both true and false values for keep_conn are expected.
-          const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
-          const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
-          int write_count {0};
-          // Convert the returned boolean write status to an integer.
-          // Check that all writes were successful.
-          write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
-          write_count += iter->WriteError(data_ref.begin(), data_ref.end());
-          write_count += iter->Complete(EXIT_SUCCESS);
-          if(write_count < 3)
-          {
-            _exit(EXIT_FAILURE);
+            if(iter->get_environment_map() != kSharedExerciseParams)
+            {
+              _exit(EXIT_FAILURE);
+            }
+            if(iter->get_role() != FCGI_RESPONDER)
+            {
+              _exit(EXIT_FAILURE);
+            }
+            // Both true and false values for keep_conn are expected.
+            const std::vector<std::uint8_t>& stdin_ref {iter->get_STDIN()};
+            const std::vector<std::uint8_t>& data_ref  {iter->get_DATA()};
+            int write_count {0};
+            // Convert the returned boolean write status to an integer.
+            // Check that all writes were successful.
+            write_count += iter->Write(stdin_ref.begin(), stdin_ref.end());
+            write_count += iter->WriteError(data_ref.begin(), data_ref.end());
+            write_count += iter->Complete(EXIT_SUCCESS);
+            if(write_count < 3)
+            {
+              _exit(EXIT_FAILURE);
+            }
           }
         }
+      }
+      else // The child process and its server component aren't needed.
+      {
+        _exit(EXIT_SUCCESS);
       }
     }
     catch(...)
@@ -1053,8 +1075,12 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
       int connection_buffer {};
       for(int j {0}; j != connection_count; ++j)
       {
-        constexpr const char* prefix {"connection iteration index: "};
-        std::string error_message {prefix};
+        int current_domain {kDomainArray[i]};
+        if((current_domain == AF_INET6) && (!test_ipv6))
+        {
+          continue;
+        }
+        std::string error_message {"connection iteration index: "};
         error_message.append(std::to_string((connection_count*i) + j));
         ::testing::ScopedTrace iteration_tracer {"", __LINE__, error_message};
         ASSERT_NO_THROW(connection_buffer = client_inter.Connect(
@@ -1070,7 +1096,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
           {
             connection_buffer,
             {
-              /* domain              = */ kDomainArray[i],
+              /* domain              = */ current_domain,
               /* received_get_values = */ false,
               /* received_unknown    = */ false,
               /* observer            = */
@@ -1520,6 +1546,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   // Terminate the child processes.
   for(int i {0}; i < kDomainCount; ++i)
   {
+    if((kDomainArray[i] == AF_INET6) && !test_ipv6)
+    {
+      continue;
+    }
     EXPECT_NO_FATAL_FAILURE(GTestFatalTerminateChild(child_id_array[i],
       __LINE__)) << "Iteration count i = " << i;
   }
