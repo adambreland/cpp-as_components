@@ -61,6 +61,14 @@ namespace as_components {
 namespace fcgi {
 namespace test {
 
+// Environment variable usage:
+// NO_IPV6 When set, this environment variable causes tests which rely on the
+//         presence of IPv6 networking to be skipped. This was added to support
+//         testing in docker containers which lack IPv6 by default.
+namespace {
+  constexpr const char* const NO_IPV6 {"NO_IPV6"};
+} // namespace
+
 // ConstructionExceptionsAndDirectlyObservableEffects
 // Examined properties:
 // (Let "positive" mean an exception was thrown.)
@@ -1049,9 +1057,7 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     static_cast<FcgiType>(25), 2);
   }
 
-  // Allows tests which rely on the presence of IPv6 networking to be skipped
-  // when the environment variable NO_IPV6 is set to any value.
-  if(!std::getenv("NO_IPV6"))
+  if(!std::getenv(NO_IPV6))
   {
     // Case 3: The management request type has value 100. A body of bytes where
     // each byte has value 1 when interpreted as std::uint8_t is present. The
@@ -1716,22 +1722,25 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
     test.RunTest();
   }
 
-  // Case 3: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+  if(!std::getenv(NO_IPV6))
   {
-    struct ConnectionAcceptanceAndRejectionTestArguments args {};
-    args.inter_args.domain          = AF_INET6;
-    args.inter_args.max_connections = 1;
-    args.inter_args.max_requests    = 1;
-    args.inter_args.app_status      = EXIT_FAILURE;
-    args.inter_args.unix_path       = path;
+    // Case 3: max_connections == 1, FCGI_WEB_SERVER_ADDRS is empty. AF_INET6.
+    {
+      struct ConnectionAcceptanceAndRejectionTestArguments args {};
+      args.inter_args.domain          = AF_INET6;
+      args.inter_args.max_connections = 1;
+      args.inter_args.max_requests    = 1;
+      args.inter_args.app_status      = EXIT_FAILURE;
+      args.inter_args.unix_path       = path;
 
-    args.initial_connections        = 1;
-    args.overload_after             = 5; // No overload.
-    args.expected_status            = std::vector<std::uint8_t> {1, 0};
-    args.test_case                  = 3;
+      args.initial_connections        = 1;
+      args.overload_after             = 5; // No overload.
+      args.expected_status            = std::vector<std::uint8_t> {1, 0};
+      args.test_case                  = 3;
 
-    ConnectionAcceptanceAndRejectionTest test {std::move(args)};
-    test.RunTest();
+      ConnectionAcceptanceAndRejectionTest test {std::move(args)};
+      test.RunTest();
+    }
   }
 
   // Case 4: max_connections == 5, FCGI_WEB_SERVER_ADDRS is empty.
@@ -1806,33 +1815,36 @@ TEST(FcgiServerInterface, ConnectionAcceptanceAndRejection)
   // 7) FCGI_WEB_SERVER_ADDRS contains the IPv6 private address fd00::1.
   //    A client with IPv6 loopback address ::1 tries to make a connection
   //    and it fails.
+  if(!std::getenv(NO_IPV6))
   {
-    if(setenv("FCGI_WEB_SERVER_ADDRS", "fd00::1", 1) != -1)
     {
-      struct ConnectionAcceptanceAndRejectionTestArguments args {};
-      args.inter_args.domain          = AF_INET6;
-      args.inter_args.max_connections = 100;
-      args.inter_args.max_requests    = 1000;
-      args.inter_args.app_status      = EXIT_FAILURE;
-      args.inter_args.unix_path       = path;
-      
-      args.initial_connections        = 0;
-      args.overload_after             = 10; // No overload.
-      args.expected_status            = std::vector<std::uint8_t> {0};
-      args.test_case                  = 7;
+      if(setenv("FCGI_WEB_SERVER_ADDRS", "fd00::1", 1) != -1)
+      {
+        struct ConnectionAcceptanceAndRejectionTestArguments args {};
+        args.inter_args.domain          = AF_INET6;
+        args.inter_args.max_connections = 100;
+        args.inter_args.max_requests    = 1000;
+        args.inter_args.app_status      = EXIT_FAILURE;
+        args.inter_args.unix_path       = path;
 
-      ConnectionAcceptanceAndRejectionTest test {std::move(args)};
-      test.RunTest();
+        args.initial_connections        = 0;
+        args.overload_after             = 10; // No overload.
+        args.expected_status            = std::vector<std::uint8_t> {0};
+        args.test_case                  = 7;
 
-      if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) == -1)
-        ADD_FAILURE() << "The environment could not be restored by a call to "
-          "setenv in case 7." << '\n' << std::strerror(errno);
+        ConnectionAcceptanceAndRejectionTest test {std::move(args)};
+        test.RunTest();
+
+        if(setenv("FCGI_WEB_SERVER_ADDRS", "", 1) == -1)
+          ADD_FAILURE() << "The environment could not be restored by a call to "
+            "setenv in case 7." << '\n' << std::strerror(errno);
+      }
+      else
+        ADD_FAILURE() << "The environment could not be modified with by a call "
+          "to setenv in case 7." << '\n' << std::strerror(errno);
     }
-    else
-      ADD_FAILURE() << "The environment could not be modified with by a call "
-        "to setenv in case 7." << '\n' << std::strerror(errno);
   }
-  
+
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
     "ConnectionAcceptanceAndRejection", __LINE__);
 
