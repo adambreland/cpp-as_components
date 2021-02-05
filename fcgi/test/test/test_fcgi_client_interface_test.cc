@@ -1472,8 +1472,10 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
   // Once all of the responses have been received, the expected observable
   // state values of the client interface are known.
   total_pending_request_count   = 0U;
-  total_completed_request_count = kDomainCount * connection_count *
-    first_application_request_count;
+  int ipv6_conditional_domain_count {((test_ipv6) ? kDomainCount :
+    (kDomainCount - 1))};
+  total_completed_request_count = ipv6_conditional_domain_count *
+    connection_count * first_application_request_count;
   EXPECT_EQ(client_inter.PendingRequestCount(), total_pending_request_count);
   EXPECT_EQ(client_inter.CompletedRequestCount(),
     total_completed_request_count);
@@ -1538,8 +1540,8 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase1)
     close_exercise_data, second_application_request_count, __LINE__));
   // Verify state for totals.
   total_pending_request_count    = 0U;
-  total_completed_request_count += kDomainCount * connection_count *
-    second_application_request_count;
+  total_completed_request_count += ipv6_conditional_domain_count *
+    connection_count * second_application_request_count;
   EXPECT_EQ(client_inter.PendingRequestCount(), total_pending_request_count);
   EXPECT_EQ(client_inter.CompletedRequestCount(),
     total_completed_request_count);
