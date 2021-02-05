@@ -1701,7 +1701,10 @@ TEST(Connect, ConnectCase4)
 {
   TestFcgiClientInterface client_inter {};
   EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("127.0.0.1", 11000U), -1));
-  EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("::1", 11000U), -1));
+  if(test_ipv6)
+  {
+    EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect("::1", 11000U), -1));
+  }
   EXPECT_NO_THROW(EXPECT_EQ(client_inter.Connect(kUnixPath1, 0U), -1));
   int unix_socket {socket(AF_UNIX, SOCK_STREAM, 0)};
   ASSERT_NE(unix_socket, -1) << std::strerror(errno);
