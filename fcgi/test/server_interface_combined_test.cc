@@ -2909,7 +2909,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
   // b) As a, but the completing, empty FCGI_STDIN record is sent first.
   {
     struct InterfaceCreationArguments inter_args {};
-    inter_args.domain          = AF_INET6;
+    inter_args.domain          = AF_INET;
     inter_args.backlog         = 5;
     inter_args.max_connections = 1;
     inter_args.max_requests    = 1;
