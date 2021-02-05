@@ -525,6 +525,9 @@ GTestNonFatalSingleProcessInterfaceAndClients(
     client_descriptors_ = std::vector<int>(client_number, -1);
     for(int i {0}; i < client_number; ++i)
     {
+      std::string loop_message {"Client index: "};
+      loop_message.append(std::to_string(i));
+      ::testing::ScopedTrace {__FILE__, __LINE__, loop_message};
       // Create a client socket and make it non-blocking.
       client_descriptors_[i] = socket(inter_args_.domain, SOCK_STREAM, 0);
       if(client_descriptors_[i] == -1)

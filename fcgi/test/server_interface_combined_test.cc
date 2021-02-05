@@ -1049,62 +1049,67 @@ TEST(FcgiServerInterface, UnknownManagementRequests)
     static_cast<FcgiType>(25), 2);
   }
 
-  // Case 3: The management request type has value 100. A body of bytes where
-  // each byte has value 1 when interpreted as std::uint8_t is present. The
-  // content is aligned on an 8-byte boundary.
+  // Allows tests which rely on the presence of IPv6 networking to be skipped
+  // when the environment variable NO_IPV6 is set to any value.
+  if(!std::getenv("NO_IPV6"))
   {
-    struct InterfaceCreationArguments args {};
-    args.domain          = AF_INET6;
-    args.backlog         = 5;
-    args.max_connections = 1000;
-    args.max_requests    = 1000;
-    args.app_status      = EXIT_FAILURE;
-    args.unix_path       = nullptr;
+    // Case 3: The management request type has value 100. A body of bytes where
+    // each byte has value 1 when interpreted as std::uint8_t is present. The
+    // content is aligned on an 8-byte boundary.
+    {
+      struct InterfaceCreationArguments args {};
+      args.domain          = AF_INET6;
+      args.backlog         = 5;
+      args.max_connections = 1000;
+      args.max_requests    = 1000;
+      args.app_status      = EXIT_FAILURE;
+      args.unix_path       = nullptr;
 
-    std::uint8_t header[2 * FCGI_HEADER_LEN] = {};
-    PopulateHeader(header, static_cast<FcgiType>(100),
-      0U, FCGI_HEADER_LEN, 0U);
-    std::memset(header + FCGI_HEADER_LEN, 1, FCGI_HEADER_LEN);
-    UnknownManagementRecordTester(args, header, 2 * FCGI_HEADER_LEN, 
-    static_cast<FcgiType>(100) , 3);
-  }
+      std::uint8_t header[2 * FCGI_HEADER_LEN] = {};
+      PopulateHeader(header, static_cast<FcgiType>(100),
+        0U, FCGI_HEADER_LEN, 0U);
+      std::memset(header + FCGI_HEADER_LEN, 1, FCGI_HEADER_LEN);
+      UnknownManagementRecordTester(args, header, 2 * FCGI_HEADER_LEN, 
+      static_cast<FcgiType>(100) , 3);
+    }
 
-  // Case 4: As in 3, but the content is not aligned on an 8-byte boundary and
-  // padding is used.
-  {
-    struct InterfaceCreationArguments args {};
-    args.domain          = AF_INET6;
-    args.backlog         = 5;
-    args.max_connections = 1;
-    args.max_requests    = 1;
-    args.app_status      = EXIT_FAILURE;
-    args.unix_path       = nullptr;
+    // Case 4: As in 3, but the content is not aligned on an 8-byte boundary and
+    // padding is used.
+    {
+      struct InterfaceCreationArguments args {};
+      args.domain          = AF_INET6;
+      args.backlog         = 5;
+      args.max_connections = 1;
+      args.max_requests    = 1;
+      args.app_status      = EXIT_FAILURE;
+      args.unix_path       = nullptr;
 
-    std::uint8_t header[2 * FCGI_HEADER_LEN] = {};
-    PopulateHeader(header, static_cast<FcgiType>(100),
-      0U, 3U, 5U);
-    std::memset(header + FCGI_HEADER_LEN, 1, 3);
-    UnknownManagementRecordTester(args, header, 2 * FCGI_HEADER_LEN, 
-    static_cast<FcgiType>(100) , 4);
-  }
+      std::uint8_t header[2 * FCGI_HEADER_LEN] = {};
+      PopulateHeader(header, static_cast<FcgiType>(100),
+        0U, 3U, 5U);
+      std::memset(header + FCGI_HEADER_LEN, 1, 3);
+      UnknownManagementRecordTester(args, header, 2 * FCGI_HEADER_LEN, 
+      static_cast<FcgiType>(100) , 4);
+    }
 
-  // Case 5: As in 3, but content is not aligned on an 8-byte boundary and no
-  // padding is used.
-  {
-    struct InterfaceCreationArguments args {};
-    args.domain          = AF_INET6;
-    args.backlog         = 5;
-    args.max_connections = 1;
-    args.max_requests    = 1;
-    args.app_status      = EXIT_FAILURE;
-    args.unix_path       = nullptr;
+    // Case 5: As in 3, but content is not aligned on an 8-byte boundary and no
+    // padding is used.
+    {
+      struct InterfaceCreationArguments args {};
+      args.domain          = AF_INET6;
+      args.backlog         = 5;
+      args.max_connections = 1;
+      args.max_requests    = 1;
+      args.app_status      = EXIT_FAILURE;
+      args.unix_path       = nullptr;
 
-    std::uint8_t header[FCGI_HEADER_LEN + 3U] = {};
-    PopulateHeader(header, static_cast<FcgiType>(100),
-      0U, 3U, 0U);
-    std::memset(header + FCGI_HEADER_LEN, 1, 3);
-    UnknownManagementRecordTester(args, header, FCGI_HEADER_LEN + 3, 
-    static_cast<FcgiType>(100) , 5);
+      std::uint8_t header[FCGI_HEADER_LEN + 3U] = {};
+      PopulateHeader(header, static_cast<FcgiType>(100),
+        0U, 3U, 0U);
+      std::memset(header + FCGI_HEADER_LEN, 1, 3);
+      UnknownManagementRecordTester(args, header, FCGI_HEADER_LEN + 3, 
+      static_cast<FcgiType>(100) , 5);
+    }
   }
 
   testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,

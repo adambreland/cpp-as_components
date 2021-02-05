@@ -41,5 +41,7 @@ bazel build //test/test:connect_interpositioning      && \
 bazel build //test/test:connect_interpositioning_test && \
 LD_PRELOAD=${PWD}/bazel-bin/test/test/libconnect_interpositioning.so \
   ./bazel-bin/test/test/connect_interpositioning_test
+test_status=${?}
 
 echo -e "\nExiting test script."
+exit ${test_status}
