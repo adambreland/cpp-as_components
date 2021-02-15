@@ -38,7 +38,11 @@
 #include "external/as_components_testing/include/as_components_testing_utilities.h"
 #include "external/googletest/googletest/include/gtest/gtest.h"
 
-#include "server_interface_combined.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_server_interface.h"
+#include "include/fcgi_request_identifier.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 #include "test/include/test_fcgi_client_interface.h"
 

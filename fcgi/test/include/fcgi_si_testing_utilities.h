@@ -34,7 +34,8 @@
 #include <tuple>
 #include <vector>
 
-#include "server_interface_combined.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_server_interface.h"
 
 // Key:
 // BAZEL DEPENDENCY       This marks use of a feature which is provided by the

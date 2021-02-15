@@ -28,10 +28,10 @@
 
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "include/fcgi_request.h"
-#include "include/fcgi_server_interface.h"
 #include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request.h"
 #include "include/fcgi_request_identifier.h"
+#include "include/fcgi_server_interface.h"
 
 // Class implementation notes:
 // 1) Discipline for accessing shared state:

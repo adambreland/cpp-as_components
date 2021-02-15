@@ -33,9 +33,9 @@
 #include <mutex>
 #include <vector>
 
-#include "include/fcgi_server_interface.h"
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request_identifier.h"
+#include "include/fcgi_server_interface.h"
 #include "include/fcgi_utilities.h"
 
 namespace as_components {

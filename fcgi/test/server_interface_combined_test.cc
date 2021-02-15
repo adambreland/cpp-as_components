@@ -20,7 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "server_interface_combined.h"
+#include "include/fcgi_request.h"
+#include "include/fcgi_server_interface.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -55,6 +56,7 @@
 #include "external/googletest/googletest/include/gtest/gtest.h"
 #include "external/socket_functions/include/socket_functions.h"
 
+#include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 
 namespace as_components {

@@ -21,8 +21,29 @@
 # SOFTWARE.
 
 cc_library(
+    name       = "fcgi_si_testing_utilities",
+    deps       = [
+        "//:fcgi_protocol_constants",
+        "//:server_interface_combined",
+        "@googletest//:gtest"
+    ],
+    srcs       = ["//test:src/fcgi_si_testing_utilities.cc"],
+    hdrs       = ["//test:include/fcgi_si_testing_utilities.h"],
+    copts      = [
+        "-std=c++17",
+        "-g",
+        "-O2",
+        "-Wextra",
+        "-iquote ."   
+    ],
+    visibility = ["//visibility:public"]
+)
+
+cc_library(
     name      = "test_fcgi_client_interface",
     deps      = [
+        "//:fcgi_protocol_constants",
+        "//:fcgi_request_identifier",
         "//:fcgi_utilities",
         "@socket_functions//:socket_functions"
     ],
@@ -43,36 +64,17 @@ cc_library(
     visibility = ["//visibility:public"]
 )
 
-cc_library(
-    name       = "fcgi_si_testing_utilities",
-    deps       = [
-        "//:server_interface_combined",
-        "@googletest//:gtest"
-    ],
-    srcs       = [
-        "//test:src/fcgi_si_testing_utilities.cc",
-    ],
-    hdrs       = ["//test:include/fcgi_si_testing_utilities.h"],
-    copts      = [
-        "-std=c++17",
-        "-g",
-        "-O2",
-        "-Wextra",
-        "-iquote ."   
-    ],
-    visibility = ["//visibility:public"]
-)
-
 cc_test(
     name       = "fcgi_utilities_test",
     deps       = [
+        "//:fcgi_protocol_constants",
         "//:fcgi_utilities",
         "//test:fcgi_si_testing_utilities",
         "@as_components_testing//gtest:as_components_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
-    srcs       = ["//test:utilities_test.cc"],
+    srcs       = ["//test:fcgi_utilities_test.cc"],
     copts      = [
         "-std=c++17",
         "-g",
@@ -84,6 +86,8 @@ cc_test(
 cc_test(
     name       = "server_interface_combined_test",
     deps       = [
+        "//:fcgi_protocol_constants",
+        "//:fcgi_utilities",
         "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "@as_components_testing//:as_components_testing_utilities",

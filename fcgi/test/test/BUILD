@@ -23,6 +23,8 @@
 cc_library(
     name          = "client_interface_testing_utilities",
     deps          = [
+        "//:fcgi_protocol_constants",
+        "//:fcgi_request_identifier",
         "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "//test:test_fcgi_client_interface",
@@ -52,6 +54,8 @@ cc_library(
 cc_test(
     name  = "test_fcgi_client_interface_test",
     deps  = [
+        "//:fcgi_protocol_constants",
+        "//:fcgi_request_identifier",
         "//:server_interface_combined",
         "//test:fcgi_si_testing_utilities",
         "//test:test_fcgi_client_interface",
@@ -102,7 +106,10 @@ cc_library(
 
 cc_library(
     name     = "connect_interpositioning",
-    deps     = ["//test/test:shared_interpositioning_state"],
+    deps     = [
+        "//:server_interface_combined",
+        "//test/test:shared_interpositioning_state"
+    ],
     srcs     = ["//test/test:src/connect_interpositioning.cc"],
     copts    = [
         "-std=c++17",

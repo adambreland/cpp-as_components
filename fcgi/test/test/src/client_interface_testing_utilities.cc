@@ -41,7 +41,10 @@
 #include "external/googletest/googletest/include/gtest/gtest.h"
 #include "external/socket_functions/include/socket_functions.h"
 
-#include "server_interface_combined.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_server_interface.h"
 #include "test/include/test_fcgi_client_interface.h"
 
 namespace as_components {

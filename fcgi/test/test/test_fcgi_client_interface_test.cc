@@ -49,7 +49,10 @@
 #include "external/socket_functions/include/socket_functions.h"
 #include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
 
-#include "server_interface_combined.h"
+#include "include/fcgi_protocol_constants.h"
+#include "include/fcgi_request.h"
+#include "include/fcgi_request_identifier.h"
+#include "include/fcgi_server_interface.h"
 #include "test/include/fcgi_si_testing_utilities.h"
 #include "test/test/include/client_interface_testing_utilities.h"
 
