@@ -26,8 +26,6 @@
 #ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 
-#include "include/fcgi_request.h"
-
 #include <sys/types.h>     // For ssize_t.
 #include <sys/uio.h>
 #include <unistd.h>
