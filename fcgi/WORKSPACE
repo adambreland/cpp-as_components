@@ -39,3 +39,10 @@ local_repository(
     name = "socket_functions",
     path = "external/socket_functions"
 )
+
+local_repository(
+    name = "as_components",
+    path = ".."
+)
+
+register_toolchains("@as_components//:simple_x86_64_linux_toolchain")

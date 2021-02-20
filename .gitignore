@@ -9,7 +9,7 @@
 external/
 
 # Bazel build ouputs.
-bazel*
+**/bazel*
 
-# VS Code configuration files.
+# Visual Studio Code configuration files.
 .vscode/

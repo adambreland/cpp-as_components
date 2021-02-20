@@ -24,7 +24,6 @@
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
 
 #include <cstdint>
-
 #include <utility>
 
 namespace as_components {
