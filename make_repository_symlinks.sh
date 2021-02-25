@@ -10,7 +10,8 @@ echo -e "${0}""\n"
 # value is extracted and associated with its respective key.
 declare -A external_dependency_map
 external_dependency_map=(\
-  [googletest]=)
+  [googletest]= \
+  [simple_bazel_cpp_toolchain]=)
 
 declare -a workspace_name_list
 workspace_name_list=(\
@@ -23,11 +24,11 @@ function PrintHelp
 {
   local escaped_help_message=\
 "This script creates symbolic links which are necessary to build the modules \
-of as_components. A directory named \"external\" is created in each of the \
-Bazel workspaces of as_components. Symbolic links to the internal and external \
-dependencies of a workspace are added to the external directory for each \
-workspace. External dependency paths are provided as script arguments with \
-the form <dependency name>=<dependency path>. For example:\n\
+of as_components. A directory named \"external_repo_links\" is created in \
+each of the Bazel workspaces of as_components. Symbolic links to the internal \
+and external dependencies of a workspace are added to the external directory \
+for each workspace. External dependency paths are provided as script \
+arguments with the form <dependency name>=<dependency path>. For example:\n\
 googletest=/usr/local/src/googletest\n\n\
 The names of the necessary external dependencies are printed below:"
 
@@ -51,18 +52,22 @@ function CreateSymlinksForInternalDependencies
 {
   local workspace_name
   for workspace_name in "${workspace_name_list[@]}"; do
-    mkdir -v "${workspace_name}"/external
+    mkdir -v "${workspace_name}"/external_repo_links
     case ${workspace_name} in
       (fcgi)
-        ln -v -s ${PWD}/testing fcgi/external/as_components_testing
-        ln -v -s ${PWD}/id_manager fcgi/external/id_manager
-        ln -v -s ${PWD}/socket_functions fcgi/external/socket_functions
+        ln -v -s ${PWD}                  fcgi/external_repo_links/as_components
+        ln -v -s ${PWD}/testing          fcgi/external_repo_links/as_components_testing
+        ln -v -s ${PWD}/id_manager       fcgi/external_repo_links/id_manager
+        ln -v -s ${PWD}/socket_functions fcgi/external_repo_links/socket_functions
         ;;
       (id_manager)
+        ln -v -s ${PWD}                  id_manager/external_repo_links/as_components
         ;;
       (socket_functions)
+        ln -v -s ${PWD}                  socket_functions/external_repo_links/as_components
         ;;
       (testing)
+        ln -v -s ${PWD}                  testing/external_repo_links/as_components
         ;;
       (*)
         PrintEscapedErrorMessageForExit "Internal error. An unknown workspace \
@@ -76,16 +81,20 @@ CreateSymlinksForInternalDependencies."
 
 function CreateSymlinksForExternalDependencies
 {
+  # All workspaces use googletest and simple_bazel_cpp_toolchain.
+  local original_directory=${PWD}
+  cd "${external_dependency_map[googletest]}"
+  local absolute_googletest_directory=${PWD}
+  cd "${external_dependency_map[simple_bazel_cpp_toolchain]}"
+  local absolute_toolchain_directory=${PWD}
+  cd ${original_directory}
   local workspace_name
   for workspace_name in "${workspace_name_list[@]}"; do
     # Common actions.
-    # All workspaces use googletest
-    local original_directory=${PWD}
-    cd "${external_dependency_map[googletest]}"
-    local absolute_googletest_directory=${PWD}
-    cd ${original_directory}
     ln -v -s ${absolute_googletest_directory} \
-"${workspace_name}"/external/googletest
+"${workspace_name}"/external_repo_links/googletest
+    ln -v -s ${absolute_toolchain_directory} \
+"${workspace_name}"/external_repo_links/simple_bazel_cpp_toolchain
     # Actions specific to a workspace.
     # (No actions are needed in this case.)
     case ${workspace_name} in
@@ -112,6 +121,7 @@ CreateSymlinksForExternalDependencies."
 # Did the user ask for help?
 if [[ (${1} == "--help") || (${1} == "help") ]]; then
   PrintHelp
+  exit 0
 fi
 
 # Performs the following checks on workspace state:
@@ -169,6 +179,7 @@ fi
 # Processes the arguments, and performs limited validation during processing.
 argument_dependency_name=
 argument_dependency_path=
+declare -i externals_in_arguments_count=0
 for argument in "${@}"; do
   argument_dependency_name=${argument%%=*}
   # Was an external dependency name not extracted from the argument?
@@ -191,9 +202,20 @@ present in: ${argument}\nInvalid name: ${argument_dependency_name}"
 ${argument_dependency_name}\nInvalid value: ${argument_dependency_path}"
     exit 1
   fi
+  # Conditionally updates the count of unique arguments which were processed.
+  if [[ -z ${external_dependency_map[${argument_dependency_name}]} ]]; then
+    # (( externals_in_arguments_count = externals_in_arguments_count + 1 ))
+    (( ++externals_in_arguments_count ))
+  fi
   external_dependency_map[${argument_dependency_name}]=\
 ${argument_dependency_path}
 done
+# Check that an argument was provided for each external dependency.
+if [[ externals_in_arguments_count -ne ${#external_dependency_map[@]} ]]; then
+  PrintEscapedErrorMessageForExit "Some external dependency paths were not \
+provided."
+  exit 1
+fi
 
 CreateSymlinksForInternalDependencies
 CreateSymlinksForExternalDependencies

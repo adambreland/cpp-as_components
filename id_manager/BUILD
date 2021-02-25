@@ -38,7 +38,7 @@ cc_library(
 # The question is why Bazel creates _solib_k8 and not _solib_x86_64.
 genrule(
     name = "patch_missing_x86_64_directory",
-    srcs = [":empty"],
+    srcs = [],
     outs = ["_solib_x86_64"],
     # Escape $ with $$ to prevent make variable substitution.
     cmd_bash = "mkdir $@",
