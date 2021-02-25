@@ -20,18 +20,20 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+load("@as_components//:common_build_data.bzl", "copts_list")
+
 cc_test(
-    name  = "socket_functions_test",
-    deps  = [
-             "//:socket_functions",
-             "@googletest//:gtest",
-             "@googletest//:gtest_main"
+    name = "socket_functions_test",
+    deps = [
+        "//:socket_functions_header",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main"
     ],
-    srcs  = ["//test:socket_functions_test.cc"],
-    copts      = [
-        "-std=c++17",
-        "-g",
-        "-iquote .",
-        "-Wextra"
+    srcs = [
+        "socket_functions_test.cc",
+        "//:libsocket_functions.so"
     ],
+    copts = copts_list,
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
 )

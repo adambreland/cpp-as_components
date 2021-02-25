@@ -25,7 +25,7 @@ load("@as_components//:common_build_data.bzl", "copts_list")
 cc_library(
     name = "as_components_testing_gtest_utilities",
     deps = [
-        "//:as_components_testing_utilities",
+        "//:as_components_testing_utilities", # Archive
         "@googletest//:gtest"
     ],
     srcs = ["src/as_components_testing_gtest_utilities.cc"],

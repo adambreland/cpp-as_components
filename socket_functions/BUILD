@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_list")
+load("@as_components//:common_build_data.bzl", "copts_with_optimization_list")
 
 # Build targets
 
@@ -37,8 +37,8 @@ cc_binary(
     name = "libsocket_functions.so",
     deps = [":socket_functions_header"],
     srcs = ["src/socket_functions.cc"],
-    copts = copts_list,
+    copts = copts_with_optimization_list,
     features = ["interpret_as_shared_library"],
-    visibility = ["//visibility:public"],
-    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+    visibility = ["//visibility:public"]
 )
