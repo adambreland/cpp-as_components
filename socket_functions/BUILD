@@ -20,15 +20,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+load("@as_components//:common_build_data.bzl", "copts_list")
+
+# Build targets
+
+# The header and binary target definitions for libsocket_functions.so.
 cc_library(
-    name       = "socket_functions",
-    srcs       = ["//:src/socket_functions.cc"],
-    hdrs       = ["//:include/socket_functions.h"],
-    copts      = [
-        "-std=c++17",
-        "-g",
-        "-O2",
-        "-Wextra"
-    ],
+    name = "socket_functions_header",
+    deps = [],
+    srcs = [],
+    hdrs = ["include/socket_functions.h"],
     visibility = ["//visibility:public"]
+)
+
+cc_binary(
+    name = "libsocket_functions.so",
+    deps = [":socket_functions_header"],
+    srcs = ["src/socket_functions.cc"],
+    copts = copts_list,
+    features = ["interpret_as_shared_library"],
+    visibility = ["//visibility:public"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )

@@ -33,7 +33,7 @@
 #include <memory>
 #include <string>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "googletest/include/gtest/gtest.h"
 
 namespace as_components {
 namespace testing {

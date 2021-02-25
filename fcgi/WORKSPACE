@@ -21,28 +21,40 @@
 # SOFTWARE.
 
 local_repository(
+    name = "as_components",
+    path = "external_repo_links/as_components"
+)
+
+local_repository(
+    name = "simple_bazel_cpp_toolchain",
+    path = "external_repo_links/simple_bazel_cpp_toolchain"
+)
+
+local_repository(
     name = "as_components_testing",
-    path = "external/as_components_testing"
+    path = "external_repo_links/as_components_testing"
 )
 
 local_repository(
     name = "googletest",
-    path = "external/googletest"
+    path = "external_repo_links/googletest"
 )
 
 local_repository(
     name = "id_manager",
-    path = "external/id_manager"
+    path = "external_repo_links/id_manager"
 )
 
 local_repository(
     name = "socket_functions",
-    path = "external/socket_functions"
+    path = "external_repo_links/socket_functions"
 )
 
-local_repository(
-    name = "as_components",
-    path = ".."
+register_execution_platforms(
+    "@local_config_platform//:host",
+    "@simple_bazel_cpp_toolchain//:simple_cpp_x86_64_linux_platform"
 )
 
-register_toolchains("@as_components//:simple_x86_64_linux_toolchain")
+register_toolchains(
+    "@simple_bazel_cpp_toolchain//:simple_x86_64_linux_toolchain"
+)

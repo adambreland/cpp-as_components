@@ -29,8 +29,8 @@
 #include <tuple>
 #include <vector>
 
-#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "gtest/include/as_components_testing_gtest_utilities.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_utilities.h"

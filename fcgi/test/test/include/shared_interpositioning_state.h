@@ -28,7 +28,7 @@ namespace fcgi        {
 namespace test        {
 namespace test        {
 
-bool shared_connect_EINTR_return_flag {true};
+extern bool shared_connect_EINTR_return_flag;
 
 } // namespace test
 } // namespace test

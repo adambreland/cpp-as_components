@@ -28,8 +28,9 @@ echo -e \
 TestFcgiClientInterface::Connect when the connect system call initially \
 returns -1 with errno == EINTR. See the primary test documentation for a \
 description of the other test cases for TestFcgiClientInterface::Connect.\n\n\
-The implicit dependency of the test, //test/test:connect_interpositioning, \
-is built. If the build was successful, then the test is built. If each build \
+The implicit dependency of the test, \
+//test/test:libconnect_interpositioning.so, is built. If the build was \
+successful, then the test is built. If each build \
 was successful, then the test is executed.\n\n\
 This script is used to allow a test version of the connect function to \
 interpose on the connect system call. The variables of \
@@ -37,10 +38,12 @@ interpose on the connect system call. The variables of \
 and the interposing connect function.\n\n\
 Starting build and test procedure.\n"
 
-bazel build //test/test:connect_interpositioning      && \
-bazel build //test/test:connect_interpositioning_test && \
-LD_PRELOAD=${PWD}/bazel-bin/test/test/libconnect_interpositioning.so \
+bazel build //test/test:libconnect_interpositioning.so && \
+bazel build //test/test:connect_interpositioning_test  && \
+LD_PRELOAD='${ORIGIN}/libconnect_interpositioning.so' \
+  LD_LIBRARY_PATH='${ORIGIN}/../..' \
   ./bazel-bin/test/test/connect_interpositioning_test
+  
 test_status=${?}
 
 echo -e "\nExiting test script."

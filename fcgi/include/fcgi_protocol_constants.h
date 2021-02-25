@@ -30,49 +30,54 @@ namespace as_components {
 namespace fcgi {
 
 // Protocol Constants
-extern const int                       FCGI_LISTENSOCK_FILENO;
-extern const std::int_fast32_t         FCGI_HEADER_LEN;
-extern const std::uint8_t              FCGI_VERSION_1;
-extern const std::uint16_t             FCGI_NULL_REQUEST_ID;
+constexpr int                          FCGI_LISTENSOCK_FILENO         {0};
+constexpr std::int_fast32_t            FCGI_HEADER_LEN                {8};
+constexpr std::uint8_t                 FCGI_VERSION_1                 {1U};
+constexpr std::uint16_t                FCGI_NULL_REQUEST_ID           {0U};
   // Flags
-extern const std::uint8_t              FCGI_KEEP_CONN;
+constexpr std::uint8_t                 FCGI_KEEP_CONN                 {1U};
   // Roles
-extern const std::uint16_t             FCGI_RESPONDER;
-extern const std::uint16_t             FCGI_AUTHORIZER;
-extern const std::uint16_t             FCGI_FILTER;
+constexpr std::uint16_t                FCGI_RESPONDER                 {1U};
+constexpr std::uint16_t                FCGI_AUTHORIZER                {2U};
+constexpr std::uint16_t                FCGI_FILTER                    {3U};
   // Protocol status values for FCGI_END_REQUEST records.
-extern const std::uint8_t              FCGI_REQUEST_COMPLETE;
-extern const std::uint8_t              FCGI_CANT_MPX_CONN;
-extern const std::uint8_t              FCGI_OVERLOADED;
-extern const std::uint8_t              FCGI_UNKNOWN_ROLE;
+constexpr std::uint8_t                 FCGI_REQUEST_COMPLETE          {0U};
+constexpr std::uint8_t                 FCGI_CANT_MPX_CONN             {1U};
+constexpr std::uint8_t                 FCGI_OVERLOADED                {2U};
+constexpr std::uint8_t                 FCGI_UNKNOWN_ROLE              {3U};
   // Default FCGI_GET_VALUES record variables.
   // (As character byte sequences encoded in ASCII/UTF-8.)
-extern const std::vector<std::uint8_t> FCGI_MAX_CONNS;
-extern const std::vector<std::uint8_t> FCGI_MAX_REQS;
-extern const std::vector<std::uint8_t> FCGI_MPXS_CONNS;
+const     std::vector<std::uint8_t>   FCGI_MAX_CONNS
+  {'F', 'C', 'G', 'I', '_', 'M', 'A', 'X', '_', 'C', 'O', 'N', 'N', 'S'};
+const     std::vector<std::uint8_t>   FCGI_MAX_REQS
+  {'F', 'C', 'G', 'I', '_', 'M', 'A', 'X', '_', 'R', 'E', 'Q', 'S'};
+const     std::vector<std::uint8_t>   FCGI_MPXS_CONNS
+  {'F', 'C', 'G', 'I', '_', 'M', 'P', 'X', 'S', '_', 'C', 'O', 'N', 'N', 'S'};
   // Header byte position definitions
-extern const std::int_fast32_t         kHeaderVersionIndex;
-extern const std::int_fast32_t         kHeaderTypeIndex;
-extern const std::int_fast32_t         kHeaderRequestIDB1Index;
-extern const std::int_fast32_t         kHeaderRequestIDB0Index;
-extern const std::int_fast32_t         kHeaderContentLengthB1Index;
-extern const std::int_fast32_t         kHeaderContentLengthB0Index;
-extern const std::int_fast32_t         kHeaderPaddingLengthIndex;
-extern const std::int_fast32_t         kHeaderReservedByteIndex;
+constexpr std::int_fast32_t            kHeaderVersionIndex            {0};
+constexpr std::int_fast32_t            kHeaderTypeIndex               {1};
+constexpr std::int_fast32_t            kHeaderRequestIDB1Index        {2};
+constexpr std::int_fast32_t            kHeaderRequestIDB0Index        {3};
+constexpr std::int_fast32_t            kHeaderContentLengthB1Index    {4};
+constexpr std::int_fast32_t            kHeaderContentLengthB0Index    {5};
+constexpr std::int_fast32_t            kHeaderPaddingLengthIndex      {6};
+constexpr std::int_fast32_t            kHeaderReservedByteIndex       {7};
   // FCGI_BEGIN_REQUEST byte position definitions
-extern const std::int_fast32_t         kBeginRequestRoleB1Index;
-extern const std::int_fast32_t         kBeginRequestRoleB0Index;
-extern const std::int_fast32_t         kBeginRequestFlagsIndex;
+constexpr std::int_fast32_t            kBeginRequestRoleB1Index       {0};
+constexpr std::int_fast32_t            kBeginRequestRoleB0Index       {1};
+constexpr std::int_fast32_t            kBeginRequestFlagsIndex        {2};
   // FCGI_END_REQUEST byte position definitions
-extern const std::int_fast32_t         kEndRequestAppStatusB3Index;
-extern const std::int_fast32_t         kEndRequestAppStatusB2Index;
-extern const std::int_fast32_t         kEndRequestAppStatusB1Index;
-extern const std::int_fast32_t         kEndRequestAppStatusB0Index;
-extern const std::int_fast32_t         kEndRequestProtocolStatusIndex;
+constexpr std::int_fast32_t            kEndRequestAppStatusB3Index    {0};
+constexpr std::int_fast32_t            kEndRequestAppStatusB2Index    {1};
+constexpr std::int_fast32_t            kEndRequestAppStatusB1Index    {2};
+constexpr std::int_fast32_t            kEndRequestAppStatusB0Index    {3};
+constexpr std::int_fast32_t            kEndRequestProtocolStatusIndex {4};
   // Maximum lengths for some record fields.
-extern const std::int_fast32_t         kNameValuePairSingleByteLength;
-extern const std::int_fast32_t         kNameValuePairFourByteLength;
-extern const std::int_fast32_t         kMaxRecordContentByteLength;
+constexpr std::int_fast32_t            kNameValuePairSingleByteLength {(1LU << 7)  - 1};
+constexpr std::int_fast32_t            kNameValuePairFourByteLength   {(1LU << 31) - 1};
+      // Use LU suffix to avoid overflow - a 32-bit signed integer cannot hold
+      // 1 << 31.
+constexpr std::int_fast32_t            kMaxRecordContentByteLength    {(1LU << 16) - 1};
 
 // Enum class for header type values.
 enum class FcgiType : std::uint8_t

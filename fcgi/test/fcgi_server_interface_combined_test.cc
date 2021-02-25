@@ -51,10 +51,10 @@
 #include <tuple>
 #include <vector>
 
-#include "external/as_components_testing/include/as_components_testing_utilities.h"
-#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
-#include "external/googletest/googletest/include/gtest/gtest.h"
-#include "external/socket_functions/include/socket_functions.h"
+#include "include/as_components_testing_utilities.h"
+#include "gtest/include/as_components_testing_gtest_utilities.h"
+#include "googletest/include/gtest/gtest.h"
+#include "include/socket_functions.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"

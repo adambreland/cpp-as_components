@@ -45,9 +45,9 @@
 #include <utility>
 #include <vector>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
-#include "external/socket_functions/include/socket_functions.h"
-#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
+#include "googletest/include/gtest/gtest.h"
+#include "include/socket_functions.h"
+#include "gtest/include/as_components_testing_gtest_utilities.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request.h"

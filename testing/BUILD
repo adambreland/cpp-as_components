@@ -20,19 +20,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+load("@as_components//:common_build_data.bzl", "copts_list")
+
+# Build targets
+
 cc_library(
-  name       = "as_components_testing_utilities",
-  srcs       = [
-      "//:src/as_components_testing_utilities.cc",
-      "//:include/as_components_testing_utilities_templates.h"
-  ],
-  hdrs       = ["//:include/as_components_testing_utilities.h"],
-  copts      = [
-      "-std=c++17",
-      "-g",
-      "-O2",
-      "-Wextra",
-      "-iquote ."
-  ],
-  visibility = ["//visibility:public"]
+    name = "as_components_testing_utilities",
+    deps = [],
+    srcs = [
+        "src/as_components_testing_utilities.cc",
+        "include/as_components_testing_utilities_templates.h"
+    ],
+    hdrs = ["include/as_components_testing_utilities.h"],
+    copts = copts_list,
+    linkstatic = True,
+    features = ["interpret_as_archive"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+    visibility = ["//visibility:public"]
 )

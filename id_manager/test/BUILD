@@ -20,21 +20,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+load("@as_components//:common_build_data.bzl", "copts_list")
+
 cc_test(
     name    = "id_manager_template_test",
-    srcs    = [
-        "//:include/id_manager_template.h",
-        "//test:id_manager_template_test.cc"
-    ],
+    srcs    = ["//test:id_manager_template_test.cc"],
     deps    = [
+        "//:id_manager",
         "@googletest//:gtest", 
         "@googletest//:gtest_main"
     ],
-    copts   = [
-      "-std=c++17",
-      "-g",
-      "-iquote .",
-      "-Wextra"
-    ],
-    timeout = "eternal"
+    copts   = copts_list
 )

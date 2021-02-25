@@ -20,35 +20,44 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+load("@as_components//:common_build_data.bzl", "copts_list")
+
 cc_library(
-    name          = "client_interface_testing_utilities",
-    deps          = [
+    name = "client_interface_testing_utilities",
+    deps = [
         "//:fcgi_protocol_constants",
         "//:fcgi_request_identifier",
-        "//:server_interface_combined",
-        "//test:fcgi_si_testing_utilities",
-        "//test:test_fcgi_client_interface",
-        "@as_components_testing//:as_components_testing_utilities",
-        "@as_components_testing//gtest:as_components_testing_gtest_utilities",
+        "//:fcgi_server_interface_combined_header",
+        "//:fcgi_utilities_header",
+        "//test:fcgi_si_testing_utilities", # Archive
+        "//test:test_fcgi_client_interface_header",
+        "@as_components_testing//:as_components_testing_utilities", # Archive
+        "@as_components_testing//gtest:as_components_testing_gtest_utilities", # Archive
+        "@socket_functions//:socket_functions_header",
         "@googletest//:gtest"
     ],
-    srcs          = ["//test/test:src/client_interface_testing_utilities.cc"],
-    hdrs          = [
-        "//test/test:include/client_interface_testing_utilities.h"
+    srcs = [
+        "src/client_interface_testing_utilities.cc",
+        "src/client_interface_testing_utilities_global_variables.cc",
+        "//:libfcgi_server_interface_combined.so",
+        "//:libfcgi_utilities.so",
+        "//test:libtest_fcgi_client_interface.so",
+        "@socket_functions//:libsocket_functions.so"
     ],
-    copts         = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
+    hdrs = [
+        "include/client_interface_testing_utilities.h"
     ],
+    copts = copts_list,
     # Set the feature test macro which is required for use of timer_create and
     # timer_settime. The minimum value is 199309L.
     local_defines = ["_POSIX_C_SOURCE=199309L"],
     # Link against the realtime library librt. Needed on Linux for use of
     # timer_create and timer_settime (POSIX interval timer functions).
-    linkopts      = ["-lrt"],
-    visibility    = ["//visibility:public"]
+    linkopts = ["-lrt"],
+    linkstatic = True,
+    features = ["interpret_as_archive"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+    visibility = ["//visibility:public"]
 )
 
 cc_test(
@@ -56,87 +65,127 @@ cc_test(
     deps  = [
         "//:fcgi_protocol_constants",
         "//:fcgi_request_identifier",
-        "//:server_interface_combined",
-        "//test:fcgi_si_testing_utilities",
-        "//test:test_fcgi_client_interface",
-        "//test/test:client_interface_testing_utilities",
+        "//:fcgi_server_interface_combined_header",
+        "//test:fcgi_si_testing_utilities", # Archive
+        "//test:test_fcgi_client_interface_header",
+        ":client_interface_testing_utilities", # Archive
+        "@socket_functions//:socket_functions_header",
+        "@as_components_testing//gtest:as_components_testing_gtest_utilities", # Archive
         "@googletest//:gtest",
         "@googletest//:gtest_main",
-        "@socket_functions//:socket_functions"
     ],
-    srcs  = ["//test/test:test_fcgi_client_interface_test.cc"],
-    copts = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
-    ]
+    srcs  = [
+        "test_fcgi_client_interface_test.cc",
+        "//:libfcgi_server_interface_combined.so",
+        "//test:libtest_fcgi_client_interface.so",
+        "@socket_functions//:libsocket_functions.so"
+    ],
+    copts = copts_list,
+    # Use $${ORIGIN}/../.. to expose the indirect dependency
+    # libfcgi_utilities.so.
+    env = {
+        "LD_LIBRARY_PATH": "$${ORIGIN}/../.."
+    },
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
 
 cc_test(
     name  = "fcgi_si_testing_utilities_test",
     deps  = [
-        "//:fcgi_utilities",
-        "//test:fcgi_si_testing_utilities",
+        "//:fcgi_utilities_header",
+        "//test:fcgi_si_testing_utilities", # Archive
         "@as_components_testing//gtest:as_components_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
-    srcs  = ["//test/test:fcgi_si_testing_utilities_test.cc"],
-    copts = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
-    ]
+    srcs  = [
+        "fcgi_si_testing_utilities_test.cc",
+        "//:libfcgi_utilities.so"
+    ],
+    copts = copts_list,
+    # 1) Use $${ORIGIN}/../.. to expose the indirect dependency
+    #    libfcgi_server_interface_combined.so.
+    # 2) Use $${ORIGIN}/../../external/socket_functions to expose the indirect
+    #    dependency libsocket_functions.so.
+    env = {
+        "LD_LIBRARY_PATH":
+            "$${ORIGIN}/../..:$${ORIGIN}/../../external/socket_functions"
+    },
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
 
+# Define a shared library with a global variable which will be accessed by
+# both :libconnect_interpositioning.so and :connect_interpositioning_test.
+# This header target solely provides an extern declaration of
+# shared_connect_EINTR_return_flag.
 cc_library(
-    name       = "shared_interpositioning_state",
-    srcs       = ["//test/test:src/shared_interpositioning_state.cc"],
-    hdrs       = ["//test/test:include/shared_interpositioning_state.h"],
-    copts      = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
-    ],
-    visibility = ["//visibility:public"]
+    name = "shared_interpositioning_state_header",
+    deps = [],
+    srcs = [],
+    hdrs = ["include/shared_interpositioning_state.h"]
 )
 
-cc_library(
-    name     = "connect_interpositioning",
-    deps     = [
-        "//:server_interface_combined",
-        "//test/test:shared_interpositioning_state"
+cc_binary(
+    name = "libshared_interpositioning_state.so",
+    deps = [":shared_interpositioning_state_header"],
+    srcs = ["src/shared_interpositioning_state.cc"],
+    copts = copts_list,
+    features = ["interpret_as_shared_library"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
+)
+
+# Define the shared library which will be preloaded to interpose on connect. A
+# header is not needed in this case.
+cc_binary(
+    name = "libconnect_interpositioning.so",
+    deps = [
+        "//:fcgi_server_interface_combined_header",
+        ":shared_interpositioning_state_header"
     ],
-    srcs     = ["//test/test:src/connect_interpositioning.cc"],
-    copts    = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
+    srcs = [
+        "src/connect_interpositioning.cc",
+        "//:libfcgi_server_interface_combined.so",
+        ":libshared_interpositioning_state.so"
     ],
-    linkopts = ["-ldl"]
+    copts = copts_list,
+    linkopts = ["-ldl"],
+    features = ["interpret_as_shared_library"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
 
 cc_test(
-    name     = "connect_interpositioning_test",
-    deps     = [
-        "//:server_interface_combined",
-        "//test:fcgi_si_testing_utilities",
-        "//test:test_fcgi_client_interface",
-        "//test/test:client_interface_testing_utilities",
-        "//test/test:shared_interpositioning_state",
+    name = "connect_interpositioning_test",
+    deps = [
+        "//:fcgi_server_interface_combined_header",
+        "//test:fcgi_si_testing_utilities", # Archive
+        "//test:test_fcgi_client_interface_header",
+        ":client_interface_testing_utilities", # Archive
+        ":shared_interpositioning_state_header",
         "@googletest//:gtest",
         "@googletest//:gtest_main",
-        "@socket_functions//:socket_functions"
+        "@socket_functions//:socket_functions_header"
     ],
-    srcs     = ["//test/test:connect_interpositioning_test.cc"],
-    copts    = [
-        "-std=c++17",
-        "-g",
-        "-Wextra",
-        "-iquote ."
-    ]
+    srcs = [
+        "connect_interpositioning_test.cc",
+        "//:libfcgi_server_interface_combined.so",
+        "//test:libtest_fcgi_client_interface.so",
+        ":libshared_interpositioning_state.so",
+        "@socket_functions//:libsocket_functions.so"
+    ],
+    copts = copts_list,
+    # Use the data attribute to ensure that libconnect_interpositioning.so is
+    # regarded as an indirect dependency of connect_interpositioning_test.
+    data = [":libconnect_interpositioning.so"],
+    # 1) For LD_PRELOAD, use ${ORIGIN} to determine the correct path to
+    #    libconnect_interpositioning.so.
+    # 2) For LD_LIBRARY_PATH, use ${ORIGIN}/../.. to expose the indirect
+    #    dependency libfcgi_utilities.so.
+    env = {
+        "LD_PRELOAD": "$${ORIGIN}/libconnect_interpositioning.so",
+        "LD_LIBRARY_PATH": "$${ORIGIN}/../.."
+    },
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )

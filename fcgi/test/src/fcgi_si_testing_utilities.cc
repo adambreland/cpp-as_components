@@ -47,7 +47,7 @@
 #include <utility>
 #include <vector>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_server_interface.h"

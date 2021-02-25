@@ -27,7 +27,7 @@
 
 #include <string>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/as_components_testing_utilities.h"
 

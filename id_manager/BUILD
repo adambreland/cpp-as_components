@@ -20,4 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-exports_files(["include/id_manager_template.h"])
+cc_library(
+    name = "id_manager",
+    deps = [],
+    srcs = [],
+    hdrs = ["include/id_manager_template.h"],
+    visibility = ["//visibility:public"]
+)

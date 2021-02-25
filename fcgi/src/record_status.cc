@@ -26,7 +26,7 @@
 #include <mutex>
 #include <vector>
 
-#include "external/socket_functions/include/socket_functions.h"
+#include "include/socket_functions.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request.h"

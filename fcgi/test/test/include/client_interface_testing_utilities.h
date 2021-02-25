@@ -35,8 +35,8 @@
 #include <map>
 #include <vector>
 
-#include "external/as_components_testing/include/as_components_testing_utilities.h"
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "include/as_components_testing_utilities.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request.h"
@@ -217,7 +217,7 @@ void GTestFatalCheckGetValuesResult(
 // main test process. This is done to to prevent process leaks in the case that
 // the main test process does not terminate the process or in the case that the
 // child process hangs and does not terminate.
-unsigned int kAlarmSecondLimit {3U};
+constexpr const unsigned int kAlarmSecondLimit {3U};
 void ChildServerAlrmRestoreAndSelfKillSet();
 
 // Default state for testing:
@@ -328,16 +328,20 @@ void GTestFatalEchoResponseCompare(
   FcgiResponse* app_response_ptr,
   int invocation_line);
 
-// This atomic flag is used to allow a blocked call to
+//    This atomic flag is used to allow a blocked call to
 // FcgiServerInterface::AcceptRequests to be broken out of. AcceptRequests may
 // be called in a loop which tests the value of the flag. If it is set, then
 // a signal handler which sets the flag should have handled a signal. Signal
 // receipt can then be arranged to occur when AcceptRequests is blocked.
+//    This strategy is used by GTestFatalServerAcceptLoop<Func>.
 //
-// This strategy is used by GTestFatalServerAcceptLoop<Func>.
-std::atomic<bool> server_accept_timeout {false};
+// EXTERNAL This variable is defined in
+// //test/test:src/client_interface_testing_utilities_global_variables.cc.
+extern std::atomic<bool> server_accept_timeout;
 
 // Sets server_accept_timeout and returns.
+// EXTERNAL This variable is defined in
+// //test/test:src/client_interface_testing_utilities_global_variables.cc.
 extern "C" void SigUsr2Handler(int);
 
 // The default timeout for a blocked call to
@@ -357,16 +361,14 @@ constexpr const struct itimerspec kTimerTimeout
   /* it_interval = */ {},
   /* it_value    = */ kNanoTimeout
 };
-struct sigevent sev
-{
-  /* sigev_notify        = */ SIGEV_SIGNAL,
-  /* sigev_signo         = */ SIGUSR2,
-  /* sigev_value (union) = */ 0,
-  /* _sigev_un           = */ 0 // system data set to default
-};
+// EXTERNAL This variable is defined in
+// //test/test:src/client_interface_testing_utilities_global_variables.cc.
+extern struct sigevent sev;
 
 timer_t CreateRealtimePosixTimer(struct sigevent* evp);
-timer_t accept_requests_block_escape_timer_id {CreateRealtimePosixTimer(&sev)};
+// EXTERNAL This variable is defined in
+// //test/test:src/client_interface_testing_utilities_global_variables.cc.
+extern timer_t accept_requests_block_escape_timer_id;
 
 // The following functions facilitate the processing of management and
 // application requests by FastCGI test server instances.

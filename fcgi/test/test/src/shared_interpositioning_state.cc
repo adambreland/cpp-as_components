@@ -21,3 +21,15 @@
 // SOFTWARE.
 
 #include "test/test/include/shared_interpositioning_state.h"
+
+namespace as_components {
+namespace fcgi        {
+namespace test        {
+namespace test        {
+
+bool shared_connect_EINTR_return_flag {true};
+
+} // namespace test
+} // namespace test
+} // namespace fcgi
+} // namespace as_components

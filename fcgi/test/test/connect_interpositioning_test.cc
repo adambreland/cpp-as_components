@@ -31,8 +31,8 @@
 #include <cstring>
 #include <string>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
-#include "external/socket_functions/include/socket_functions.h"
+#include "googletest/include/gtest/gtest.h"
+#include "include/socket_functions.h"
 
 #include "include/fcgi_request.h"
 #include "include/fcgi_server_interface.h"

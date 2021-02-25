@@ -36,8 +36,8 @@
 #include <utility>
 #include <vector>
 
-#include "external/as_components_testing/gtest/include/as_components_testing_gtest_utilities.h"
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "gtest/include/as_components_testing_gtest_utilities.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "test/include/fcgi_si_testing_utilities.h"

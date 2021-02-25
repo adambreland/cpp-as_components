@@ -47,8 +47,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "external/id_manager/include/id_manager_template.h"
-#include "external/socket_functions/include/socket_functions.h"
+#include "include/id_manager_template.h"
+#include "include/socket_functions.h"
 
 #include "include/fcgi_protocol_constants.h"
 #include "include/fcgi_request_identifier.h"

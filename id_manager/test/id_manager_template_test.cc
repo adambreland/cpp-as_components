@@ -25,7 +25,7 @@
 #include <set>
 #include <stdexcept>
 
-#include "external/googletest/googletest/include/gtest/gtest.h"
+#include "googletest/include/gtest/gtest.h"
 
 #include "include/id_manager_template.h"
 

@@ -6,7 +6,7 @@
 *.a
 
 # External dependency symbolic links.
-external/
+external_repo_links/
 
 # Bazel build ouputs.
 **/bazel*

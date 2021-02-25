@@ -26,10 +26,10 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <sys/types.h>
-#include <sys/uio.h>       // For scatter-gather I/O.
+#include <sys/uio.h>
 
-#include <cstdint>         // For std::uint8_t.
-#include <cstdlib>         // For std::size_t.
+#include <cstdint>
+#include <cstdlib>
 #include <utility>
 
 namespace as_components {
