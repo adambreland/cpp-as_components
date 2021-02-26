@@ -61,8 +61,6 @@ namespace fcgi {
 namespace test {
 namespace test {
 
-// TESTING DISCUSSION
-
 // Environment variable use:
 // NO_IPV6 When set, this environment variable causes tests which rely on the
 //         presence of IPv6 networking to be skipped. This was added to support
@@ -70,6 +68,8 @@ namespace test {
 namespace {
   bool test_ipv6 {!(std::getenv("NO_IPV6"))};
 } // namespace
+
+// TESTING DISCUSSION
 
 // A few test cases are currently not implemented. These are marked with:
 // *** UNTESTED ***

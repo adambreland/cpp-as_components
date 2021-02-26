@@ -53,11 +53,14 @@ function CreateSymlinksForInternalDependencies
   local workspace_name
   for workspace_name in "${workspace_name_list[@]}"; do
     mkdir -v "${workspace_name}"/external_repo_links
+    if [[ $? -ne 0 ]]; then
+      return 1
+    fi
     case ${workspace_name} in
       (fcgi)
-        ln -v -s ${PWD}                  fcgi/external_repo_links/as_components
-        ln -v -s ${PWD}/testing          fcgi/external_repo_links/as_components_testing
-        ln -v -s ${PWD}/id_manager       fcgi/external_repo_links/id_manager
+        ln -v -s ${PWD}                  fcgi/external_repo_links/as_components         &&
+        ln -v -s ${PWD}/testing          fcgi/external_repo_links/as_components_testing &&
+        ln -v -s ${PWD}/id_manager       fcgi/external_repo_links/id_manager            &&
         ln -v -s ${PWD}/socket_functions fcgi/external_repo_links/socket_functions
         ;;
       (id_manager)
@@ -76,6 +79,9 @@ CreateSymlinksForInternalDependencies."
         exit 1
         ;;
     esac
+    if [[ $? -ne 0 ]]; then
+      return 1
+    fi
   done
 }
 
@@ -92,9 +98,12 @@ function CreateSymlinksForExternalDependencies
   for workspace_name in "${workspace_name_list[@]}"; do
     # Common actions.
     ln -v -s ${absolute_googletest_directory} \
-"${workspace_name}"/external_repo_links/googletest
+"${workspace_name}"/external_repo_links/googletest &&
     ln -v -s ${absolute_toolchain_directory} \
 "${workspace_name}"/external_repo_links/simple_bazel_cpp_toolchain
+    if [[ $? -ne 0 ]]; then
+      return 1
+    fi
     # Actions specific to a workspace.
     # (No actions are needed in this case.)
     case ${workspace_name} in
@@ -113,6 +122,9 @@ CreateSymlinksForExternalDependencies."
         exit 1
         ;;
     esac
+    if [[ $? -ne 0 ]]; then
+      return 1
+    fi
   done
 }
 
@@ -217,6 +229,10 @@ provided."
   exit 1
 fi
 
-CreateSymlinksForInternalDependencies
-CreateSymlinksForExternalDependencies
+CreateSymlinksForInternalDependencies && CreateSymlinksForExternalDependencies
+if [[ $? -ne 0 ]]; then
+  PrintEscapedErrorMessageForExit "An error occurred during symbolic link \
+creation."
+  exit 1
+fi
 echo -e "\nThe symbolic links for as_components were created."

@@ -340,8 +340,6 @@ void GTestFatalEchoResponseCompare(
 extern std::atomic<bool> server_accept_timeout;
 
 // Sets server_accept_timeout and returns.
-// EXTERNAL This variable is defined in
-// //test/test:src/client_interface_testing_utilities_global_variables.cc.
 extern "C" void SigUsr2Handler(int);
 
 // The default timeout for a blocked call to

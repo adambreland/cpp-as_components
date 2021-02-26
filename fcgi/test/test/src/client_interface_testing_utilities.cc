@@ -635,8 +635,12 @@ void GTestFatalConnectionClosureCheck(
     {
       try
       {
-        close(descriptor);
+        // Kill the child process before closing the socket. The other order
+        // allows the child to detect socket closure and terminate. Such
+        // termination would then be registered as an error when the parent
+        // process tries to terminate the child.
         GTestFatalTerminateChild(child_id, __LINE__);
+        close(descriptor);
         unlink(kUnixPath2);
       }
       catch(std::exception& e)
