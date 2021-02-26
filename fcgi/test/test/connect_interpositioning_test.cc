@@ -45,12 +45,21 @@ namespace fcgi {
 namespace test {
 namespace test {
 
+// Environment variable use:
+// NO_IPV6 When set, this environment variable causes tests which rely on the
+//         presence of IPv6 networking to be skipped. This was added to support
+//         testing in docker containers which lack working IPv6 by default.
+namespace {
+  bool test_ipv6 {!(std::getenv("NO_IPV6"))};
+} // namespace
+
 TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
 {
   constexpr const int kChildCount {2};
   constexpr const char* kInternetAddresses[kChildCount] = {"127.0.0.1", "::1"};
   pid_t child_id_array[kChildCount] = {};
   int pipe_return_array[kChildCount][2] = {};
+  int conditional_child_count {(test_ipv6) ? kChildCount : 1};
   TestFcgiClientInterface client_inter {};
 
   // A lambda function to close all of the pipe descriptors.
@@ -72,7 +81,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
   };
 
   // Create the pipes.
-  for(int i {0}; i != kChildCount; ++i)
+  for(int i {0}; i != conditional_child_count; ++i)
   {
     if(pipe(pipe_return_array[i]) == -1)
     {
@@ -85,7 +94,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
     }
   }
   // Fork the child processes.
-  for(int i {0}; i != kChildCount; ++i)
+  for(int i {0}; i != conditional_child_count; ++i)
   {
     child_id_array[i] = fork();
     if(child_id_array[i] == -1) // In parent and an error occured.
@@ -98,7 +107,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
           __LINE__)) << "Iteration count: " << j;
       }
       // Cleanup the pipes.
-      GTestFatalPipeClosureOnError(kChildCount, "Cleanup after fork error.",
+      GTestFatalPipeClosureOnError(conditional_child_count, "Cleanup after fork error.",
         __LINE__);
       // Return from the current test.
       FAIL() << "Fork error: " << std::strerror(saved_errno);
@@ -123,7 +132,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
       // parent will not send SIGUSR1 until after it has received the port of
       // the server interface of the child process.
       //    Close the descriptors for the read ends of the pipes.
-      for(int j {0}; j != kChildCount; ++j)
+      for(int j {0}; j != conditional_child_count; ++j)
       {
         EXPECT_NE(close(pipe_return_array[j][0]), -1) << std::strerror(errno);
       }
@@ -148,19 +157,19 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
   // doing so synchronizes the parent so that it does not try to connect to the
   // FcgiServerInterface of the child until the interface has been created.
   // Close the descriptors for the write ends of the pipes.
-  for(int i {0}; i != kChildCount; ++i)
+  for(int i {0}; i != conditional_child_count; ++i)
   {
     close(pipe_return_array[i][1]);
   }
   in_port_t port_array[kChildCount] = {};
-  for(int i {0}; i != kChildCount; ++i)
+  for(int i {0}; i != conditional_child_count; ++i)
   {
     std::size_t read_return {};
     if((read_return = socket_functions::SocketRead(pipe_return_array[i][0],
       static_cast<std::uint8_t*>(static_cast<void*>(&(port_array[i]))),
       sizeof(in_port_t))) != sizeof(in_port_t))
     {
-      for(int j {0}; j != kChildCount; ++j)
+      for(int j {0}; j != conditional_child_count; ++j)
       {
         EXPECT_NO_FATAL_FAILURE(GTestFatalTerminateChild(child_id_array[j],
           __LINE__)) << "Iteration count: " << j;
@@ -169,7 +178,7 @@ TEST_F(TestFcgiClientInterfaceTestFixture, ConnectCase2)
     EXPECT_NE(close(pipe_return_array[i][0]), -1) << std::strerror(errno);
   }
   int local_connections[kChildCount] = {};
-  for(int i {0}; i != kChildCount; ++i)
+  for(int i {0}; i != conditional_child_count; ++i)
   {
     shared_connect_EINTR_return_flag = true;
     local_connections[i] = client_inter.Connect(kInternetAddresses[i],
