@@ -64,9 +64,10 @@ RUN   cd /usr/local/src/as_components/fcgi && \
       cd /usr/local/src/as_components/id_manager && \
       bazel test ... && \
       cd /usr/local/src/as_components/socket_functions && \
-      bazel test ... && \
-      cd /usr/local/src/as_components/testing && \
       bazel test ...
+      # Workspace testing currently lacks tests.
+      # cd /usr/local/src/as_components/testing && \
+      # bazel test ...
 # Installs the application shared libraries of as_components.
 RUN   mkdir /usr/local/bin/as_components \
             /usr/local/bin/as_components/fcgi \
@@ -87,4 +88,6 @@ COPY  --from=build_lib /usr/local/bin/as_components/ \
                       /usr/local/bin/as_components/
 # Updates /etc/ld.so.cache with the application shared libraries. Link updates
 # are not needed (-X) as the shared libraries are not currently versioned.
-RUN   ldconfig -X /usr/local/bin/as_components
+RUN   ldconfig -X /usr/local/bin/as_components/fcgi \
+                  /usr/local/bin/as_components/fcgi/test \
+                  /usr/local/bin/as_components/socket_functions

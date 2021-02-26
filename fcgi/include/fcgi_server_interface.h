@@ -203,8 +203,8 @@ class FcgiServerInterface {
   // Parameters:
   // listening_descriptor: The descriptor of the listening socket to be
   //                       used by the interface to accept connections.
-  // max_connections:      The maximum number of socket connections of those
-  //                       which were accepted by the listening socket.
+  // max_connections:      The maximum number of simultaneous socket
+  //                       connections to clients.
   // max_requests:         The maximum number of active requests for a
   //                       socket connection.
   // app_status_on_abort:  The application status which will be returned by the
