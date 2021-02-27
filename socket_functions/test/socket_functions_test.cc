@@ -28,7 +28,7 @@
 
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/socket_functions.h"
+#include "socket_functions/include/socket_functions.h"
 
 TEST(SocketFunctions, ScatterGatherHelper)
 {

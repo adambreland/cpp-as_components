@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_list")
+load("//common_data:common_build_data.bzl", "copts_list")
 
 cc_library(
     name = "as_components_testing_utilities",

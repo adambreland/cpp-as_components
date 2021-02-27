@@ -13,22 +13,14 @@ external_dependency_map=(\
   [googletest]= \
   [simple_bazel_cpp_toolchain]=)
 
-declare -a workspace_name_list
-workspace_name_list=(\
-  fcgi \
-  id_manager \
-  socket_functions \
-  testing)
-
 function PrintHelp
 {
   local escaped_help_message=\
 "This script creates symbolic links which are necessary to build the modules \
-of as_components. A directory named \"external_repo_links\" is created in \
-each of the Bazel workspaces of as_components. Symbolic links to the internal \
-and external dependencies of a workspace are added to the external directory \
-for each workspace. External dependency paths are provided as script \
-arguments with the form <dependency name>=<dependency path>. For example:\n\
+of as_components. A directory named external_repo_links is created in \
+as_components. Symbolic links to the external dependencies of the workspaces \
+are added. External dependency paths are provided as script arguments with the \
+form <dependency name>=<dependency path>. For example:\n\
 googletest=/usr/local/src/googletest\n\n\
 The names of the necessary external dependencies are printed below:"
 
@@ -45,48 +37,9 @@ function PrintEscapedErrorMessageForExit
   echo -e "\nERROR\n"${1}"\n\nScript exiting."
 }
 
-# This function defines the logic for internal symbolic link creation. It is
-# invoked after the state of the workspaces and the values of the script
-# arguments have been verified.
-function CreateSymlinksForInternalDependencies
-{
-  local workspace_name
-  for workspace_name in "${workspace_name_list[@]}"; do
-    mkdir -v "${workspace_name}"/external_repo_links
-    if [[ $? -ne 0 ]]; then
-      return 1
-    fi
-    case ${workspace_name} in
-      (fcgi)
-        ln -v -s ${PWD}                  fcgi/external_repo_links/as_components         &&
-        ln -v -s ${PWD}/testing          fcgi/external_repo_links/as_components_testing &&
-        ln -v -s ${PWD}/id_manager       fcgi/external_repo_links/id_manager            &&
-        ln -v -s ${PWD}/socket_functions fcgi/external_repo_links/socket_functions
-        ;;
-      (id_manager)
-        ln -v -s ${PWD}                  id_manager/external_repo_links/as_components
-        ;;
-      (socket_functions)
-        ln -v -s ${PWD}                  socket_functions/external_repo_links/as_components
-        ;;
-      (testing)
-        ln -v -s ${PWD}                  testing/external_repo_links/as_components
-        ;;
-      (*)
-        PrintEscapedErrorMessageForExit "Internal error. An unknown workspace \
-name was encountered during the execution of the script function \
-CreateSymlinksForInternalDependencies."
-        exit 1
-        ;;
-    esac
-    if [[ $? -ne 0 ]]; then
-      return 1
-    fi
-  done
-}
-
 function CreateSymlinksForExternalDependencies
 {
+  mkdir -v external_repo_links || return 1
   # All workspaces use googletest and simple_bazel_cpp_toolchain.
   local original_directory=${PWD}
   cd "${external_dependency_map[googletest]}"
@@ -94,38 +47,9 @@ function CreateSymlinksForExternalDependencies
   cd "${external_dependency_map[simple_bazel_cpp_toolchain]}"
   local absolute_toolchain_directory=${PWD}
   cd ${original_directory}
-  local workspace_name
-  for workspace_name in "${workspace_name_list[@]}"; do
-    # Common actions.
-    ln -v -s ${absolute_googletest_directory} \
-"${workspace_name}"/external_repo_links/googletest &&
-    ln -v -s ${absolute_toolchain_directory} \
-"${workspace_name}"/external_repo_links/simple_bazel_cpp_toolchain
-    if [[ $? -ne 0 ]]; then
-      return 1
-    fi
-    # Actions specific to a workspace.
-    # (No actions are needed in this case.)
-    case ${workspace_name} in
-      (fcgi)
-        ;;
-      (id_manager)
-        ;;
-      (socket_functions)
-        ;;
-      (testing)
-        ;;
-      (*)
-        PrintEscapedErrorMessageForExit "Internal error. An unknown workspace \
-name was encountered during the execution of the script function \
-CreateSymlinksForExternalDependencies."
-        exit 1
-        ;;
-    esac
-    if [[ $? -ne 0 ]]; then
-      return 1
-    fi
-  done
+  ln -v -s ${absolute_googletest_directory} external_repo_links/googletest &&
+  ln -v -s ${absolute_toolchain_directory}  external_repo_links/simple_bazel_cpp_toolchain ||
+  return 1
 }
 
 # Script logic start.
@@ -137,54 +61,12 @@ if [[ (${1} == "--help") || (${1} == "help") ]]; then
 fi
 
 # Performs the following checks on workspace state:
-# 1) Is each expected workspace present?
-# 2) For each workspace, is a directory named "external" absent as it should be
-#    when this script is executed?
-# An error message is printed and the script exits if any check fails.
-declare -a present_external_directory_list
-declare -a missing_workspace_name_list
-no_errors=0
-all_workspaces_present=0
-all_external_directories_absent=0
-for workspace_name in "${workspace_name_list[@]}"; do
-  if [[ -d ./${workspace_name} ]]; then
-    if [[ -d ./${workspace_name}/external ]]; then
-      present_external_directory_list+=("${workspace_name}")
-      all_external_directories_absent=1
-      no_errors=1
-    fi
-  else
-    missing_workspace_name_list+=("${workspace_name}")
-    all_workspaces_present=1
-    no_errors=1
-  fi
-done
-escaped_error_message=
-error_message_new=0
-function UpdateForPreviousErrors
-{
-  if [[ error_message_new -eq 0 ]]; then
-    error_message_new=1
-  else
-    escaped_error_message+="\n\n"
-  fi
-}
-if [[ all_workspaces_present -ne 0 ]]; then
-  UpdateForPreviousErrors
-  escaped_error_message="Not all workspaces were present. Missing:"
-  for workspace_name in "${missing_workspace_name_list[@]}"; do
-    escaped_error_message+="\n""${workspace_name}"
-  done
-fi
-if [[ all_external_directories_absent -ne 0 ]]; then
-  UpdateForPreviousErrors
-  escaped_error_message+="An unexpected external directory was present in:"
-  for workspace_name in "${present_external_directory_list[@]}"; do
-    escaped_error_message+="\n""${workspace_name}"
-  done
-fi
-if [[ no_errors -ne 0 ]]; then
-  PrintEscapedErrorMessageForExit "${escaped_error_message}"
+# 1) Is a directory named "external_repo_links" absent as it should be when
+#    this script is executed?
+# An error message is printed and the script exits the check fails.
+if [[ -d external_repo_links ]]; then
+  PrintEscapedErrorMessageForExit "The directory external_repo_links was \
+present."
   exit 1
 fi
 
@@ -229,10 +111,10 @@ provided."
   exit 1
 fi
 
-CreateSymlinksForInternalDependencies && CreateSymlinksForExternalDependencies
-if [[ $? -ne 0 ]]; then
+CreateSymlinksForExternalDependencies ||
+{
   PrintEscapedErrorMessageForExit "An error occurred during symbolic link \
-creation."
-  exit 1
-fi
+creation.";
+  exit 1;
+}
 echo -e "\nThe symbolic links for as_components were created."

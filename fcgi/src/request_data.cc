@@ -25,8 +25,8 @@
 #include <map>
 #include <vector>
 
-#include "include/fcgi_server_interface.h"
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_utilities.h"
 
 namespace as_components {
 namespace fcgi {

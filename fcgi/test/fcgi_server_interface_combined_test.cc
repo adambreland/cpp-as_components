@@ -20,9 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "include/fcgi_request.h"
-#include "include/fcgi_server_interface.h"
-
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -51,13 +48,15 @@
 #include <tuple>
 #include <vector>
 
-#include "include/as_components_testing_utilities.h"
-#include "gtest/include/as_components_testing_gtest_utilities.h"
 #include "googletest/include/gtest/gtest.h"
-#include "include/socket_functions.h"
 
-#include "include/fcgi_protocol_constants.h"
-#include "test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
+#include "socket_functions/include/socket_functions.h"
+#include "testing/include/as_components_testing_utilities.h"
+#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
 
 namespace as_components {
 namespace fcgi {

@@ -27,7 +27,7 @@
 
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/id_manager_template.h"
+#include "id_manager/include/id_manager_template.h"
 
 namespace {
 

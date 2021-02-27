@@ -35,16 +35,16 @@
 #include <map>
 #include <vector>
 
-#include "include/as_components_testing_utilities.h"
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request.h"
-#include "include/fcgi_request_identifier.h"
-#include "include/fcgi_server_interface.h"
-#include "include/fcgi_request_identifier.h"
-#include "test/include/fcgi_si_testing_utilities.h"
-#include "test/include/test_fcgi_client_interface.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/test/include/test_fcgi_client_interface.h"
+#include "testing/include/as_components_testing_utilities.h"
 
 namespace as_components {
 namespace fcgi {

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "gtest/include/as_components_testing_gtest_utilities.h"
+#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
 
 #include <stdlib.h>
 #include <sys/signal.h>

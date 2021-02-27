@@ -33,10 +33,10 @@
 #include <mutex>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request_identifier.h"
-#include "include/fcgi_server_interface.h"
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_utilities.h"
 
 namespace as_components {
 namespace fcgi {
@@ -518,6 +518,6 @@ class FcgiRequest {
 } // namespace fcgi
 } // namespace as_components
 
-#include "include/fcgi_request_templates.h"
+#include "fcgi/include/fcgi_request_templates.h"
 
 #endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_H_

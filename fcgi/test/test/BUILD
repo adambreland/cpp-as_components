@@ -20,29 +20,29 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_list")
+load("//common_data:common_build_data.bzl", "copts_list")
 
 cc_library(
     name = "client_interface_testing_utilities",
     deps = [
-        "//:fcgi_protocol_constants",
-        "//:fcgi_request_identifier",
-        "//:fcgi_server_interface_combined_header",
-        "//:fcgi_utilities_header",
-        "//test:fcgi_si_testing_utilities", # Archive
-        "//test:test_fcgi_client_interface_header",
-        "@as_components_testing//:as_components_testing_utilities", # Archive
-        "@as_components_testing//gtest:as_components_testing_gtest_utilities", # Archive
-        "@socket_functions//:socket_functions_header",
+        "//fcgi:fcgi_protocol_constants",
+        "//fcgi:fcgi_request_identifier",
+        "//fcgi:fcgi_server_interface_combined_header",
+        "//fcgi:fcgi_utilities_header",
+        "//fcgi/test:fcgi_si_testing_utilities", # Archive
+        "//fcgi/test:test_fcgi_client_interface_header",
+        "//testing:as_components_testing_utilities", # Archive
+        "//testing/gtest:as_components_testing_gtest_utilities", # Archive
+        "//socket_functions:socket_functions_header",
         "@googletest//:gtest"
     ],
     srcs = [
         "src/client_interface_testing_utilities.cc",
         "src/client_interface_testing_utilities_global_variables.cc",
-        "//:libfcgi_server_interface_combined.so",
-        "//:libfcgi_utilities.so",
-        "//test:libtest_fcgi_client_interface.so",
-        "@socket_functions//:libsocket_functions.so"
+        "//fcgi:libfcgi_server_interface_combined.so",
+        "//fcgi:libfcgi_utilities.so",
+        "//fcgi/test:libtest_fcgi_client_interface.so",
+        "//socket_functions:libsocket_functions.so"
     ],
     hdrs = [
         "include/client_interface_testing_utilities.h"
@@ -63,22 +63,22 @@ cc_library(
 cc_test(
     name  = "test_fcgi_client_interface_test",
     deps  = [
-        "//:fcgi_protocol_constants",
-        "//:fcgi_request_identifier",
-        "//:fcgi_server_interface_combined_header",
-        "//test:fcgi_si_testing_utilities", # Archive
-        "//test:test_fcgi_client_interface_header",
+        "//fcgi:fcgi_protocol_constants",
+        "//fcgi:fcgi_request_identifier",
+        "//fcgi:fcgi_server_interface_combined_header",
+        "//fcgi/test:fcgi_si_testing_utilities", # Archive
+        "//fcgi/test:test_fcgi_client_interface_header",
         ":client_interface_testing_utilities", # Archive
-        "@socket_functions//:socket_functions_header",
-        "@as_components_testing//gtest:as_components_testing_gtest_utilities", # Archive
+        "//socket_functions:socket_functions_header",
+        "//testing/gtest:as_components_testing_gtest_utilities", # Archive
         "@googletest//:gtest",
         "@googletest//:gtest_main",
     ],
     srcs  = [
         "test_fcgi_client_interface_test.cc",
-        "//:libfcgi_server_interface_combined.so",
-        "//test:libtest_fcgi_client_interface.so",
-        "@socket_functions//:libsocket_functions.so"
+        "//fcgi:libfcgi_server_interface_combined.so",
+        "//fcgi/test:libtest_fcgi_client_interface.so",
+        "//socket_functions:libsocket_functions.so"
     ],
     copts = copts_list,
     # Use $${ORIGIN}/../.. to expose the indirect dependency
@@ -93,24 +93,24 @@ cc_test(
 cc_test(
     name  = "fcgi_si_testing_utilities_test",
     deps  = [
-        "//:fcgi_utilities_header",
-        "//test:fcgi_si_testing_utilities", # Archive
-        "@as_components_testing//gtest:as_components_testing_gtest_utilities",
+        "//fcgi:fcgi_utilities_header",
+        "//fcgi/test:fcgi_si_testing_utilities", # Archive
+        "//testing/gtest:as_components_testing_gtest_utilities",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
     srcs  = [
         "fcgi_si_testing_utilities_test.cc",
-        "//:libfcgi_utilities.so"
+        "//fcgi:libfcgi_utilities.so"
     ],
     copts = copts_list,
     # 1) Use $${ORIGIN}/../.. to expose the indirect dependency
     #    libfcgi_server_interface_combined.so.
-    # 2) Use $${ORIGIN}/../../external/socket_functions to expose the indirect
+    # 2) Use $${ORIGIN}/../../../socket_functions to expose the indirect
     #    dependency libsocket_functions.so.
     env = {
         "LD_LIBRARY_PATH":
-            "$${ORIGIN}/../..:$${ORIGIN}/../../external/socket_functions"
+            "$${ORIGIN}/../..:$${ORIGIN}/../../../socket_functions"
     },
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
@@ -141,12 +141,12 @@ cc_binary(
 cc_binary(
     name = "libconnect_interpositioning.so",
     deps = [
-        "//:fcgi_server_interface_combined_header",
+        "//fcgi:fcgi_server_interface_combined_header",
         ":shared_interpositioning_state_header"
     ],
     srcs = [
         "src/connect_interpositioning.cc",
-        "//:libfcgi_server_interface_combined.so",
+        "//fcgi:libfcgi_server_interface_combined.so",
         ":libshared_interpositioning_state.so"
     ],
     copts = copts_list,
@@ -158,21 +158,21 @@ cc_binary(
 cc_test(
     name = "connect_interpositioning_test",
     deps = [
-        "//:fcgi_server_interface_combined_header",
-        "//test:fcgi_si_testing_utilities", # Archive
-        "//test:test_fcgi_client_interface_header",
+        "//fcgi:fcgi_server_interface_combined_header",
+        "//fcgi/test:fcgi_si_testing_utilities", # Archive
+        "//fcgi/test:test_fcgi_client_interface_header",
         ":client_interface_testing_utilities", # Archive
         ":shared_interpositioning_state_header",
+        "//socket_functions:socket_functions_header",
         "@googletest//:gtest",
-        "@googletest//:gtest_main",
-        "@socket_functions//:socket_functions_header"
+        "@googletest//:gtest_main"
     ],
     srcs = [
         "connect_interpositioning_test.cc",
-        "//:libfcgi_server_interface_combined.so",
-        "//test:libtest_fcgi_client_interface.so",
+        "//fcgi:libfcgi_server_interface_combined.so",
+        "//fcgi/test:libtest_fcgi_client_interface.so",
         ":libshared_interpositioning_state.so",
-        "@socket_functions//:libsocket_functions.so"
+        "//socket_functions:libsocket_functions.so"
     ],
     copts = copts_list,
     # Use the data attribute to ensure that libconnect_interpositioning.so is

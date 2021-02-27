@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "include/as_components_testing_utilities.h"
+#include "testing/include/as_components_testing_utilities.h"
 
 #include <dirent.h>
 #include <sys/types.h>

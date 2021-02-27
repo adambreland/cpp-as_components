@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
 
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -49,8 +49,8 @@
 
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_server_interface.h"
 
 namespace as_components {
 namespace fcgi {

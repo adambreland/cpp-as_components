@@ -29,7 +29,7 @@
 
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/as_components_testing_utilities.h"
+#include "testing/include/as_components_testing_utilities.h"
 
 namespace as_components {
 namespace testing {

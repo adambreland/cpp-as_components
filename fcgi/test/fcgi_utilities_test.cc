@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "include/fcgi_utilities.h"
-
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -36,11 +34,12 @@
 #include <utility>
 #include <vector>
 
-#include "gtest/include/as_components_testing_gtest_utilities.h"
 #include "googletest/include/gtest/gtest.h"
 
-#include "include/fcgi_protocol_constants.h"
-#include "test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_utilities.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
+#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
 
 namespace as_components {
 namespace fcgi {

@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_with_optimization_list")
+load("//common_data:common_build_data.bzl", "copts_with_optimization_list")
 
 # Build targets
 

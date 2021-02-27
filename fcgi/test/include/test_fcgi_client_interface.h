@@ -37,10 +37,9 @@
 #include <utility>
 #include <vector>
 
-#include "include/id_manager_template.h"
-
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "id_manager/include/id_manager_template.h"
 
 namespace as_components {
 namespace fcgi {

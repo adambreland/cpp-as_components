@@ -23,7 +23,7 @@
 #ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_TEMPLATES_H_
 
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_utilities.h"
 
 #include <sys/select.h>
 #include <sys/uio.h>
@@ -37,7 +37,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
 
 namespace as_components {
 namespace fcgi {

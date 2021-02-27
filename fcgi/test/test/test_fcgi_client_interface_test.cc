@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "test/include/test_fcgi_client_interface.h"
-
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
@@ -46,15 +44,16 @@
 #include <vector>
 
 #include "googletest/include/gtest/gtest.h"
-#include "include/socket_functions.h"
-#include "gtest/include/as_components_testing_gtest_utilities.h"
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request.h"
-#include "include/fcgi_request_identifier.h"
-#include "include/fcgi_server_interface.h"
-#include "test/include/fcgi_si_testing_utilities.h"
-#include "test/test/include/client_interface_testing_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/test/include/test_fcgi_client_interface.h"
+#include "fcgi/test/test/include/client_interface_testing_utilities.h"
+#include "socket_functions/include/socket_functions.h"
+#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
 
 namespace as_components {
 namespace fcgi {

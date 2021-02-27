@@ -26,7 +26,9 @@
 #ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_TEMPLATES_H_
 
-#include <sys/types.h>     // For ssize_t.
+#include "fcgi/include/fcgi_request.h"
+
+#include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -35,8 +37,8 @@
 #include <utility>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_utilities.h"
 
 namespace as_components {
 namespace fcgi {

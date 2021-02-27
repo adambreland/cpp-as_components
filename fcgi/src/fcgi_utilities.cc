@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_utilities.h"
 
 #include <cstdlib>
 #include <cstdint>
@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
 
 namespace as_components {
 namespace fcgi {

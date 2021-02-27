@@ -31,8 +31,8 @@
 #include <set>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request_identifier.h"
 
 namespace as_components {
 namespace fcgi {
@@ -1214,6 +1214,6 @@ class FcgiServerInterface {
 
 // The definition of FcgiRequest must be present to allow proper instantiation
 // of some of the template state of FcgiServerInterface.
-#include "include/fcgi_request.h"
+#include "fcgi/include/fcgi_request.h"
 
 #endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_SERVER_INTERFACE_H_

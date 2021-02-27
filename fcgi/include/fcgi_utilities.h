@@ -32,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-#include "include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
 
 namespace as_components {
 namespace fcgi {
@@ -385,6 +385,6 @@ std::size_t NeededLocalData(std::size_t m);
 } // namespace fcgi
 } // namespace as_components
 
-#include "include/fcgi_utilities_templates.h"
+#include "fcgi/include/fcgi_utilities_templates.h"
 
 #endif // AS_COMPONENTS_FCGI_INCLUDE_FCGI_UTILITIES_H_

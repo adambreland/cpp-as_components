@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_with_optimization_list")
+load("//common_data:common_build_data.bzl", "copts_with_optimization_list")
 
 # Build targets
 
@@ -85,9 +85,15 @@ cc_library(
         "include/fcgi_request_templates.h",
         "include/fcgi_server_interface.h"
     ],
-    # -pthread should be used whenever libfcgi_server_interface_combined.so
-    # is linked into an object file.
-    linkopts = pthread_list,
+    # linkopts:
+    # 1) pthread should be used whenever libfcgi_server_interface_combined.so
+    #    is linked into an object file as the C++ threading implementation
+    #    depends on pthread.
+    # 2) FcgiRequest uses templates that depend on symbols from
+    #    fcgi_utilities. Use of such a template by a client introduce symbols
+    #    from fcgi_utilities into the translation unit of the client. In this
+    #    case, fcgi_utilities becomes a direct dependency of the client.
+    linkopts = pthread_list + ["-lfcgi_utilities"],
     visibility = ["//visibility:public"]
 )
 
@@ -95,7 +101,7 @@ cc_binary(
     name = "libfcgi_server_interface_combined.so",
     deps = [
         ":fcgi_server_interface_combined_header",
-        "@socket_functions//:socket_functions_header"
+        "//socket_functions:socket_functions_header"
     ],
     srcs = [
         "src/fcgi_request.cc",
@@ -103,7 +109,7 @@ cc_binary(
         "src/record_status.cc",
         "src/request_data.cc",
         ":libfcgi_utilities.so",
-        "@socket_functions//:libsocket_functions.so"
+        "//socket_functions:libsocket_functions.so"
     ],
     # -pthread should be used during compilation and linking.
     copts = copts_with_optimization_list + pthread_list,

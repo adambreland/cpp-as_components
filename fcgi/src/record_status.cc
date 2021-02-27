@@ -26,12 +26,11 @@
 #include <mutex>
 #include <vector>
 
-#include "include/socket_functions.h"
-
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request.h"
-#include "include/fcgi_request_identifier.h"
-#include "include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "socket_functions/include/socket_functions.h"
 
 // Class implementation notes:
 // 1) Discipline for accessing shared state:

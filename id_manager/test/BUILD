@@ -20,18 +20,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-load("@as_components//:common_build_data.bzl", "copts_list")
+load("//common_data:common_build_data.bzl", "copts_list")
 
 cc_test(
     name = "id_manager_template_test",
     deps = [
-        "//:id_manager",
+        "//id_manager:id_manager",
         "@googletest//:gtest", 
         "@googletest//:gtest_main"
     ],
     srcs = ["id_manager_template_test.cc"],
     copts = copts_list,
-    data = ["//:patch_missing_x86_64_directory"],
+    data = ["//id_manager:patch_missing_x86_64_directory"],
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )

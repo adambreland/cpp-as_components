@@ -33,7 +33,7 @@
 #include <cstdlib>
 #include <iostream>
 
-#include "test/test/include/shared_interpositioning_state.h"
+#include "fcgi/test/test/include/shared_interpositioning_state.h"
 
 namespace {
   extern "C" using ConnectType = int(int, const struct sockaddr*, socklen_t);

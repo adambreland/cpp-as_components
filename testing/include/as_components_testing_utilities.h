@@ -159,6 +159,6 @@ class FileDescriptorLeakChecker
 } // namespace testing
 } // namespace as_components
 
-#include "include/as_components_testing_utilities_templates.h"
+#include "testing/include/as_components_testing_utilities_templates.h"
 
 #endif // AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_H_

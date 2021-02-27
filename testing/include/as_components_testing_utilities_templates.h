@@ -23,7 +23,7 @@
 #ifndef AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_TEMPLATES_H_
 #define AS_COMPONENTS_TESTING_INCLUDE_AS_COMPONENTS_TESTING_UTILITIES_TEMPLATES_H_
 
-#include "include/as_components_testing_utilities.h"
+#include "testing/include/as_components_testing_utilities.h"
 
 #include <algorithm>
 #include <type_traits>

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "test/test/include/shared_interpositioning_state.h"
+#include "fcgi/test/test/include/shared_interpositioning_state.h"
 
 namespace as_components {
 namespace fcgi        {

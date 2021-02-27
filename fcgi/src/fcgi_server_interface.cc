@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "include/fcgi_server_interface.h"
+#include "fcgi/include/fcgi_server_interface.h"
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -42,12 +42,11 @@
 #include <system_error>
 #include <utility>
 
-#include "include/socket_functions.h"
-
-#include "include/fcgi_protocol_constants.h"
-#include "include/fcgi_request.h"
-#include "include/fcgi_request_identifier.h"
-#include "include/fcgi_utilities.h"
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_utilities.h"
+#include "socket_functions/include/socket_functions.h"
 
 // Class implementation notes:
 // 1) Mutex acquisition patterns and related actions:

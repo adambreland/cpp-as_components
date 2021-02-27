@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "test/test/include/client_interface_testing_utilities.h"
+#include "fcgi/test/test/include/client_interface_testing_utilities.h"
 
 #include <signal.h>
 #include <time.h>
