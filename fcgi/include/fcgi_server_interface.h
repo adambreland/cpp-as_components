@@ -103,7 +103,8 @@ class FcgiServerInterface {
   //       construct an FcgiRequest object. In this case, an FCGI_END_REQUEST
   //       record was sent for the request. The protocol status was
   //       FCGI_REQUEST_COMPLETE. The application status was that given by the
-  //       app_status_on_abort variable during interface construction.
+  //       app_status_on_abort argument which was provided during interface
+  //       construction.
   // 5) If all of the data for a request was received during reading, an
   //    FcgiRequest object was created for the request. It was added to the
   //    returned list.
@@ -1141,9 +1142,8 @@ class FcgiServerInterface {
 
   // File descriptors of the self-pipe which is used for wake ups on state
   // changes from blocking during I/O multiplexing for incoming connections 
-  // and data.
+  // and data. (The write descriptor is in the shared section below.)
   int self_pipe_read_descriptor_ {};
-  int self_pipe_write_descriptor_ {};
 
   // This map takes the file descriptor of a connection and accesses the
   // RecordStatus object of the connection. A RecordStatus object summarizes the 
@@ -1158,6 +1158,12 @@ class FcgiServerInterface {
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION START ///////////////
 
+  // This data member is shared in the sense that the description which it
+  // refers to is shared between FcgiRequest instances and can be regarded as
+  // being part of the interface. For example, a request must check that the
+  // interface is alive before the request can write to the interface pipe.
+  int self_pipe_write_descriptor_ {};
+
   // A map to retrieve a connection's write mutex. These mutexes are used by
   // the interface and by FcgiRequest objects.
   //
@@ -1168,7 +1174,7 @@ class FcgiServerInterface {
   // (A unique_ptr was used as using std::mutex directly results in
   // compiler errors.)
   std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>> 
-    write_mutex_map_ {};
+  write_mutex_map_ {};
 
   // Static state used by FcgiRequest objects to check if the interface with
   // which they are associated is alive. The mutex is also used for general

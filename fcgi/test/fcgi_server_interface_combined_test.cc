@@ -1182,8 +1182,7 @@ class ConnectionAcceptanceAndRejectionTest
   inter_tuple_ {};
 };
 
-ConnectionAcceptanceAndRejectionTest::
-ConnectionAcceptanceAndRejectionTest(
+ConnectionAcceptanceAndRejectionTest::ConnectionAcceptanceAndRejectionTest(
   struct ConnectionAcceptanceAndRejectionTestArguments args)
 {
   args_ = std::move(args);
@@ -1207,8 +1206,7 @@ ConnectionAcceptanceAndRejectionTest(
   }
 }
 
-ConnectionAcceptanceAndRejectionTest::
-~ConnectionAcceptanceAndRejectionTest()
+ConnectionAcceptanceAndRejectionTest::~ConnectionAcceptanceAndRejectionTest()
 {
   if(socket_pair_array_[0] != -1)
     close(socket_pair_array_[0]);
@@ -1229,8 +1227,7 @@ ConnectionAcceptanceAndRejectionTest::
   }
 }
 
-void ConnectionAcceptanceAndRejectionTest::
-RunTest()
+void ConnectionAcceptanceAndRejectionTest::RunTest()
 {
   // Create a pair of sockets to allow synchronization of and communication
   // between the test process and a child process it creates below.
@@ -4324,12 +4321,19 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 // Examined properties:
 // 1) Request limit (value of max_requests passed to the interface
 //    constructor): 1 or greater than 1.
-// 2) Presence of previous connections when the interface is placed into an
-//    overloaded state: requests are present or not.
+// 2) The presence of previous connections when the interface is placed into
+//    an overloaded state. When requests are present for such a connection,
+//    whether or not the the interface will:
+//    a) accept records for the requests which are incomplete
+//    b) allow the application to service requests which were assigned
 // 3) Incomplete requests vs. requests for which an FcgiRequest object
-//    has been produced.
-// 4) Multiple connections and separate request tallies.
-// 5) Request number tracking as requests are sent and completed.
+//    has been produced in relation to request count tracking. Are incomplete
+//    requests and assigned requests counted equally as they should be?
+// 4) Multiple connections and separate request tallies. Does the interface
+//    properly keep track of the request count for each connection?
+// 5) Request number tracking as requests are sent and completed. Does the
+//    interface correctly increment and decrement the request count of
+//    individual connections?
 //
 // Test Cases:
 // Single connection:

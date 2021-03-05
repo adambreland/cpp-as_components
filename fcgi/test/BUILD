@@ -130,3 +130,24 @@ cc_test(
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
+
+cc_binary(
+    name = "fcgi_shared_library_installation_test",
+    deps = [
+        "//fcgi:fcgi_server_interface_combined_header",
+        ":test_fcgi_client_interface_header",
+        "//socket_functions:socket_functions_header"
+    ],
+    srcs = [
+        "fcgi_shared_library_installation_test.cc",
+        "//fcgi:libfcgi_server_interface_combined.so",
+        # Link in fcgi_utilities due to the use of this library by templates
+        # of fcgi_server_interface_combined.
+        "//fcgi:libfcgi_utilities.so",
+        ":libtest_fcgi_client_interface.so",
+        "//socket_functions:libsocket_functions.so"
+    ],
+    copts = copts_list,
+    features = ["interpret_as_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
+)

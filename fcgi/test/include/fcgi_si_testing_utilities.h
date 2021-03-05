@@ -37,16 +37,6 @@
 #include "fcgi/include/fcgi_protocol_constants.h"
 #include "fcgi/include/fcgi_server_interface.h"
 
-// Key:
-// BAZEL DEPENDENCY       This marks use of a feature which is provided by the
-//                        Bazel testing run-time environment. 
-// GOOGLE TEST DEPENDENCY This marks use of a feature which is provided by
-//                        Google Test.
-
-// Note: All modules starting with GTest depend on Google Test. Modules which
-//       depend on Google Test but whose names do not start with GTest are
-//       marked with the Google Test dependency flag defined above.
-
 namespace as_components {
 namespace fcgi {
 namespace test {
@@ -55,11 +45,12 @@ namespace test {
 // test_case. This string may be used in test messages.
 std::string CaseSuffix(int test_case);
 
+// ExtractContent
 //    A utility function used for testing. ExtractContent reads a file which
 // contains a sequence of FastCGI records. These records are assumed to be
-// from a single, complete record sequence. (Multiple records may be present in
-// a sequence when it is associated with a stream record type from the FastCGI
-// protocol.) Three operations are performed.
+// from a single, complete record sequence for a FastCGI stream. (Multiple
+// records may be present in a sequence when it is associated with a stream
+// record type from the FastCGI protocol.) Three operations are performed.
 //
 //    First, several error checks are performed.
 // 1) Each header is validated for type and request identifer. Header

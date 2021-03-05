@@ -487,7 +487,7 @@ class FcgiRequest {
   template<typename ByteIter>
   bool WriteHelper(ByteIter begin_iter, ByteIter end_iter, FcgiType type);
 
-  // State for internal request management. Constant after initialization.
+  // State for internal request management.
     // Note that default constructed and moved-from FcgiRequest objects have
     // an associated_interface_id_ value of 0U.
   unsigned long associated_interface_id_;
@@ -498,7 +498,7 @@ class FcgiRequest {
   bool* bad_connection_state_ptr_;
   int interface_pipe_write_descriptor_;
 
-  // Request information. Constant after initialization.
+  // Request information.
   std::map<std::vector<uint8_t>, std::vector<uint8_t>> environment_map_;
   std::vector<uint8_t> request_stdin_content_;
   std::vector<uint8_t> request_data_content_;

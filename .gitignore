@@ -11,5 +11,8 @@ external_repo_links/
 # Bazel build ouputs.
 **/bazel*
 
+# Additional build outputs.
+output_binaries_and_tests/
+
 # Visual Studio Code configuration files.
 .vscode/

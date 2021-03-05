@@ -89,14 +89,17 @@ cc_library(
     # 1) pthread should be used whenever libfcgi_server_interface_combined.so
     #    is linked into an object file as the C++ threading implementation
     #    depends on pthread.
-    # 2) FcgiRequest uses templates that depend on symbols from
-    #    fcgi_utilities. Use of such a template by a client introduce symbols
-    #    from fcgi_utilities into the translation unit of the client. In this
-    #    case, fcgi_utilities becomes a direct dependency of the client.
-    linkopts = pthread_list + ["-lfcgi_utilities"],
+    linkopts = pthread_list,
     visibility = ["//visibility:public"]
 )
 
+# Linking note: depending on libfcgi_server_interface_combined.so
+#    FcgiRequest uses templates that depend on symbols from fcgi_utilities.h.
+# Use of such a template by a client of libfcgi_server_interface_combined.so
+# introduces symbols from fcgi_utilities.h into the translation unit of the
+# client. In this case, libfcgi_utilities.so becomes a direct dependency of the
+# client.
+#    In this case, libfcgi_utilities.so should be linked into the client.
 cc_binary(
     name = "libfcgi_server_interface_combined.so",
     deps = [

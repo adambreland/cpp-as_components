@@ -5,9 +5,9 @@ echo -e "${0}""\n"
 # Constants, containers, and functions which are viewed as script globals.
 
 # A map whose keys are the working names of the external dependencies.
-# The values for the keys are initially empty. They should be provided within
+# The values for the keys are initially empty. Paths should be provided within
 # arguments when the script is invoked. The arguments are processed, and each
-# value is extracted and associated with its respective key.
+# path is extracted and associated with its respective key.
 declare -A external_dependency_map
 external_dependency_map=(\
   [googletest]= \
@@ -40,7 +40,6 @@ function PrintEscapedErrorMessageForExit
 function CreateSymlinksForExternalDependencies
 {
   mkdir -v external_repo_links || return 1
-  # All workspaces use googletest and simple_bazel_cpp_toolchain.
   local original_directory=${PWD}
   cd "${external_dependency_map[googletest]}"
   local absolute_googletest_directory=${PWD}
@@ -63,7 +62,7 @@ fi
 # Performs the following checks on workspace state:
 # 1) Is a directory named "external_repo_links" absent as it should be when
 #    this script is executed?
-# An error message is printed and the script exits the check fails.
+# An error message is printed and the script exits if the check fails.
 if [[ -d external_repo_links ]]; then
   PrintEscapedErrorMessageForExit "The directory external_repo_links was \
 present."
@@ -98,11 +97,9 @@ ${argument_dependency_name}\nInvalid value: ${argument_dependency_path}"
   fi
   # Conditionally updates the count of unique arguments which were processed.
   if [[ -z ${external_dependency_map[${argument_dependency_name}]} ]]; then
-    # (( externals_in_arguments_count = externals_in_arguments_count + 1 ))
     (( ++externals_in_arguments_count ))
   fi
-  external_dependency_map[${argument_dependency_name}]=\
-${argument_dependency_path}
+  external_dependency_map[${argument_dependency_name}]=${argument_dependency_path}
 done
 # Check that an argument was provided for each external dependency.
 if [[ externals_in_arguments_count -ne ${#external_dependency_map[@]} ]]; then
