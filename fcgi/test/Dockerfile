@@ -1,5 +1,8 @@
+# Container image: as_components/fcgi/external_tests
+
 # This Dockerfile defines the container image for the external tests for
 # namespace fcgi.
+# It is assumed that the build context is output_binaries_and_tests.
 
 FROM as_components/ubuntu_base
 SHELL ["/bin/bash", "-c"]

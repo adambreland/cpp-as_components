@@ -1,6 +1,35 @@
 #! /bin/bash
 
-echo -e "${0}""\n"
+# This script is invoked during the configuration of a local source directory.
+# This configuration, among other purposes, allows build actions to be taken by
+# a container which has a bind mount to the source directory. The script is
+# responsible for creating symbolic links in the source directory to the
+# external dependencies of as_components. See the WORKSPACE file of
+# as_components for the Bazel targets definitions of external dependencies.
+#
+# Arguments:
+# 1) The script accepts "help" and "--help" as the first argument.
+# 2) If a help argument is not given, the script expects a sequence of
+#    arguments where each argument is a name-value pair for an external
+#    dependency path with the form:
+#    <external dependency name>=<external dependency path>
+#
+#    For example: googletest=/usr/local/src/googletest
+#
+# Preconditions:
+# 1) The working directory is the source directory of as_components.
+#
+# Return status:
+# 1) The script returns zero if help was requested or if symbolic links to
+#    all external dependencies were created. The script returns a non-zero
+#    value otherwise.
+# 2) Non-zero return status conditions:
+#    a) The directory external_repo_links exists.
+#    b) A path for an external dependency from an argument either does not
+#       refer to a directory or refers to a directory which does not exist.
+#    c) After processing the arguments, at least one external dependency was
+#       not associated with a path.
+#    d) An argument refers to an unknown external dependency name.
 
 # Constants, containers, and functions which are viewed as script globals.
 

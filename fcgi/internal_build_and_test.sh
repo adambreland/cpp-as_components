@@ -1,3 +1,5 @@
+#! /bin/bash
+
 # This script is used by fcgi/build_and_test.sh. It is executed by the
 # as_components/build_and_test container as part of the build and test actions
 # for namespace fcgi.
@@ -12,6 +14,8 @@
 #    a) output_binaries_and_tests
 #    b) output_binaries_and_tests/application_libraries
 #    c) output_binaries_and_tests/tests
+# 4) The external test runner script is located at
+#    fcgi/test/external_test_runner.sh.
 #
 # Arguments: none
 #
@@ -33,6 +37,11 @@
 # 2) Test failure does not influence the return status.
 
 cd /usr/local/src/as_components &&
+if [[ !(-d external_repo_links) ]]; then
+    ./make_repository_symlinks.sh \
+        googletest=/usr/local/src/googletest \
+        simple_bazel_cpp_toolchain=/usr/local/src/simple_bazel_cpp_toolchain    
+fi &&
 if [[ !(-d output_binaries_and_tests/application_libraries/fcgi) ]]; then
     mkdir output_binaries_and_tests/application_libraries{/fcgi,/fcgi/test,/socket_functions}
 fi &&

@@ -3,7 +3,7 @@
 ## News and status
 **Version: pre-release.**
 
-Testing of `as_components` is currently underway before its initial release.
+Testing of `as_components` is underway before its initial release.
 This includes synchronization testing of `fcgi::FcgiServerInterface`.
 
 ## Introduction
