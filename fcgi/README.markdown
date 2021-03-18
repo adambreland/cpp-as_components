@@ -1,7 +1,7 @@
 # Namespace `fcgi`
 This document provides a description of the main classes and functions of
 `fcgi`. Interface information and information on the modules not covered here
-is present in the appropriate header files.
+is in the appropriate header files.
 
 ## `FcgiServerInterface`
 ### Introduction

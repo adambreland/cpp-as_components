@@ -5,7 +5,7 @@
 # a container which has a bind mount to the source directory. The script is
 # responsible for creating symbolic links in the source directory to the
 # external dependencies of as_components. See the WORKSPACE file of
-# as_components for the Bazel targets definitions of external dependencies.
+# as_components for the Bazel targets definitions of its external dependencies.
 #
 # Arguments:
 # 1) The script accepts "help" and "--help" as the first argument.

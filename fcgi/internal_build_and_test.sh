@@ -66,4 +66,3 @@ cp --update \
     bazel test --test_env=NO_IPV6= ...
     exit 0;
 }
-
