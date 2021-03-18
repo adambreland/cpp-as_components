@@ -45,6 +45,9 @@ test_container_name=as_components_fcgi_test
 script_path=${0%/*} &&
 if [[ ${script_path} == ${0} ]]; then
     script_path=${PWD}
+else
+    cd ${script_path} &&
+    script_path=${PWD}
 fi &&
 cd ${script_path}/.. &&
 # An absolute path is needed for a Docker bind mount.

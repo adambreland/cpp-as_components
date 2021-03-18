@@ -4,7 +4,7 @@
 # namespace fcgi.
 # It is assumed that the build context is output_binaries_and_tests.
 
-FROM as_components/ubuntu_base
+FROM as_components/fcgi/external_test_base
 SHELL ["/bin/bash", "-c"]
 # Installs the application shared libraries of as_components.
 COPY application_libraries \

@@ -14,9 +14,10 @@ RUN set -o pipefail && \
     mv bazel.gpg /etc/apt/trusted.gpg.d/ && \
     echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | \
       tee /etc/apt/sources.list.d/bazel.list
-# Updates the new Bazel repository. Installs bazel, g++, and make. Make is
-# required to build NGINX and OpenSSL.
-RUN apt-get -y update && apt-get -y install bazel g++ make
+# Updates the new Bazel repository. Installs bazel, g++, make, and
+# libcurl4-openssl-dev (libcurl with development files). Make is required to
+# build NGINX and OpenSSL.
+RUN apt-get -y update && apt-get -y install bazel g++ libcurl4-openssl-dev make
 # Retrieves the googletest source code and installs it.
 RUN curl -fsSL https://github.com/google/googletest/tarball/release-1.10.0 \
       > temp_repo_tarball.tar.gz && \

@@ -1,3 +1,5 @@
+#! /bin/bash
+
 # This script configures Docker and the source directory so that later build
 # actions can be performed. The script:
 # 1) Builds the container images which are needed to build and test
@@ -13,9 +15,14 @@
 script_path=${0%/*} &&
 if [[ ${script_path} == ${0} ]]; then
     script_path=${PWD}
+else
+    cd ${script_path} &&
+    script_path=${PWD}
 fi &&
 cd ${script_path}/ubuntu_base &&
 docker build --no-cache -t as_components/ubuntu_base . &&
+cd ${script_path}/fcgi/external_test_base &&
+docker build --no-cache -t as_components/fcgi/external_test_base . &&
 cd ${script_path}/build_and_test &&
 docker build --no-cache -t as_components/build_and_test . &&
 cd ${script_path} &&
