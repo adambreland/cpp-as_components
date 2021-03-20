@@ -13,7 +13,9 @@ extern "C" {
   #include <curl/curl.h>
 }
 
-namespace {
+namespace as_components {
+namespace fcgi {
+namespace test {
 
 // A management class which allows automatic initialization and cleanup of the
 // global CURL environment. A suitable instance should be constructed before
@@ -123,9 +125,18 @@ class CurlEasyHandle
 };
 
 // A management class in the style of std::unique_ptr for curl_slist*
-// instances returned by curl_slist_append.
+// instances returned by curl_slist_append. This class is intended to ease the
+// configuration of the CURLOPT_HTTPHEADER option for CURL easy handles.
+//
 // 1) Each instance manages at most one curl_slist.
 // 2) Default construction does not attempt to allocate a curl_slist.
+//
+// Example of use:
+// /* The lifetime of s_list should extend beyond the point when the handle
+//    will no longer be used for transfers with this setting of the option. */
+// CurlSlist s_list {};
+// s_list.AppendString("Vary: User-Agent");
+// curl_easy_setopt(easy_handle_ptr, CURLOPT_HTTPHEADER, s_list.get());
 class CurlSlist
 {
  public:
@@ -316,11 +327,15 @@ struct StatusLine
   std::vector<std::uint8_t> status_text;
 };
 
-// A member of this class serves as an abstraction of a collection of buffers
-// which store the HTTP headers and the body of an HTTP response. This class
-// offers usage error checking which would not occur if buffers were manually
-// set with calls to curl_easy_setopt with CURLOPT_HEADERDATA and
+//    A member of this class serves as an abstraction of a collection of
+// buffers which store the HTTP headers and the body of an HTTP response. This
+// class offers usage error checking which would not occur if buffers were
+// manually set with calls to curl_easy_setopt with CURLOPT_HEADERDATA and
 // CURLOPT_WRITEDATA.
+//    This class only affects the CURLOPT_HEADERFUNCTION, CURLOPT_HEADERDATA,
+// CURLOPT_WRITEFUNCTION, and CURLOPT_WRITEDATA options of the CURL easy
+// handles which are passed to it with pointer arguments. The other options of
+// easy handles are managed by the user of the class.
 //
 // Preconditions:
 // 1) Use of this class requires that the lifetime of any CURL easy handle
@@ -380,6 +395,7 @@ class CurlHttpResponse
   //    may be registered again.
   void Deregister() noexcept;
 
+  // non-constant reference.
   inline StatusLine& status_line() noexcept
   {
     return status_line_;
@@ -390,6 +406,7 @@ class CurlHttpResponse
     return status_line_received_;
   }
 
+  // non-constant reference.
   inline HeaderList& header_list() noexcept
   {
     return header_list_;
@@ -400,6 +417,7 @@ class CurlHttpResponse
     return terminal_header_line_received_;
   }
 
+  // non-constant reference.
   inline std::vector<std::uint8_t>& body() noexcept
   {
     return body_;
@@ -415,6 +433,7 @@ class CurlHttpResponse
     return match_error_;
   }
 
+  // non-constant reference.
   inline std::vector<std::uint8_t>& error_line() noexcept
   {
     return error_line_;
@@ -465,6 +484,8 @@ class CurlHttpResponse
   std::vector<std::uint8_t> body_ {};
 };
 
-} // namespace
+} // namespace test
+} // namespace fcgi
+} // namespace as_components
 
 #endif // AS_COMPONENTS_FCGI_TEST_INCLUDE_CURL_EASY_HANDLE_CLASSES_H_

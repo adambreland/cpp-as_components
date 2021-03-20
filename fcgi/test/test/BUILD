@@ -189,3 +189,21 @@ cc_test(
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
+
+# This test is executed by curl_easy_handle_classes_internal_test.
+cc_test(
+    tags = ["manual"],
+    name = "curl_easy_handle_classes_internal_test",
+    deps = ["//fcgi/test:curl_easy_handle_classes"],
+    srcs = ["curl_easy_handle_classes_internal_test.cc"],
+    copts = copts_list,
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
+)
+
+sh_test(
+    name = "curl_easy_handle_classes_test",
+    deps = [],
+    data = [":curl_easy_handle_classes_internal_test"],
+    srcs = ["curl_easy_handle_classes_test.sh"],
+)

@@ -151,3 +151,17 @@ cc_binary(
     features = ["interpret_as_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
+
+cc_library(
+    name = "curl_easy_handle_classes",
+    deps = [],
+    srcs = ["src/curl_easy_handle_classes.cc"],
+    hdrs = ["include/curl_easy_handle_classes.h"],
+    copts = copts_list,
+    # It is assumed that libcurl is installed as a system library.
+    linkopts = ["-lcurl"],
+    linkstatic = True,
+    features = ["interpret_as_archive"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+    visibility = ["//visibility:public"]
+)

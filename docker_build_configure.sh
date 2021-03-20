@@ -21,8 +21,6 @@ else
 fi &&
 cd ${script_path}/ubuntu_base &&
 docker build --no-cache -t as_components/ubuntu_base . &&
-cd ${script_path}/fcgi/external_test_base &&
-docker build --no-cache -t as_components/fcgi/external_test_base . &&
 cd ${script_path}/build_and_test &&
 docker build --no-cache -t as_components/build_and_test . &&
 cd ${script_path} &&

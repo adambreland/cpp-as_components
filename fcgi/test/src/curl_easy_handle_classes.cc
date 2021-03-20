@@ -6,13 +6,16 @@
 #include <map>
 #include <regex>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 extern "C" {
   #include <curl/curl.h>
 }
 
-namespace {
+namespace as_components {
+namespace fcgi {
+namespace test {
 
 // CurlSlist
 
@@ -37,22 +40,22 @@ CurlSlist& CurlSlist::AppendStringHelper(const char* char_ptr)
 // parts.
 //
 // Regex description:
-// (HTTP/.+?)                "HTTP/" followed by a non-greedy sequence of one
-//                           or more characters where the entire sequence is
-//                           treated as a submatch. (Version submatch.)
-// [:blank:]+                A greedy sequence or one or more blank characters
-//                           which is not treated as a submatch.
-// ([1-5][:digit:][:digit:]) A sequence as follows which is treated as a
-//                           submatch: A digit in the range 1 to 5, any digit,
-//                           any digit. (Status code submatch.)
-// [:blank:]+                As above.
-// (.*)                      A greedy sequence of zero or more characters which
-//                           is treated as a submatch. (Status text submatch.)
-// (?\n|\r\n)                A terminal line separator. Either newline or the
-//                           sequence carriage return-newline.
+// (HTTP/.+?)  "HTTP/" followed by a non-greedy sequence of one
+//             or more characters where the entire sequence is
+//             treated as a submatch. (Version submatch.)
+// \s+         A greedy sequence or one or more blank characters
+//             which is not treated as a submatch.
+// ([1-5]\d\d) A sequence as follows which is treated as a
+//             submatch: A digit in the range 1 to 5, any digit,
+//             any digit. (Status code submatch.)
+// \s+         As above.
+// (.*)        A greedy sequence of zero or more characters which
+//             is treated as a submatch. (Status text submatch.)
+// (?:\n|\r\n) A terminal line separator. Either newline or the
+//             sequence carriage return-newline.
 // Regex submatch count: 3
 const std::regex status_line_regex
-{R"((HTTP/.+?)[:blank:]+([1-5][:digit:][:digit:])[:blank:]+(.*)(?\n|\r\n))"};
+{R"((HTTP/.+?)\s+([1-5]\d\d)\s+(.*)(?:\n|\r\n))"};
 
 // Splits a header into a name and value. White space which appears before the
 // value is discarded. Trailing line separator characters are discarded.  A
@@ -62,16 +65,16 @@ const std::regex status_line_regex
 // (.+?)          A non-greedy sequence of one or more characters which is
 //                treated as a submatch. (Header name submatch.)
 // :              A colon.
-// (?[:blank:]*)  A sequence of zero or more blanks characters which are
+// \s*     A sequence of zero or more blanks characters which are
 //                not line separators where the sequence is not treated as
 //                a submatch. This removes leading white space from any
 //                header value.
-// (.*?)          A non-greedy sequence of zero or more characters which is
-//                treated as a submatch. (Header value submatch.)
-// (?\n|\r\n)     The newline character or the carriage return and newline
+// (.*)           A greedy sequence of zero or more characters which is treated
+//                as a submatch. (Header value submatch.)
+// (?:\n|\r\n)    The newline character or the carriage return and newline
 //                sequence.
 // Regex submatch count: 2
-const std::regex header_regex {R"((.+?):(?[:blank:]*)(.*?)(?\n|\r\n))"};
+const std::regex header_regex {R"((.+?):\s*(.*)(?:\n|\r\n))"};
 
 // static data members
 CURL* CurlHttpResponse::cache_easy_handle_ptr_ {nullptr};
@@ -91,6 +94,10 @@ std::map<CURL*, CurlHttpResponse*> CurlHttpResponse::registration_map_ {};
 // 3) Deregistering a response by a call to Deregister will perform a cache
 //    update if one is needed.
 
+constexpr const char* null_response_message {
+  "The CurlHttpResponse* value received from "
+  "CurlHttpResponse::RegisteredResponse was null.\n"};
+
 // friend of CurlHttpResponse
 // extern "C"
 std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
@@ -107,6 +114,8 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
   // receipt_error_ need not be checked.
   if(!response_ptr)
   {
+    std::cerr << __FILE__ << '\n' << __func__ << '\n' <<
+      null_response_message << "Pointer value: " << userdata << '\n';
     return 0U;
   }
   if(response_ptr->terminal_header_line_received_)
@@ -116,6 +125,8 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
     // condition detects all cases of response reuse when a receipt error did
     // not occur.
     response_ptr->Deregister();
+    std::cerr << __FILE__ << '\n' << __func__ << '\n' <<
+      "The header list of the CurlHttpResponse object was already complete.\n";
     return 0U;
   }
   // Header processing start.
@@ -141,6 +152,10 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
       if(!std::regex_match(cbuffer, line_end, match, status_line_regex))
       {
         UpdateOnMatchError();
+        std::string_view status_line_view {cbuffer, nitems};
+        std::cerr << __FILE__ << '\n' <<__func__ << '\n' <<
+          "The status line did not match the expected pattern.\n" <<
+          "Status line:\n" << status_line_view << '\n';
         return 0U;
       }
       else
@@ -166,6 +181,10 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
       else if(!std::regex_match(cbuffer, line_end, match, header_regex))
       {
         UpdateOnMatchError();
+        std::string_view header_view {cbuffer, nitems};
+        std::cerr << __FILE__ << '\n' << __func__ << '\n' <<
+          "A header did not match the expected pattern.\n" <<
+          "Header:\n" << header_view << '\n';
         return 0U;
       }
       else
@@ -185,7 +204,7 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
     response_ptr->receipt_error_ = true;
     try
     {
-      std::cerr << exception_message << e.what() << '\n';
+      std::cerr << __FILE__ << '\n' << exception_message << e.what() << '\n';
     }
     catch(...)
     {}
@@ -197,7 +216,7 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
     response_ptr->receipt_error_ = true;
     try
     {
-      std::cerr << exception_message;
+      std::cerr << __FILE__ << '\n' << exception_message;
     }
     catch(...)
     {}
@@ -228,6 +247,8 @@ std::size_t BodyProcessor(char* buffer, std::size_t size, std::size_t nmemb,
     // would have halted before BodyProcessor is called.
     //    The check for !response_ptr is a defensive check that should never
     // fail given the reasoning above.
+    std::cerr << __FILE__ << '\n' << __func__ << '\n' <<
+      null_response_message << "Pointer value: " << userdata << '\n';
     return 0U;
   }
   // Body processing start.
@@ -378,4 +399,6 @@ CurlHttpResponse* CurlHttpResponse::RegisteredResponse(void* userdata) noexcept
   return cached_response_ptr_;
 }
 
-} // namespace
+} // namespace test
+} // namespace fcgi
+} // namespace as_components
