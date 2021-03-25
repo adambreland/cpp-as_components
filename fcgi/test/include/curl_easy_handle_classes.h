@@ -86,6 +86,8 @@ class CurlEasyHandle
     return temp_ptr;
   }
 
+  // An invocation of reset implies easy handle cleanup on *this. This means
+  // that eh.reset(eh.get()) is invalid for CurlEasyHandle instance eh.
   inline void reset(CURL* curl_easy_handle) noexcept
   {
     cleanup();
@@ -225,6 +227,11 @@ class CurlSlist
   struct curl_slist* curl_slist_ptr_ {nullptr};
 };
 
+// Functions for the CURLOPT_HEADERFUNCTION and CURLOPT_WRITEFUNCTION options
+// of a CURL easy handle. Note that these functions are not designed to handle
+// multipart MIME types (i.e. multipart or message types) or chunked transfer
+// encoding.
+
 // friend of CurlHttpResponse
 //
 // A function to be used as the callback for the CURLOPT_HEADERFUNCTION option
@@ -240,18 +247,20 @@ class CurlSlist
 // 1) It is assumed that nitems != 0.
 //
 // Exceptions and errors:
-// 1) This is a C++ function with C naming and calling conventions. All errors,
-//    including exceptions, cause the function to return 0. No exception is
-//    propagated beyond a call.
+// 1) This is a C++ function with C naming and calling conventions (language
+//    linkage). All errors, including exceptions, cause the function to return
+//    0. No exception is propagated beyond a call.
 // 2) Exceptions can only occur after a non-null pointer to a
 //    CurlHttpResponse instance was provided by
 //    CurlHttpResponse::RegisteredResponse. Let p be this pointer. If an
 //    exception occurred, then p->receipt_error() returns true and the response
 //    instance was deregistered.
-// 3) If an error occurred because a header line did not match the expected
-//    pattern, then, in addition to other error actions:
-//    a) The match error flag was set.
-//    b) An attempt was made to copy the line to the error line field of the
+// 3) If an error occurred because the status line or a header line did not
+//    match the expected pattern, then, in addition returning 0:
+//    a) The receipt error flag was set.
+//    b) The match error flag was set.
+//    c) The instance was deregistered.
+//    d) An attempt was made to copy the line to the error line field of the
 //       response instance.
 // 4) The function may attempt to write to std::cerr to report errors.
 //
@@ -261,7 +270,7 @@ class CurlSlist
 //    to CurlHttpResponse::RegisteredResponse, then 0 was returned.
 // 2) If userdata, when cast to CURL*, was associated with a CurlHttpResponse
 //    instance which had previously been used to receive a complete set of
-//    headers (terminal_header_line_received() returns true), then the instance
+//    headers (terminal_header_line_received() == true), then the instance
 //    was deregistered and 0 was returned.
 // 3) If userdata, when cast to CURL*, was associated with a valid
 //    CurlHttpResponse instance, then the header line given by
@@ -313,6 +322,7 @@ extern "C" std::size_t HeaderProcessor(char* buffer, std::size_t size,
 //    CurlHttpResponse instance, then an attempt was made to insert
 //    [buffer, buffer + nmemb) at the end of the body vector of the response
 //    instance.
+// 3) Note that this function does not deregister CurlHttpResponse instances.
 extern "C" std::size_t BodyProcessor(char* buffer, std::size_t size,
   std::size_t nmemb, void* userdata);
 

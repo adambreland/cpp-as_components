@@ -194,7 +194,11 @@ cc_test(
 cc_test(
     tags = ["manual"],
     name = "curl_easy_handle_classes_internal_test",
-    deps = ["//fcgi/test:curl_easy_handle_classes"],
+    deps = [
+        "//fcgi/test:curl_easy_handle_classes",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main"
+    ],
     srcs = ["curl_easy_handle_classes_internal_test.cc"],
     copts = copts_list,
     features = ["interpret_as_test_executable"],

@@ -6,36 +6,38 @@ extern "C" {
   #include <curl/curl.h>
 }
 
+#include "googletest/include/gtest/gtest.h"
+
 #include "fcgi/test/include/curl_easy_handle_classes.h"
 
-// Ensure that the CURL environment is initialized before the program starts.
-as_components::fcgi::test::CurlEnvironmentManager curl_environment {};
+namespace as_components {
+namespace fcgi {
+namespace test {
+namespace test {
 
-int main(int, char**)
+// Ensure that the CURL environment is initialized before the program starts.
+CurlEnvironmentManager curl_environment {};
+
+TEST(CurlEasyHandleClasses, SimpleTest)
 {
   try
   {
     as_components::fcgi::test::CurlEasyHandle easy_handle {};
-    if(curl_easy_setopt(easy_handle.get(), CURLOPT_URL, "http://localhost") !=
-      CURLE_OK)
-    {
-      std::cout << "CURLOPT_URL could not be set.\n";
-      return EXIT_FAILURE;
-    }
+    ASSERT_EQ(curl_easy_setopt(easy_handle.get(), CURLOPT_URL,
+      "http://localhost"), CURLE_OK) << "CURLOPT_URL could not be set.";
     as_components::fcgi::test::CurlSlist s_list {};
     s_list.AppendString("Vary: User-Agent");
+    // It is assumed that this call cannot fail since easy_handle was set with
+    // a URL with http as the scheme.
     curl_easy_setopt(easy_handle.get(), CURLOPT_HTTPHEADER, s_list.get());
     as_components::fcgi::test::CurlHttpResponse response {};
     // Implicitly sets CURLOPT_HEADERFUNCTION, CURLOPT_HEADERDATA,
     // CURLOPT_WRITEFUNCTION, and CURLOPT_WRITEDATA.
     response.Register(easy_handle.get());
     CURLcode perform_result {};
-    if((perform_result = curl_easy_perform(easy_handle.get())) != CURLE_OK)
-    {
-      std::cout << "curl_easy_perform failed. Curl error number: " <<
-        perform_result << '\n' << curl_easy_strerror(perform_result) << '\n';
-      return EXIT_FAILURE;
-    }
+    ASSERT_EQ((perform_result = curl_easy_perform(easy_handle.get())),
+      CURLE_OK) << "curl_easy_perform failed. Curl error number: " <<
+        perform_result << '\n' << curl_easy_strerror(perform_result);
     std::cout << "Status line: " <<
       std::string_view
       {
@@ -71,17 +73,19 @@ int main(int, char**)
       {reinterpret_cast<const char*>(response.body().data()),
         response.body().size()};
     std::cout << "\nBody:\n" << body_view << '\n';
-    return EXIT_SUCCESS;
   }
   catch(std::exception& e)
   {
-    std::cout << "An exception derived from std::exception was caught. " <<
-      e.what() << '\n';
-    return EXIT_FAILURE;
+    FAIL() << "An exception derived from std::exception was caught. " <<
+      e.what();
   }
   catch(...)
   {
-    std::cout << "An unknown exception type was caught.\n";
-    return EXIT_FAILURE;
+    FAIL() << "An unknown exception type was caught.\n";
   }
 }
+
+} // namespace test
+} // namespace test
+} // namespace fcgi
+} // namespace as_components

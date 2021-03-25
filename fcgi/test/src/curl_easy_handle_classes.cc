@@ -40,41 +40,41 @@ CurlSlist& CurlSlist::AppendStringHelper(const char* char_ptr)
 // parts.
 //
 // Regex description:
-// (HTTP/.+?)  "HTTP/" followed by a non-greedy sequence of one
-//             or more characters where the entire sequence is
-//             treated as a submatch. (Version submatch.)
-// \s+         A greedy sequence or one or more blank characters
-//             which is not treated as a submatch.
-// ([1-5]\d\d) A sequence as follows which is treated as a
-//             submatch: A digit in the range 1 to 5, any digit,
-//             any digit. (Status code submatch.)
+// (HTTP/.+?)  "HTTP/" followed by a non-greedy sequence of one or more
+//             characters where the entire sequence is treated as a submatch.
+//             (Version submatch.)
+// \s+         A greedy sequence or one or more blank characters which is not
+//             treated as a submatch.
+// ([1-5]\d\d) A sequence as follows which is treated as a submatch: A digit in
+//             the range 1 to 5, any digit, any digit. (Status code submatch.)
 // \s+         As above.
-// (.*)        A greedy sequence of zero or more characters which
-//             is treated as a submatch. (Status text submatch.)
-// (?:\n|\r\n) A terminal line separator. Either newline or the
-//             sequence carriage return-newline.
+// (.*?)       A non-greedy sequence of zero or more characters which is
+//             treated as a submatch. (Status text submatch.)
+// \s*         A greedy sequence of zero or more white space characters.
+// (?:\n|\r\n) A terminal line separator. Either newline or the sequence
+//             (carriage return, newline).
 // Regex submatch count: 3
 const std::regex status_line_regex
-{R"((HTTP/.+?)\s+([1-5]\d\d)\s+(.*)(?:\n|\r\n))"};
+{R"((HTTP/.+?)\s+([1-5]\d\d)\s+(.*?)\s*(?:\n|\r\n))"};
 
 // Splits a header into a name and value. White space which appears before the
 // value is discarded. Trailing line separator characters are discarded.  A
 // line separator may be newline only or carriage return followed by newline.
 //
 // Regex description:
-// (.+?)          A non-greedy sequence of one or more characters which is
-//                treated as a submatch. (Header name submatch.)
-// :              A colon.
-// \s*     A sequence of zero or more blanks characters which are
-//                not line separators where the sequence is not treated as
-//                a submatch. This removes leading white space from any
-//                header value.
-// (.*)           A greedy sequence of zero or more characters which is treated
-//                as a submatch. (Header value submatch.)
-// (?:\n|\r\n)    The newline character or the carriage return and newline
-//                sequence.
+// (.+?)       A non-greedy sequence of one or more characters which is treated
+//             as a submatch. (Header name submatch.)
+// :           A colon.
+// \s*         A sequence of zero or more blanks characters which are not line
+//             separators where the sequence is not treated as a submatch. This
+//             removes leading white space from any header value.
+// (.*?)       A non-greedy sequence of zero or more characters which is
+//             treated as a submatch. (Header value submatch.)
+// \s*         A greedy sequence of zero or more white space characters.
+// (?:\n|\r\n) The newline character or the carriage return and newline
+//             sequence.
 // Regex submatch count: 2
-const std::regex header_regex {R"((.+?):\s*(.*)(?:\n|\r\n))"};
+const std::regex header_regex {R"((.+?):\s*(.*?)\s*(?:\n|\r\n))"};
 
 // static data members
 CURL* CurlHttpResponse::cache_easy_handle_ptr_ {nullptr};
@@ -100,7 +100,7 @@ constexpr const char* null_response_message {
 
 // friend of CurlHttpResponse
 // extern "C"
-std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
+std::size_t HeaderProcessor(char* buffer, std::size_t, std::size_t nitems,
   void* userdata)
 {
   // This implementation assumes nitems != 0.
@@ -226,7 +226,7 @@ std::size_t HeaderProcessor(char* buffer, std::size_t size, std::size_t nitems,
 
 // friend of CurlHttpResponse
 // extern "C"
-std::size_t BodyProcessor(char* buffer, std::size_t size, std::size_t nmemb,
+std::size_t BodyProcessor(char* buffer, std::size_t, std::size_t nmemb,
   void* userdata)
 {
   // The special case where nmemb == 0 is handled by the implementation for
