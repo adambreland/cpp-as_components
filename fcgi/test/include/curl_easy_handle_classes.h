@@ -322,7 +322,8 @@ extern "C" std::size_t HeaderProcessor(char* buffer, std::size_t size,
 //    CurlHttpResponse instance, then an attempt was made to insert
 //    [buffer, buffer + nmemb) at the end of the body vector of the response
 //    instance.
-// 3) Note that this function does not deregister CurlHttpResponse instances.
+// 3) Note that this function does not deregister CurlHttpResponse instances
+//    from non-exceptional execution.
 extern "C" std::size_t BodyProcessor(char* buffer, std::size_t size,
   std::size_t nmemb, void* userdata);
 
@@ -350,9 +351,7 @@ struct StatusLine
 // Preconditions:
 // 1) Use of this class requires that the lifetime of any CURL easy handle
 //    which is associated with instances of the class extends beyond the
-//    lifetime of the associated instances. In other words, instances of type
-//    CURL* which may be stored by the class or its instances must not be
-//    invalid.
+//    lifetime of the associated instances.
 class CurlHttpResponse
 {
  public:
@@ -389,6 +388,8 @@ class CurlHttpResponse
   // Effects:
   // 1) *this and the state of CurlHttpResponse were updated to reflect the
   //    association of *this with easy_handle_ptr.
+  //    a) If easy_handle_ptr was already associated with a CurlHttpResponse
+  //       instance, then that association was dissolved.
   // 2) HeaderProcessor and BodyProcessor were set on *easy_handle_ptr with
   //    CURLOPT_HEADERFUNCTION and CURLOPT_WRITEFUNCTION, respectively.
   // 3) The CURLOPT_HEADERDATA and CURLOPT_WRITEDATA options were set on

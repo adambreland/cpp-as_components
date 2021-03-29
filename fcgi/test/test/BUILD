@@ -208,6 +208,10 @@ cc_test(
 sh_test(
     name = "curl_easy_handle_classes_test",
     deps = [],
-    data = [":curl_easy_handle_classes_internal_test"],
+    data = [
+        ":curl_easy_handle_classes_internal_test",
+        "nginx.conf",
+        "curl_easy_handle_classes_internal_test_http_response_body.txt"
+    ],
     srcs = ["curl_easy_handle_classes_test.sh"],
 )

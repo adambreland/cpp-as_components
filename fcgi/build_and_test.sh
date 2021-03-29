@@ -57,7 +57,7 @@ execute_docker_run_for_build=0 &&
 docker run \
     --name ${build_container_name} \
     -t \
-    --mount type=volume,src=as_components_bazel_output_user_root,dst=/usr/local/src/bazel_files \
+    --mount type=volume,src=as_components_build_and_test,dst=/usr/local/src/build_and_test \
     --mount type=bind,src=${as_components_path},dst=/usr/local/src/as_components \
     as_components/build_and_test:latest \
     /bin/bash /usr/local/src/as_components/fcgi/internal_build_and_test.sh
