@@ -402,8 +402,8 @@ class CurlHttpResponse
   // 1) Use of this function is optional.
   // 2) Invoking the function on an instance which was not registered with a
   //    CURL easy handle has no effect.
-  // 3) If an instance was registered, never used, and then deregistered, it
-  //    may be registered again.
+  // 3) If an instance was registered, never used to receive data, and then
+  //    deregistered, it may be registered again.
   void Deregister() noexcept;
 
   // non-constant reference.

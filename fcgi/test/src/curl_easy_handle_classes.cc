@@ -311,11 +311,7 @@ void CurlHttpResponse::Deregister() noexcept
     // Erasure cannot throw given the comparison operator of registration_map_.
     registration_map_.erase(denormalized_easy_handle_ptr_);
     // These invocations should always return CURLE_OK.
-    curl_easy_setopt(denormalized_easy_handle_ptr_, CURLOPT_HEADERFUNCTION,
-      nullptr);
     curl_easy_setopt(denormalized_easy_handle_ptr_, CURLOPT_HEADERDATA,
-      nullptr);
-    curl_easy_setopt(denormalized_easy_handle_ptr_, CURLOPT_WRITEFUNCTION,
       nullptr);
     curl_easy_setopt(denormalized_easy_handle_ptr_, CURLOPT_WRITEDATA, nullptr);
     // Conditionally updates the cached CurlHttpResponse*.

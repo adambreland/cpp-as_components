@@ -196,10 +196,15 @@ cc_test(
     name = "curl_easy_handle_classes_internal_test",
     deps = [
         "//fcgi/test:curl_easy_handle_classes",
+        ":client_interface_testing_utilities",
+        "//socket_functions:socket_functions_header",
         "@googletest//:gtest",
         "@googletest//:gtest_main"
     ],
-    srcs = ["curl_easy_handle_classes_internal_test.cc"],
+    srcs = [
+        "curl_easy_handle_classes_internal_test.cc",
+        "//socket_functions:libsocket_functions.so"
+    ],
     copts = copts_list,
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
