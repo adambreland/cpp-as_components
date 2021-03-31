@@ -352,6 +352,14 @@ struct StatusLine
 // 1) Use of this class requires that the lifetime of any CURL easy handle
 //    which is associated with instances of the class extends beyond the
 //    lifetime of the associated instances.
+//
+// Usage notes:
+// 1) Once any CurlHttpResponse instance is registered with an easy handle, the
+//    functions which were set on the easy handle for the options
+//    CURLOPT_HEADERFUNCTION and CURLOPT_WRITEFUNCTION will remain set on the
+//    easy handle. The default settings can be restored with curl_easy_restore.
+//    Alternatively, another function can be explicitly set on the easy handle
+//    by a call to curl_easy_setopt with the approprpiate option argument.
 class CurlHttpResponse
 {
  public:

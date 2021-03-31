@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -41,6 +42,7 @@ namespace test {
 // Ensure that the CURL environment is initialized before the program starts.
 CurlEnvironmentManager curl_environment {};
 
+// Debug test
 // A test which makes an HTTP request and prints the response to the test log.
 // TEST(CurlEasyHandleClasses, DebugTest)
 // {
@@ -119,7 +121,7 @@ CurlEnvironmentManager curl_environment {};
 //    c) The instance has been used to receive the information for a request.
 //    d) The instance was used and became associated with an error.
 // 2) Deregister is called on an instance which was never registered.
-// 3) An new instance is registered, deregistered, and then registered again.
+// 3) A new instance is registered, deregistered, and then registered again.
 //    The instance is then successfully used to receive response information.
 // 4) An instance is registered. Another instance takes the easy handle of the
 //    first instance through registration. The first instance is then
@@ -130,20 +132,142 @@ CurlEnvironmentManager curl_environment {};
 // Examines properties:
 // 1) Failure cases:
 //    a) No instance is registered for an easy handle.
-//       1) An instance was never registered.
-//       2) An instance was registered, and then deregistered.
-//       3) An instance was registered, used to completion, and then an attempt
+//       1) An instance was registered, and then deregistered.
+//       2) An instance was registered, used to completion, and then an attempt
 //          was made to use the instance again. This was detected, and the
-//          instance was deregistered. An request is then made.
+//          instance was deregistered. A request is then made.
 //    b) An instance is used after it has already been used. This case can be
 //       combined with a.3.
 //    c) For each of a header and status line: mismatch against the expected
 //       pattern.
 // 2) Non-failure cases:
-//    a)
+//    Note: In all cases, the presence and correct content of two test headers
+//    should be checked.
+//    a) A response is registered and used.
+//    b) A second response is registered on an easy handle which had
+//       successfully been used. A request-response cycle is performed.
+//    c) A second easy handle is used with a new response after at least one
+//       response had been received over another easy handle.
+//    d) A response is received over an easy handle which had previously been
+//       used to receive a response and for which another easy handle was used
+//       to receive a response between these responses.
+
+const std::vector<std::uint8_t> kResponseBody {'a', 'b', 'c', '\n', '1', '2',
+  '3'};
+
+TEST(CurlEasyHandleClasses, CombinedSet1)
+{
+  try
+  {
+    auto GTestNonFatalCheckSuccessfulResponseObservers = []
+    (CurlHttpResponse* response_ptr, int invocation_line)
+    {
+      ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+        "lambda CheckSuccessfulResponseObservers"};
+      EXPECT_TRUE(response_ptr->status_line_received());
+      EXPECT_TRUE(response_ptr->header_list_complete());
+      EXPECT_EQ(response_ptr->body(), kResponseBody);
+      EXPECT_FALSE(response_ptr->processing_error());
+      EXPECT_FALSE(response_ptr->match_error());
+      EXPECT_EQ(response_ptr->error_line().size(), 0U);
+    };
+
+    auto HeaderNameLessThan = []
+    (const HeaderPair& lhs, const HeaderPair& rhs)->bool
+    {
+      return (lhs.first < rhs.first);
+    };
+
+    auto HeaderEquality = []
+    (const HeaderPair& lhs, const HeaderPair& rhs)->bool
+    {
+      return (lhs.first == rhs.first);
+    };
+
+    auto GTestNonFatalCheckHeaders = [&HeaderNameLessThan, &HeaderEquality]
+    (CurlHttpResponse* response_ptr, int invocation_line)->void
+    {
+      ::testing::ScopedTrace tracer {__FILE__, invocation_line,
+        "lambda CheckHeaders"};
+      // Use move iterators for efficient sorting below.
+      HeaderList::iterator h_begin {response_ptr->header_list().begin()};
+      HeaderList::iterator h_end {response_ptr->header_list().end()};
+      EXPECT_GT(response_ptr->header_list().size(), 0U);
+      std::sort(h_begin, h_end, HeaderNameLessThan);
+      HeaderList::iterator duplicate_iter {std::adjacent_find(h_begin, h_end,
+        HeaderEquality)};
+      EXPECT_EQ(duplicate_iter, h_end);
+      HeaderPair pairs[2] =
+      {
+        {{'E', 'c', 'h', 'o', '-', '1'}, {'1'}},
+        {{'E', 'c', 'h', 'o', '-', '2'}, {'2'}}
+      };
+      for(int i {0}; i != 2; ++i)
+      {
+        HeaderPair& current_pair {pairs[i]};
+        HeaderList::iterator echo_iter {std::lower_bound(h_begin, h_end,
+          current_pair, HeaderNameLessThan)};
+        EXPECT_NE(echo_iter, h_end);
+        if(echo_iter == h_end)
+        {
+          return;
+        }
+        EXPECT_EQ(echo_iter->first, current_pair.first);
+        EXPECT_EQ(echo_iter->second, current_pair.second);
+      }
+    };
+
+    CurlSlist header_list {};
+    header_list.AppendString("Echo-1: 1");
+    std::string echo_2 {"Echo-2: 2"};
+    header_list.AppendString(echo_2);
+    CurlEasyHandle easy_handle_1 {};
+    CurlHttpResponse curl_response_1 {};
+    ASSERT_EQ(curl_easy_setopt(easy_handle_1.get(), CURLOPT_URL,
+      "http://localhost/echo/response.txt"), CURLE_OK);
+    ASSERT_EQ(curl_easy_setopt(easy_handle_1.get(), CURLOPT_HTTPHEADER,
+      header_list.get()), CURLE_OK);
+    // TEST CASE 1.a.1 for HeaderProcessor and BodyProcessor.
+    ASSERT_NO_THROW(curl_response_1.Register(easy_handle_1.get()));
+    curl_response_1.Deregister();
+    ASSERT_NE(curl_easy_perform(easy_handle_1.get()), CURLE_OK);
+    // TEST CASE 2.a for HeaderProcessor and BodyProcessor.
+    ASSERT_NO_THROW(curl_response_1.Register(easy_handle_1.get()));
+    ASSERT_EQ(curl_easy_perform(easy_handle_1.get()), CURLE_OK);
+    GTestNonFatalCheckSuccessfulResponseObservers(&curl_response_1, __LINE__);
+    GTestNonFatalCheckHeaders(&curl_response_1, __LINE__);
+    // TEST CASE 2.b for HeaderProcessor and BodyProcessor.
+    CurlHttpResponse curl_response_2 {};
+    ASSERT_NO_THROW(curl_response_2.Register(easy_handle_1.get()));
+    ASSERT_EQ(curl_easy_perform(easy_handle_1.get()), CURLE_OK);
+    GTestNonFatalCheckSuccessfulResponseObservers(&curl_response_2, __LINE__);
+    GTestNonFatalCheckHeaders(&curl_response_2, __LINE__);
+    // TEST CASE 2.c for HeaderProcessor and BodyProcessor.
+    CurlEasyHandle easy_handle_2 {};
+    ASSERT_EQ(curl_easy_setopt(easy_handle_2.get(), CURLOPT_URL,
+      "http://localhost/echo/response.txt"), CURLE_OK);
+    ASSERT_EQ(curl_easy_setopt(easy_handle_2.get(), CURLOPT_HTTPHEADER,
+      header_list.get()), CURLE_OK);
+    CurlHttpResponse curl_response_3 {};
+    ASSERT_NO_THROW(curl_response_3.Register(easy_handle_2.get()));
+    ASSERT_EQ(curl_easy_perform(easy_handle_2.get()), CURLE_OK);
+    GTestNonFatalCheckSuccessfulResponseObservers(&curl_response_3, __LINE__);
+    GTestNonFatalCheckHeaders(&curl_response_3, __LINE__);
+    // TEST CASE 2.d for HeaderProcessor and BodyProcessor.
+    CurlHttpResponse curl_response_4 {};
+    ASSERT_NO_THROW(curl_response_4.Register(easy_handle_1.get()));
+    ASSERT_EQ(curl_easy_perform(easy_handle_1.get()), CURLE_OK);
+    GTestNonFatalCheckSuccessfulResponseObservers(&curl_response_4, __LINE__);
+    GTestNonFatalCheckHeaders(&curl_response_4, __LINE__);
+  }
+  catch(...)
+  {
+    FAIL();
+  }
+}
 
 // CurlHttpHeader test cases 1.a, 1.b, 2, and 4.
-TEST(CurlHttpResponse, TestCaseSet1)
+TEST(CurlEasyHandleClasses, CurlHttpResponseOnlySet)
 {
   // TEST CASE 1.a
   CurlHttpResponse curl_response_1 {};
@@ -173,9 +297,9 @@ TEST(CurlHttpResponse, TestCaseSet1)
   );
 }
 
-// CurlHttpHeader test cases 1.c, 1.d, and 3, HeaderProcessor and BodyProcessor
-// test cases 1.a.3, 1.b, and 1.c.
-TEST(CurlHttpResponse, TestCaseSet2)
+// CurlHttpHeader test cases 1.c, 1.d, and 3; HeaderProcessor and BodyProcessor
+// test cases 1.a.2, 1.b, and 1.c.
+TEST(CurlEasyHandleClasses, CombinedSet2)
 {
   try
   {
@@ -450,8 +574,7 @@ TEST(CurlHttpResponse, TestCaseSet2)
     EXPECT_TRUE(curl_response_3.header_list_complete());
     EXPECT_FALSE(curl_response_3.processing_error());
     EXPECT_FALSE(curl_response_3.match_error());
-    EXPECT_EQ(curl_response_3.body(), (std::vector<std::uint8_t>
-      {'a', 'b', 'c', '\n', '1', '2', '3'}));
+    EXPECT_EQ(curl_response_3.body(), kResponseBody);
     EXPECT_EQ(curl_response_3.error_line().size(), 0U);
     // TEST CASE 1.b for HeaderProcessor and BodyProcessor.
     ASSERT_NE(curl_easy_perform(easy_handle_1.get()), CURLE_OK);
@@ -469,7 +592,6 @@ TEST(CurlHttpResponse, TestCaseSet2)
     FAIL();
   }
 }
-
 
 } // namespace test
 } // namespace test
