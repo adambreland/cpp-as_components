@@ -14,9 +14,9 @@ RUN set -o pipefail && \
     mv bazel.gpg /etc/apt/trusted.gpg.d/ && \
     echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | \
       tee /etc/apt/sources.list.d/bazel.list
-# Updates the new Bazel repository. Installs bazel, g++, nginx-light and
-# libcurl4-openssl-dev (libcurl with development files).
-RUN apt-get -y update && apt-get -y install bazel g++ nginx-light \
+# Updates the new Bazel repository. Installs bazel, g++, gettext (for envsubst),
+# nginx-light and libcurl4-openssl-dev (libcurl with development files).
+RUN apt-get -y update && apt-get -y install bazel g++ gettext nginx-light \
     libcurl4-openssl-dev
 # Retrieves the googletest source code and installs it.
 RUN curl -fsSL https://github.com/google/googletest/tarball/release-1.10.0 \

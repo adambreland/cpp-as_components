@@ -39,7 +39,7 @@ namespace test {
 // 2) CurlHttpResponse::Register
 // 3) CurlHttpResponse::Deregister
 
-// Ensure that the CURL environment is initialized before the program starts.
+// Ensures that the CURL environment is initialized before the program starts.
 CurlEnvironmentManager curl_environment {};
 
 // Debug test
@@ -113,6 +113,10 @@ CurlEnvironmentManager curl_environment {};
 //   }
 // }
 
+// CurlSlist
+// Testcases:
+// 1) Both of the overloads of AppendString are used.
+
 // CurlHttpResponse
 // Test cases:
 // 1) A std::logic_error exception is thrown when Register is called.
@@ -152,8 +156,8 @@ CurlEnvironmentManager curl_environment {};
 //       used to receive a response and for which another easy handle was used
 //       to receive a response between these responses.
 
-const std::vector<std::uint8_t> kResponseBody {'a', 'b', 'c', '\n', '1', '2',
-  '3'};
+const std::vector<std::uint8_t> kResponseBody
+  {'a', 'b', 'c', '\n', '1', '2', '3'};
 
 TEST(CurlEasyHandleClasses, CombinedSet1)
 {
@@ -217,6 +221,7 @@ TEST(CurlEasyHandleClasses, CombinedSet1)
       }
     };
 
+    // TEST CASE 1 for CurlSlist.
     CurlSlist header_list {};
     header_list.AppendString("Echo-1: 1");
     std::string echo_2 {"Echo-2: 2"};
@@ -317,7 +322,7 @@ TEST(CurlEasyHandleClasses, CombinedSet2)
 
       const std::string malformed_status_line_response
       {
-        "HTTP/1.1 200Success\r\n" // Missing space between code and text.
+        "HTTP/1.1 200Success\r\n" // Missing space between status code and text.
         "Content-Type: text/plain\r\n"
         "Content-Length: 11\r\n"
         "\r\n"

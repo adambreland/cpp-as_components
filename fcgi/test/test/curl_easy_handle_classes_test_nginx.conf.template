@@ -1,15 +1,16 @@
-# The configuration for an NGINX instance which is used to test the classes
-# from curl_easy_handle_classes.h.
+# The configuration for an NGINX instance which is used in the testing of the
+# classes from curl_easy_handle_classes.h.
 #
 # This configuration assumes the existence of the following directories within
-# the root directory /usr/local/src/build_and_test/nginx:
-# 1) run
-# 2) log
-# 3) data
+# the directory /usr/local/src/build_and_test/nginx/curl_easy_test:
+# 1) log
+# 2) data
 
 user www-data;
 worker_processes 1;
-pid /usr/local/src/build_and_test/nginx/run/nginx.pid;
+# This configuration file template will be processed to replace ${TEST_TMPDIR}
+# with the Bazel test environment temporary file directory.
+pid ${TEST_TMPDIR}/nginx.pid;
 
 events {
     # Uses the default event processing directives.
@@ -21,29 +22,29 @@ http {
     tcp_nopush on; # Refers to TCP_CORK on Linux.
     tcp_nodelay on; # Used in conjunction with tcp_nopush to allow corking to
                     # control when partial frames are sent. Except for the case
-                    # of TCP_CORK time-out, partial frames are sent if and only
-                    # if TCP_CORK is not currently set.
+                    # of TCP_CORK time-out, data is sent immediately regardless
+                    # of length if and only if TCP_CORK is not currently set.
 
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    error_log /usr/local/src/build_and_test/nginx/log/error.log;
+    error_log /usr/local/src/build_and_test/nginx/curl_easy_test/log/error.log;
 
     gzip on; # Only applies to HTML by default.
 
     server {
         listen 127.0.0.1:80;
 
-        root /usr/local/src/build_and_test/nginx;
+        root /usr/local/src/build_and_test/nginx/curl_easy_test;
 
         location /data/ {
         }
 
         location /echo/ {
-            # Serves static files from /data with two custom headers echoed.
+            # Serves static files from data with two custom headers echoed.
             # (A previous root directive appears to not apply to the value of
             # the alias directive.)
-            alias /usr/local/src/build_and_test/nginx/data/;
+            alias /usr/local/src/build_and_test/nginx/curl_easy_test/data/;
 
             # It appears to be that ngx_http_headers_module is always
             # available.
