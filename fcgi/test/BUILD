@@ -166,6 +166,8 @@ cc_library(
     visibility = ["//visibility:public"]
 )
 
+# This test is executed by fcgi_server_interface_integration_test.
+# The env attribute is set to document test dependencies.
 cc_test(
     tags = ["manual"],
     name = "fcgi_server_interface_integration_test_app_server",
@@ -187,11 +189,28 @@ cc_test(
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
 )
 
+# This test is executed by fcgi_server_interface_integration_test.
+cc_test(
+    tags = ["manual"],
+    name = "fcgi_server_interface_integration_test_http_client",
+    deps = [
+        # It is assumed that libcurl is present as a system library.
+        ":curl_easy_handle_classes",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main"
+    ],
+    srcs = ["fcgi_server_interface_integration_test_http_client.cc"],
+    copts = copts_list,
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+)
+
 sh_test(
     name = "fcgi_server_interface_integration_test",
     deps = [],
     data = [
         ":fcgi_server_interface_integration_test_app_server",
+        ":fcgi_server_interface_integration_test_http_client",
         "fcgi_server_interface_integration_test_nginx.conf.template"
     ],
     srcs = ["fcgi_server_interface_integration_test.sh"]

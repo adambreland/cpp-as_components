@@ -1,4 +1,4 @@
-user www-data;
+user root;
 worker_processes 1;
 pid ${TEST_TMPDIR}/nginx.pid;
 
@@ -13,7 +13,7 @@ http {
         # Setting the max_conns parameter to the maximum connection number
         # of the application server will prevent such closures.
         server unix:/tmp/fcgi_server_interface_integration_test_listen_sock
-                max_conns=10;
+               max_conns=10;
         # Any number of connections up to the maximum number should be used
         # repeatedly when this is possible.
         keepalive 10;
@@ -35,15 +35,15 @@ http {
         error_log /usr/local/src/build_and_test/nginx/fcgi_server_interface_integration_test/log/error.log warn;
 
         # FastCGI configuration.
-        location /fastcgi/ {
+        location /fastcgi {
             fastcgi_pass fastcgi_app_server;
 
             fastcgi_keep_conn on;
 
             # FastCGI parameters:
             # NGINX passes all request headers by default. This behavior is
-            # disabled here as many of the request headers are not relevant to
-            # the application server.
+            # disabled here as many request headers are not relevant to the
+            # application server.
             fastcgi_pass_request_headers off;
             # Basic CGI and request information parameters:
             # CGI parameters (without use of PATH_INFO):
@@ -62,8 +62,8 @@ http {
                 # The entire Cookie header value.
             fastcgi_param COOKIE           $http_cookie;
             # Custom or other header:
-            # fastcgi_param <uppercase name with dashes-to-underscores>
-            #               $http_<header name to lowercase with dashes-to-underscores>;
+            fastcgi_param TEST_HEADER_1    $http_test_header_1;
+            fastcgi_param TEST_HEADER_2    $http_test_header_2;
 
             # Unused CGI parameters related to authorization (authentication).
             # AUTH_TYPE

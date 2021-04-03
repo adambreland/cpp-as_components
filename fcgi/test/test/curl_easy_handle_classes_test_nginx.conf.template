@@ -28,7 +28,7 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    error_log /usr/local/src/build_and_test/nginx/curl_easy_test/log/error.log;
+    error_log /usr/local/src/build_and_test/nginx/curl_easy_test/log/error.log warn;
 
     gzip on; # Only applies to HTML by default.
 

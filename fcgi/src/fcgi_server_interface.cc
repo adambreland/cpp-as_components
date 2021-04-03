@@ -141,16 +141,22 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
   if(max_requests <= 0)
   {
     if(construction_argument_error)
+    {
       error_message += '\n';
+    }
     else
+    {
       construction_argument_error = true;
+    }
 
     error_message += "A value less than or equal to zero was given for the "
       "maximum number of concurrent requests. This value must be greater "
       "than or equal to one.";
   }
   if(construction_argument_error)
+  {
     throw std::invalid_argument {error_message};
+  }
 
   // Ensure that the supplied listening socket is non-blocking. This property
   // is assumed in the design of the AcceptRequests loop.
@@ -190,8 +196,10 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
     throw std::system_error {ec, "getsockopt with SO_TYPE"};
   }
   if(getsockopt_int_buffer != SOCK_STREAM)
+  {
     throw std::runtime_error {"The socket used for construction "
       "of an FcgiServerInterface object was not a stream socket."};
+  }
 
   getsockopt_int_buffer_size = sizeof(int);
   if(getsockopt(listening_descriptor_, SOL_SOCKET, SO_ACCEPTCONN,
@@ -201,8 +209,10 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
     throw std::system_error {ec, "getsockopt with SO_ACCEPTCONN"};
   }
   if(getsockopt_int_buffer != 1) // The value 1 indicates listening status.
+  {
     throw std::runtime_error {"The socket used for construction "
-      "of an FcgiServerInterface object\nwas not a listening socket."};
+      "of an FcgiServerInterface object was not a listening socket."};
+  }
 
   // For internet domains, check for IP addresses which are deemed authorized.
   // If FCGI_WEB_SERVER_ADDRS is unbound or bound to an empty value, any
@@ -210,7 +220,7 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
   // list, an error is thrown. Otherwise, a list of well-formed addresses which
   // have been converted to a normalized presentation format is stored in the
   // FcgiServerInterface object.
-  if(socket_domain_ == AF_INET || socket_domain_ == AF_INET6)
+  if((socket_domain_ == AF_INET) || (socket_domain_ == AF_INET6))
   {
     const char* ip_address_list_ptr = std::getenv("FCGI_WEB_SERVER_ADDRS");
     std::string ip_address_list {(ip_address_list_ptr) ?
@@ -224,9 +234,13 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
       struct in6_addr ipv6_internal_address;
       void* inet_address_subaddress_ptr {nullptr};
       if(socket_domain_ == AF_INET)
+      {
         inet_address_subaddress_ptr = &(ipv4_internal_address);
+      }
       else
+      {
         inet_address_subaddress_ptr = &(ipv6_internal_address);
+      }
       // Allocate enough space for a maximal normalized address string.
       char normalized_address[INET6_ADDRSTRLEN];
 
@@ -263,8 +277,10 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
       }
 
       if(!valid_ip_address_set_.size())
+      {
         throw std::runtime_error {"No authorized IP addresses "
           "were found during construction of an FcgiServerInterface object."};
+      }
     }
   }
 
@@ -275,15 +291,21 @@ FcgiServerInterface(int listening_descriptor, int max_connections,
     {FcgiServerInterface::interface_state_mutex_};
 
   if(interface_identifier_)
+  {
     throw std::runtime_error {"Construction of an FcgiServerInterface object "
       "occurred when another object was present."};
+  }
 
   // Prevent interface_identifier_ == 0 when a valid interface is present in
   // the unlikely event of integer overflow.
   if(previous_interface_identifier_ < std::numeric_limits<unsigned long>::max())
+  {
     previous_interface_identifier_ += 1U;
+  }
   else
+  {
     previous_interface_identifier_ = 1U;
+  }
 
   interface_identifier_ = previous_interface_identifier_;
 
@@ -319,7 +341,9 @@ FcgiServerInterface::~FcgiServerInterface()
   {
     for(auto dds_iter {dummy_descriptor_set_.begin()}; 
       dds_iter != dummy_descriptor_set_.end(); ++dds_iter)
+    {
       close(*dds_iter);
+    }
 
     // ACQUIRE interface_state_mutex_.
     std::lock_guard<std::mutex> interface_state_lock
@@ -517,7 +541,9 @@ int FcgiServerInterface::AcceptConnection()
 
   // Validate the new connected socket against domain and address.
   if(!((new_socket_domain == socket_domain_) && valid_address))
+  {
     return 0;
+  }
 
   // Make the accepted connected sockets non-blocking.
   int flags {};
@@ -767,6 +793,7 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 
   int select_return {select(number_for_select, &read_set, nullptr, nullptr, 
     nullptr)};
+
   if(select_return == -1)
   {
     // Return when a signal was caught by the thread of the interface.

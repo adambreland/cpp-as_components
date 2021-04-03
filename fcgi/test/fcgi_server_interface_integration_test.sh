@@ -15,12 +15,12 @@ if [[ $? -eq 0 ]]; then
     if [[ $? -eq 0 ]]; then
         # Waits so that NGINX has time to initialize.
         sleep 0.1
-        # Executes the internal test which uses libcurl. The test will fail if the
-        # NGINX instance was not created or is not ready.
-        # ${TEST_SRCDIR}/__main__/fcgi/test/fcgi_server_interface_integration_test_http_client
+        # Executes the internal test which uses libcurl. The test will fail if
+        # the NGINX instance was not created or is not ready.
+        ${TEST_SRCDIR}/__main__/fcgi/test/fcgi_server_interface_integration_test_http_client
         test_status=$?
-        # kill is needed because the command "nginx -s quit" assumes that the default
-        # location for the process ID of the NGINX master process is used.
+        # kill is needed because the command "nginx -s quit" assumes that the
+        # default location for the process ID of the NGINX master process is used.
         kill -QUIT $(cat ${TEST_TMPDIR}/nginx.pid)
         exit $test_status
     else

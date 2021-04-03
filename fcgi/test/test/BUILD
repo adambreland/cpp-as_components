@@ -195,6 +195,7 @@ cc_test(
     tags = ["manual"],
     name = "curl_easy_handle_classes_internal_test",
     deps = [
+        # It is assumed that libcurl is present as a system library.
         "//fcgi/test:curl_easy_handle_classes",
         ":client_interface_testing_utilities",
         "//socket_functions:socket_functions_header",
