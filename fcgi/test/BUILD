@@ -165,3 +165,34 @@ cc_library(
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
     visibility = ["//visibility:public"]
 )
+
+cc_test(
+    tags = ["manual"],
+    name = "fcgi_server_interface_integration_test_app_server",
+    deps = [
+        "//fcgi:fcgi_request_identifier",
+        "//fcgi:fcgi_server_interface_combined_header",
+        "//fcgi:fcgi_utilities_header"
+    ],
+    srcs = [
+        "fcgi_server_interface_integration_test_app_server.cc",
+        "//fcgi:libfcgi_server_interface_combined.so",
+        "//fcgi:libfcgi_utilities.so"
+    ],
+    copts = copts_list,
+    env = {
+        "LD_LIBRARY_PATH": "$${ORIGIN}/../../socket_functions"
+    },
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"],
+)
+
+sh_test(
+    name = "fcgi_server_interface_integration_test",
+    deps = [],
+    data = [
+        ":fcgi_server_interface_integration_test_app_server",
+        "fcgi_server_interface_integration_test_nginx.conf.template"
+    ],
+    srcs = ["fcgi_server_interface_integration_test.sh"]
+)

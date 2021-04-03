@@ -238,7 +238,7 @@ class FcgiServerInterface {
   //       valid addresses are found when that value is processed. An address
   //       is valid if inet_pton finds the address to be valid when given the
   //       appropriate socket domain.
-  // 4) An exception if thrown if, during construction, another
+  // 4) An exception is thrown if, during construction, another
   //    FcgiServerInterface object exists.
   // 5) The file description of listening_descriptor may or may not have been
   //    made non-blocking.
