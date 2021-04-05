@@ -419,6 +419,11 @@ class CurlHttpResponse
     return status_line_;
   }
 
+  inline const StatusLine& status_line() const noexcept
+  {
+    return status_line_;
+  }
+
   inline bool status_line_received() const noexcept
   {
     return status_line_received_;
@@ -430,6 +435,11 @@ class CurlHttpResponse
     return header_list_;
   }
 
+  inline const HeaderList& header_list() const noexcept
+  {
+    return header_list_;
+  }
+
   inline bool header_list_complete() const noexcept
   {
     return terminal_header_line_received_;
@@ -437,6 +447,11 @@ class CurlHttpResponse
 
   // non-constant reference.
   inline std::vector<std::uint8_t>& body() noexcept
+  {
+    return body_;
+  }
+
+  inline const std::vector<std::uint8_t>& body() const noexcept
   {
     return body_;
   }
@@ -499,6 +514,23 @@ class CurlHttpResponse
   bool terminal_header_line_received_ {false};
   std::vector<std::uint8_t> body_ {};
 };
+
+// Helper functions for CurlHttpResponse.
+inline bool HeaderNameLessThan(const HeaderPair& lhs,
+  const HeaderPair& rhs)
+{
+  return (lhs.first < rhs.first);
+};
+
+inline bool HeaderNameEquality(const HeaderPair& lhs,
+  const HeaderPair& rhs)
+{
+  return (lhs.first == rhs.first);
+};
+
+// Sorts the headers by header name and returns true if no duplicates were
+// found and false otherwise.
+bool SortHeadersAndCheckForDuplicates(CurlHttpResponse* response_ptr);
 
 } // namespace test
 } // namespace fcgi

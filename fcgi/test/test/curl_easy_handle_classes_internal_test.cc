@@ -176,31 +176,19 @@ TEST(CurlEasyHandleClasses, CombinedSet1)
       EXPECT_EQ(response_ptr->error_line().size(), 0U);
     };
 
-    auto HeaderNameLessThan = []
-    (const HeaderPair& lhs, const HeaderPair& rhs)->bool
-    {
-      return (lhs.first < rhs.first);
-    };
-
-    auto HeaderEquality = []
-    (const HeaderPair& lhs, const HeaderPair& rhs)->bool
-    {
-      return (lhs.first == rhs.first);
-    };
-
-    auto GTestNonFatalCheckHeaders = [&HeaderNameLessThan, &HeaderEquality]
+    auto GTestNonFatalCheckHeaders = []
     (CurlHttpResponse* response_ptr, int invocation_line)->void
     {
       ::testing::ScopedTrace tracer {__FILE__, invocation_line,
-        "lambda CheckHeaders"};
-      // Use move iterators for efficient sorting below.
+        "lambda GTestNonFatalCheckHeaders"};
       HeaderList::iterator h_begin {response_ptr->header_list().begin()};
       HeaderList::iterator h_end {response_ptr->header_list().end()};
       EXPECT_GT(response_ptr->header_list().size(), 0U);
-      std::sort(h_begin, h_end, HeaderNameLessThan);
-      HeaderList::iterator duplicate_iter {std::adjacent_find(h_begin, h_end,
-        HeaderEquality)};
-      EXPECT_EQ(duplicate_iter, h_end);
+      if(!SortHeadersAndCheckForDuplicates(response_ptr))
+      {
+        ADD_FAILURE() << "Duplicate check failed.";
+        return;
+      }
       HeaderPair pairs[2] =
       {
         {{'E', 'c', 'h', 'o', '-', '1'}, {'1'}},

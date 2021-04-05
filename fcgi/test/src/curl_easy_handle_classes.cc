@@ -395,6 +395,16 @@ CurlHttpResponse* CurlHttpResponse::RegisteredResponse(void* userdata) noexcept
   return cached_response_ptr_;
 }
 
+bool SortHeadersAndCheckForDuplicates(CurlHttpResponse* response_ptr)
+{
+  HeaderList::iterator h_begin {response_ptr->header_list().begin()};
+  HeaderList::iterator h_end {response_ptr->header_list().end()};
+  std::sort(h_begin, h_end, HeaderNameLessThan);
+  HeaderList::iterator duplicate_iter {std::adjacent_find(h_begin, h_end,
+    HeaderNameEquality)};
+  return (duplicate_iter == h_end);
+}
+
 } // namespace test
 } // namespace fcgi
 } // namespace as_components

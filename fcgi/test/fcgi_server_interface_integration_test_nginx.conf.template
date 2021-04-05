@@ -62,8 +62,8 @@ http {
                 # The entire Cookie header value.
             fastcgi_param COOKIE           $http_cookie;
             # Custom or other header:
-            fastcgi_param TEST_HEADER_1    $http_test_header_1;
-            fastcgi_param TEST_HEADER_2    $http_test_header_2;
+            fastcgi_param Test-Header-1    $http_test_header_1;
+            fastcgi_param Test-Header-2    $http_test_header_2;
 
             # Unused CGI parameters related to authorization (authentication).
             # AUTH_TYPE

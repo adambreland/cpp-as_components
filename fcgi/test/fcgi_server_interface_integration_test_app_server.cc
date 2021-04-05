@@ -98,9 +98,15 @@ int main(int, char**)
       1};
     // Writes the process ID of the application server to a file so that the
     // HTTP client test process can terminate it upon test exit.
-    std::ios_base::openmode open_mode {std::ios_base::out |
-      std::ios_base::trunc};
-    std::fstream pid_out {"/tmp/fcgi_server_interface.pid", open_mode};
+    std::ios_base::openmode open_mode {std::ios::out | std::ios::trunc};
+    const char* str_ptr {std::getenv("TEST_TMPDIR")};
+    if(str_ptr == nullptr)
+    {
+      exit(EXIT_FAILURE);
+    }
+    std::string id_path {str_ptr};
+    id_path.append("/fcgi_server_interface.pid");
+    std::fstream pid_out {id_path, open_mode};
     const char* pid_write_failure_message {"The interface process ID could "
       "not be written.\n"};
     if(!(pid_out.good()))
@@ -127,7 +133,7 @@ int main(int, char**)
     // Beginning of the application server logic.
     const char* header_terminator {"\r\n"};
     const char* response_prefix {"Status: 200 Success\r\n"};
-    const char* test_header_name_prefix {"TEST_HEADER_"};
+    const char* test_header_name_prefix {"Test-Header-"};
     const std::vector<std::uint8_t> test_header_search_key {
       static_cast<const std::uint8_t*>(static_cast<const void*>(
           test_header_name_prefix)),
@@ -136,11 +142,15 @@ int main(int, char**)
     };
     std::vector<std::uint8_t>::const_iterator test_header_search_key_end
       {test_header_search_key.end()};
-    const std::string response_body {"FcgiServerInterface!\n"};
+    const std::string response_body {"FcgiServerInterface!"};
     const std::string response_body_length_text
       {std::to_string(response_body.size())};
     using FcgiRequest = as_components::fcgi::FcgiRequest;
     std::vector<FcgiRequest> requests {};
+    const std::vector<std::uint8_t> kRequestMethodName
+      {'R','E','Q','U','E','S','T','_','M','E','T','H','O','D'};
+    const std::vector<std::uint8_t> kGET {'G','E','T'};
+    const std::vector<std::uint8_t> kPOST {'P','O','S','T'};
     while(true)
     {
       requests = fcgi_inter.AcceptRequests();
@@ -149,16 +159,47 @@ int main(int, char**)
       {
         std::string response {response_prefix};
         // Validate the metadata of the request against the expected values.
+
+        auto RequestBodyInvalid =
+        [&kRequestMethodName, &kGET, &kPOST, &req_iter]
+        ()->bool
+        {
+          const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
+            env {req_iter->get_environment_map()};
+          std::map<std::vector<std::uint8_t>,
+            std::vector<std::uint8_t>>::const_iterator method_iter
+            {env.find(kRequestMethodName)};
+          if(method_iter == env.cend())
+          {
+            return true;
+          }
+          const std::vector<std::uint8_t>& method_value_ref
+            {method_iter->second};
+          if(method_value_ref == kGET)
+          {
+            return (req_iter->get_STDIN().size() != 0U);
+          }
+          else if(method_value_ref == kPOST)
+          {
+            return (req_iter->get_STDIN() != kPOST); // The body should be
+                                                     // "POST".
+          }
+          else
+          {
+            return true;
+          }
+        };
+
         int metadata_correct {1};
-        if((req_iter->get_environment_map().size() == 0U) ||
-           (req_iter->get_DATA().size() != 0U) ||
+        if((req_iter->get_DATA().size() != 0U) ||
            (req_iter->get_keep_conn() != true) ||
            (req_iter->get_role() != as_components::fcgi::FCGI_RESPONDER) ||
-           (req_iter->AbortStatus() != false))
+           (req_iter->AbortStatus() != false) ||
+           RequestBodyInvalid())
         {
           metadata_correct = 0;
         }
-        response.append("Metadata-Correct: ").append(
+        response.append("Request-Correct: ").append(
           std::to_string(metadata_correct)).append(header_terminator);
         const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
         req_env {req_iter->get_environment_map()};
