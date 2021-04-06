@@ -1,3 +1,25 @@
+// MIT License
+//
+// Copyright (c) 2021 Adam J. Breland
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // In addition to providing the logic for the integration test application
 // server, this program must act as an application server creation command
 // which exits with either success or failure to an invoking shell depending on
@@ -132,14 +154,10 @@ int main(int, char**)
 
     // Beginning of the application server logic.
     const char* header_terminator {"\r\n"};
+    // The CGI/FastCGI Status header for success:
     const char* response_prefix {"Status: 200 Success\r\n"};
-    const char* test_header_name_prefix {"Test-Header-"};
-    const std::vector<std::uint8_t> test_header_search_key {
-      static_cast<const std::uint8_t*>(static_cast<const void*>(
-          test_header_name_prefix)),
-      static_cast<const std::uint8_t*>(static_cast<const void*>(
-          test_header_name_prefix + 12)) // Yes, this was manually counted.
-    };
+    const std::vector<std::uint8_t> test_header_search_key
+      {'T','e','s','t','-','H','e','a','d','e','r','-'};
     std::vector<std::uint8_t>::const_iterator test_header_search_key_end
       {test_header_search_key.end()};
     const std::string response_body {"FcgiServerInterface!"};
@@ -157,9 +175,6 @@ int main(int, char**)
       for(std::vector<FcgiRequest>::iterator req_iter {requests.begin()};
         req_iter != requests.end(); ++req_iter)
       {
-        std::string response {response_prefix};
-        // Validate the metadata of the request against the expected values.
-
         auto RequestBodyInvalid =
         [&kRequestMethodName, &kGET, &kPOST, &req_iter]
         ()->bool
@@ -191,6 +206,7 @@ int main(int, char**)
         };
 
         int metadata_correct {1};
+        // Validates the metadata of the request against the expected values.
         if((req_iter->get_DATA().size() != 0U) ||
            (req_iter->get_keep_conn() != true) ||
            (req_iter->get_role() != as_components::fcgi::FCGI_RESPONDER) ||
@@ -199,12 +215,15 @@ int main(int, char**)
         {
           metadata_correct = 0;
         }
+        // Constructs the response:
+        std::string response {response_prefix};
         response.append("Request-Correct: ").append(
           std::to_string(metadata_correct)).append(header_terminator);
         const std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>&
-        req_env {req_iter->get_environment_map()};
-        std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>::const_iterator
-        env_iter {req_env.lower_bound(test_header_search_key)};
+          req_env {req_iter->get_environment_map()};
+        std::map<std::vector<std::uint8_t>,
+          std::vector<std::uint8_t>>::const_iterator env_iter
+          {req_env.lower_bound(test_header_search_key)};
         // Iterates over test headers as determined by test header prefix
         // inclusion.
         for(/*no-op*/;
@@ -212,7 +231,7 @@ int main(int, char**)
             (std::mismatch(test_header_search_key.begin(),
                            test_header_search_key_end,
                            env_iter->first.begin()).first ==
-            test_header_search_key_end);
+              test_header_search_key_end);
             ++env_iter)
         {
           response.append(env_iter->first.begin(), env_iter->first.end());
