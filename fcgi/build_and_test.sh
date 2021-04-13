@@ -24,21 +24,19 @@
 
 # A convenience script to build and test namespace fcgi.
 #    This script builds as_components from a local source directory. A
-# container is derived from the build and test image
-# (image: as_components/build_and_test). The source directory is exposed to the
-# container through a bind mount. The script is configured to use a Docker
-# volume as the Bazel outputUserRoot directory. The use of a volume allows
-# incremental builds without container image modifications. It also prevents
-# internal Bazel build state from being stored in any container.
+# container is derived from the build and test image (image:
+# as_components/build_and_test). The source directory is exposed to the
+# container through a bind mount. The script is configured to use a directory
+# within a Docker volume as the Bazel outputUserRoot directory. The use of a
+# volume allows incremental builds without container image modifications. It
+# also prevents internal Bazel build state from being stored in any container.
 #    If the build was successful, tests for namespace fcgi are executed. These
 # include unit tests and external tests. Unit tests are executed by Bazel, e.g.
 # through cc_test targets, in its testing environment. External tests are
 # simply tests which are executed outside of the Bazel testing environment.
 # These tests are executed in a container which is derived from an image which
-# is built specifically for external tests. A Ubuntu base image is modified to
-# include:
-# 1) The shared libraries which are needed to use the modules of namespace fcgi. 
-# 2) Any dependecies of the tests other than the aforementioned libraries.
+# is built specifically for external tests (image:
+# as_components/fcgi/external_tests).
 #
 # Arguments: none
 #
@@ -49,15 +47,24 @@
 #    test actions with docker_build_configure.sh.
 # 3) The script is executed by the root user.
 # 4) Docker configuration preconditions:
-#    a) A Docker volume named as_components_bazel_output_user_root either does
-#       not exist or exists with an intended use as an outputUserRoot directory
-#       for Bazel.
-#    b) The build and test container image as_components/build_and_test
-#       exists.
-#    c) The Dockerfile for the external test container image
+#    a) A Docker volume named as_components_build_and_test either does
+#       not exist or exists with the intended use as persistent storage for
+#       the build and test actions of as_components.
+#       1) An immediate subdirectory bazel_files of this directory is used as
+#          the Bazel outputUserRoot directory.
+#    b) The Dockerfile for the external test container image
 #       as_components/fcgi/external_tests exists at fcgi/test/Dockerfile.
-#    d) The external test runner script is located at
+#    c) The external test runner script is located at
 #       fcgi/test/external_test_runner.sh.
+#
+# Effects:
+# 1) An attempt is made to build the modules of fcgi.
+# 2) If the build actions were successful:
+#    a) The build outputs are copied to the appropriate locations of
+#       output_binaries_and_tests in the local source directory. These include
+#       any external tests of fcgi.
+#    b) Bazel tests were performed.
+#    c) External tests were performed.
 
 build_container_name=as_components_fcgi_build
 test_container_name=as_components_fcgi_test
@@ -93,7 +100,8 @@ if [[ -v execute_docker_run_for_build ]]; then
         # Build a test image and execute the external tests.
         # AND list: Build the test container image and run the external test
         # runner script in a derived container.
-        echo -e "\nBuilding the test container image:" &&
+        echo -e "\nPerforming external tests:"
+        echo    "Building the test container image:" &&
         docker build \
             -t as_components/fcgi/external_tests \
             --file fcgi/test/Dockerfile \

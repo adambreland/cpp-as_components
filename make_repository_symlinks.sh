@@ -26,8 +26,10 @@
 # This configuration, among other purposes, allows build actions to be taken by
 # a container which has a bind mount to the source directory. The script is
 # responsible for creating symbolic links in the source directory to the
-# external dependencies of as_components. See the WORKSPACE file of
-# as_components for the Bazel targets definitions of external dependencies.
+# external dependencies of as_components. Note that these symbolic links refer
+# to directories which exist within the build_and_test container image. They
+# are valid within a build_and_test container. See the WORKSPACE file of
+# as_components for the Bazel target definitions of external dependencies.
 #
 # Arguments:
 # 1) The script accepts "help" and "--help" as the first argument.

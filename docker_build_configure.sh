@@ -27,7 +27,7 @@
 # 1) Builds the container images which are needed to build and test
 #    as_components.
 # 2) Creates an output directory tree for application shared libraries and
-#    external test files. 
+#    external test files.
 #
 # Note:
 # 1) Run as the root user.

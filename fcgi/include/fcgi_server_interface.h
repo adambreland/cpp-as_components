@@ -83,7 +83,7 @@ class FcgiServerInterface {
   //       are returned immediately.
   //    b) AcceptRequests returns if it was blocked waiting for incoming
   //       connections or data and either:
-  //       1) A signal affected the interface thread (errno == EINTR).
+  //       1) A signal interrupted the interface thread (errno == EINTR).
   //       2) An FcgiRequest object updated interface state in a way that
   //          the interface should respond to. For example, a call will return
   //          when a connection was corrupted by a request object. The
@@ -201,6 +201,7 @@ class FcgiServerInterface {
     application_overload_ = overload_status;
   }
 
+  // Normal constructor
   // Parameters:
   // listening_descriptor: The descriptor of the listening socket to be
   //                       used by the interface to accept connections.
