@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <utility>
 #include <vector>
 
 #include "fcgi/include/fcgi_server_interface.h"
@@ -82,51 +83,50 @@ bool FcgiServerInterface::RequestData::ProcessFCGI_PARAMS()
   {
     if(FCGI_PARAMS_.size())
     {
-      using byte_seq_pair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
-
-      std::vector<byte_seq_pair> name_value_pair_list
+      std::vector<ByteSeqPair> name_value_pair_list
         {ExtractBinaryNameValuePairs(FCGI_PARAMS_.data(), FCGI_PARAMS_.size())};
-
       if(name_value_pair_list.size())
       {
-        auto first_component_comp =
-          [](const byte_seq_pair& lhs, const byte_seq_pair& rhs)->bool
-          {
-            return lhs.first < rhs.first;
-          };
-
-        std::sort(name_value_pair_list.begin(), name_value_pair_list.end(),
-          first_component_comp);
-
-        auto current = name_value_pair_list.begin();
-        auto next = ++(name_value_pair_list.begin());
-
-        while(next != name_value_pair_list.end())
+        std::map<std::vector<std::uint8_t>, std::vector<std::uint8_t>>::iterator
+          environment_map_end {environment_map_.end()};
+        std::vector<ByteSeqPair>::iterator nvp_list_begin
+          {name_value_pair_list.begin()};
+        std::vector<ByteSeqPair>::iterator nvp_list_end
+          {name_value_pair_list.end()};
+        std::sort(nvp_list_begin, nvp_list_end, NameLessThan);
+        std::vector<ByteSeqPair>::iterator current {nvp_list_begin};
+        std::vector<ByteSeqPair>::iterator next {nvp_list_begin};
+        ++next;
+        while(next != nvp_list_end)
         {
           if(current->first == next->first)
           {
             if(current->second == next->second)
+            {
               ++next;
+            }
             else
-              return false; 
+            {
               // A list of environment variables was sent which had distinct
               // definitions for the same variable. Regard the list as corrupt.
+              return false;
+            }
           }
           else
           {
-            environment_map_.emplace_hint(environment_map_.end(),
+            environment_map_.emplace_hint(environment_map_end,
               std::move(*current));
             current = next;
             ++next;
           }
         }
-        environment_map_.emplace_hint(environment_map_.end(), 
-          std::move(*current));
+        environment_map_.emplace_hint(environment_map_end, std::move(*current));
       }
       else // ExtractBinaryNameValuePairs found a formatting error.
+      {
         return false;
+      }
     }
-
     return true;
   }
   catch(...)

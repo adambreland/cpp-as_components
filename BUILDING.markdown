@@ -1,11 +1,16 @@
 # Building `as_components`
-## Build dependencies and actions upon initial installation
+## Build dependencies and actions upon installation
 ### Dependencies
 * Build and test actions occur in Docker containers.
   * `as_components` uses [Bazel](https://bazel.build/) for build actions. Bazel
     is also used to execute most tests. Bazel is added automatically to the
     necessary Docker container images. If you are only interested in
-    producing binaries, then the use of Bazel for build actions is transparent.
+    producing binaries, then the use of Bazel for build and test actions is
+    transparent.
+* The build process uses a Bazel toolchain which assumes Linux and x86-64.
+  * Modifying the build process for other Unix variants and ISAs should be
+    possible, though doing so requires knowledge of Bazel toolchain definition
+    with platforms. Building for or on other platforms has not been tested.
 
 ### Initial installation and configuration
 1. Install Docker if it is not installed.

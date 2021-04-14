@@ -47,7 +47,7 @@ template<typename ByteIter>
 bool FcgiRequest::WriteHelper(ByteIter begin_iter, ByteIter end_iter,
   FcgiType type)
 {
-  if(completed_ || associated_interface_id_ == 0U)
+  if(completed_ || (associated_interface_id_ == 0U))
     return false;
 
   bool write_success {true};

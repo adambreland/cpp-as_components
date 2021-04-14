@@ -31,6 +31,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -339,8 +340,9 @@ FcgiServerInterface::~FcgiServerInterface()
   // Any exception results in program termination.
   try
   {
+    std::set<int>::iterator dummy_end {dummy_descriptor_set_.end()};
     for(auto dds_iter {dummy_descriptor_set_.begin()}; 
-      dds_iter != dummy_descriptor_set_.end(); ++dds_iter)
+      dds_iter != dummy_end; ++dds_iter)
     {
       close(*dds_iter);
     }
@@ -356,15 +358,17 @@ FcgiServerInterface::~FcgiServerInterface()
     // FcgiRequest objects for write mutexes ensures that no write mutex will
     // be held when the loop completes until the interface mutex is released.
     // Close all file descriptors for active sockets.
+    std::map<int, std::pair<std::unique_ptr<std::mutex>, bool>>::iterator
+      write_mutex_map_end {write_mutex_map_.end()};
     for(auto write_mutex_iter {write_mutex_map_.begin()};
-        write_mutex_iter != write_mutex_map_.end(); ++write_mutex_iter)
+        write_mutex_iter != write_mutex_map_end; ++write_mutex_iter)
     {
       write_mutex_iter->second.first->lock();
       write_mutex_iter->second.first->unlock();
       close(write_mutex_iter->first);
     }
 
-    // Kill interface.
+    // Indicates that no interface is present.
     FcgiServerInterface::interface_identifier_ = 0U;
   } // RELEASE interface_state_mutex_.
   catch(...)
@@ -437,8 +441,8 @@ int FcgiServerInterface::AcceptConnection()
   }  
   
   int accept_return {};
-  while((accept_return = accept(listening_descriptor_, address_ptr, 
-    length_ptr)) == -1 && (errno == EINTR || 
+  while(((accept_return = accept(listening_descriptor_, address_ptr,
+    length_ptr)) == -1) && (errno == EINTR ||
     errno == ECONNABORTED))
   {
     new_connection_address_length = sizeof(struct sockaddr_storage);
@@ -462,9 +466,9 @@ int FcgiServerInterface::AcceptConnection()
   socklen_t getsockopt_int_buffer_size {sizeof(int)};
   int getsockopt_return {};
 
-  while((getsockopt_return = getsockopt(managed_descriptor.get_descriptor(),
+  while(((getsockopt_return = getsockopt(managed_descriptor.get_descriptor(),
     SOL_SOCKET, SO_TYPE, &getsockopt_int_buffer, &getsockopt_int_buffer_size))
-    == -1 && errno == EINTR)
+    == -1) && (errno == EINTR))
   {
     getsockopt_int_buffer_size = sizeof(int);
   }
@@ -671,8 +675,9 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
     // 3) When the destructor of the interface executes, the descriptor, which
     //    is now in use by the application, is spuriously closed as the 
     //    descriptor remained in dummy_descriptor_set_.
+    std::set<int>::iterator dummy_end {dummy_descriptor_set_.end()};
     for(auto dds_iter {dummy_descriptor_set_.begin()};
-        dds_iter != dummy_descriptor_set_.end(); /*no-op*/)
+        dds_iter != dummy_end; /*no-op*/)
     {
       std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter
         {request_map_.lower_bound(FcgiRequestIdentifier {*dds_iter, 0U})};
@@ -725,7 +730,9 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
     constexpr int bl {32};
     std::uint8_t read_buffer[bl];
     while((read_return = read(self_pipe_read_descriptor_, read_buffer, bl)) > 0)
+    {
       continue;
+    }
     if(read_return == 0) 
     {
       bad_interface_state_detected_ = true;
@@ -781,19 +788,21 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
   int number_for_select 
     {std::max<int>(listening_descriptor_, self_pipe_read_descriptor_) + 1};
   // Reverse to access highest fd immediately.
-  auto map_reverse_iter = record_status_map_.rbegin();
-  if(map_reverse_iter != record_status_map_.rend())
+  std::map<int, RecordStatus>::reverse_iterator map_reverse_iter
+    {record_status_map_.rbegin()};
+  std::map<int, RecordStatus>::reverse_iterator map_rend
+    {record_status_map_.rend()};
+  if(map_reverse_iter != map_rend)
   {
     number_for_select = std::max<int>(number_for_select, 
-      (map_reverse_iter->first) + 1); 
-    for(/*no-op*/; map_reverse_iter != record_status_map_.rend();
-      ++map_reverse_iter)
+      (map_reverse_iter->first) + 1);
+    for(/*no-op*/; map_reverse_iter != map_rend; ++map_reverse_iter)
+    {
       FD_SET(map_reverse_iter->first, &read_set);
+    }
   }
-
   int select_return {select(number_for_select, &read_set, nullptr, nullptr, 
     nullptr)};
-
   if(select_return == -1)
   {
     // Return when a signal was caught by the thread of the interface.
@@ -842,17 +851,17 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
   // to be accepted.
   int connections_read {0};
 
-  // This variable 1) serves as the value of the current file descriptor
-  // where that information is needed in function calls in the loop below and 
-  // 2) allows, in the case that a throw occurred during a loop iteration, the
-  // value of the file descriptor during the iteration to be in scope in the
-  // catch block below.
+  // This variable serves as the value of the current file descriptor
+  // where that information is needed in function calls in the loop below. It
+  // also allows, in the case that a throw occurred during a loop iteration,
+  // the value of the file descriptor during the iteration to be in scope in
+  // the catch block below.
   int current_connection {};
   try
   {
+    std::map<int, RecordStatus>::iterator status_end {record_status_map_.end()};
     for(std::map<int, RecordStatus>::iterator it {record_status_map_.begin()};
-        (it != record_status_map_.end()) && (connections_read < select_return);
-        ++it)
+        (it != status_end) && (connections_read < select_return); ++it)
     {
       current_connection = it->first;
       // Call ReadRecords and construct FcgiRequest objects for any application
@@ -885,19 +894,22 @@ std::vector<FcgiRequest> FcgiServerInterface::AcceptRequests()
 
           // For each request, extract a pointer to its RequestData object, and
           // create an FcgiRequest object from it.
+          std::vector<std::map<FcgiRequestIdentifier,
+            RequestData>::iterator>::iterator req_iterators_end
+            {request_iterators.end()};
           for(std::vector<std::map<FcgiRequestIdentifier,
             RequestData>::iterator>::iterator iter {request_iterators.begin()};
-            iter != request_iterators.end(); ++iter)
+            iter != req_iterators_end; ++iter)
           {
             RequestData* request_data_ptr {&((*iter)->second)};
-            
+
             // This is a rare instance where an FcgiRequest may be destroyed
             // within the scope of implementation code. The destructor of
             // FcgiRequest objects tries to acquire interface_state_mutex_
             // if the object to be destroyed is neither completed nor null.
             // See the catch block immediately below.
             //
-            // Note that the "normal" constructor of FcgiRequest causes the
+            // Note that the normal constructor of FcgiRequest causes the
             // associated RequestData instance to transition from pending to
             // assigned.
             FcgiRequest request {(*iter)->first,
@@ -1172,10 +1184,12 @@ bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
   try
   {
     bool assigned_requests_present {false};
-    for(auto request_map_iter =
-          request_map_.lower_bound(FcgiRequestIdentifier {connection, 0U});
-        !(request_map_iter == request_map_.end()
-          || request_map_iter->first.descriptor() > connection);
+    std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
+      {request_map_.end()};
+    for(std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter
+          {request_map_.lower_bound(FcgiRequestIdentifier {connection, 0U})};
+        !((request_map_iter == request_map_end) ||
+          (request_map_iter->first.descriptor() > connection));
         /*no-op*/)
     {
       if(request_map_iter->second.get_status() ==
@@ -1188,8 +1202,8 @@ bool FcgiServerInterface::RequestCleanupDuringConnectionClosure(int connection)
       else
       {
         // Safely erase the request.
-        std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_erase_iter 
-          {request_map_iter};
+        std::map<FcgiRequestIdentifier, RequestData>::iterator
+          request_map_erase_iter {request_map_iter};
         ++request_map_iter;
         RemoveRequest(request_map_erase_iter);
       }
@@ -1249,8 +1263,11 @@ bool FcgiServerInterface::
 SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr, 
   std::int_fast32_t count)
 {
-  using byte_seq_pair = std::pair<std::vector<std::uint8_t>, 
-    std::vector<std::uint8_t>>;
+  auto NameLessThanTypeMismatch = []
+  (const ByteSeqPair& lhs, const std::vector<std::uint8_t>& rhs)->bool
+  {
+    return (lhs.first < rhs);
+  };
 
   // If count is zero or if the sequence of bytes given by the range
   // [buffer_ptr, buffer_ptr + count) contains a FastCGI name-value pair format
@@ -1259,83 +1276,69 @@ SendGetValuesResult(int connection, const std::uint8_t* buffer_ptr,
   // client. If the client included requests, the absence of those variables 
   // in the response will correctly indicate that the request was not 
   // understood (as, in this case, an error will have been present).
-  std::vector<byte_seq_pair> get_value_pairs
+  std::vector<ByteSeqPair> get_value_pairs
     {ExtractBinaryNameValuePairs(buffer_ptr, count)};
-
-  // The following for loop constructs result pairs as a list with elements
-  // of type byte_seq_pair. This process disregards any name that is not 
-  // understood and omits duplicates. The map is used to track which
-  // FCGI_GET_VALUES requests are understood (three are specified in the 
-  // standard) and which requests have already occurred. Once a request type is
-  // seen, it is removed from the map. Processing stops once all requests have 
-  // been seen or the list of understood FCGI_GET_VALUES requests is exhausted.
-
-  std::vector<byte_seq_pair> result_pairs {};
-
-  // The integer values in the key-value pairs are used for the switch only. 
-  std::map<std::vector<std::uint8_t>, int> get_values_result_request_map
-      {{FCGI_MAX_CONNS, 0}, {FCGI_MAX_REQS, 1}, {FCGI_MPXS_CONNS, 2}};
-
-  std::vector<uint8_t> local_result {};
-
-  for(std::vector<byte_seq_pair>::iterator pairs_iter {get_value_pairs.begin()};
-    (pairs_iter != get_value_pairs.end()) && get_values_result_request_map.size(); 
-     ++pairs_iter)
+  std::vector<ByteSeqPair>::iterator pairs_begin {get_value_pairs.begin()};
+  std::vector<ByteSeqPair>::iterator pairs_end   {get_value_pairs.end()};
+  std::sort(pairs_begin, pairs_end, NameLessThan);
+  std::vector<ByteSeqPair> result_pairs {};
+  // Check for the presence of each of the three known requests.
+  std::vector<ByteSeqPair>::iterator pairs_iter {};
+  pairs_iter = std::lower_bound(pairs_begin, pairs_end, FCGI_MAX_CONNS,
+    NameLessThanTypeMismatch);
+  if((pairs_iter != pairs_end) && (pairs_iter->first == FCGI_MAX_CONNS))
   {
-    std::map<std::vector<std::uint8_t>, int>::iterator vpm_iter 
-      {get_values_result_request_map.find(pairs_iter->first)};
-    if(vpm_iter != get_values_result_request_map.end())
-    {
-      local_result.clear();
-      switch(vpm_iter->second)
-      {
-        case 0:
-          local_result = 
-            ToUnsignedCharacterVector(maximum_connection_count_);
-          break;
-        case 1:
-          local_result = 
-            ToUnsignedCharacterVector(maximum_request_count_per_connection_);
-          break;
-        case 2:
-          local_result.push_back((maximum_request_count_per_connection_ > 1) ?
-            static_cast<std::uint8_t>('1') : static_cast<std::uint8_t>('0'));
-          break;
-      }
-      result_pairs.emplace_back(std::move(pairs_iter->first), 
-        std::move(local_result));
-      get_values_result_request_map.erase(vpm_iter);
-    }
+    ByteSeqPair result_pair {{FCGI_MAX_CONNS}, {}};
+    result_pair.second = ToUnsignedCharacterVector(maximum_connection_count_);
+    result_pairs.push_back(std::move(result_pair));
   }
-
-  // Process result pairs to generate the response string.
-
-  // Allocate space for header.
+  pairs_iter = std::lower_bound(pairs_begin, pairs_end, FCGI_MAX_REQS,
+    NameLessThanTypeMismatch);
+  if((pairs_iter != pairs_end) && (pairs_iter->first == FCGI_MAX_REQS))
+  {
+    ByteSeqPair result_pair {{FCGI_MAX_REQS}, {}};
+    result_pair.second =
+      ToUnsignedCharacterVector(maximum_request_count_per_connection_);
+    result_pairs.push_back(std::move(result_pair));
+  }
+  pairs_iter = std::lower_bound(pairs_begin, pairs_end, FCGI_MPXS_CONNS,
+    NameLessThanTypeMismatch);
+  if((pairs_iter != pairs_end) && (pairs_iter->first == FCGI_MPXS_CONNS))
+  {
+    ByteSeqPair result_pair
+    {
+      {FCGI_MPXS_CONNS},
+      {(maximum_request_count_per_connection_ > 1) ?
+        static_cast<std::uint8_t>('1') : static_cast<std::uint8_t>('0')}
+    };
+    result_pairs.push_back(std::move(result_pair));
+  }
+  // Processes result pairs to generate the response string.
+  // Allocates space for header.
   std::vector<std::uint8_t> result(FCGI_HEADER_LEN, 0U);
-
   // Since only known names are accepted, assume that the lengths of
   // the names and values can fit in either 7 or 31 bits, i.e. 1 or 4 bytes.
   // (Currently only 1 byte is needed to encode lengths.)
-  for(auto pair_iter = result_pairs.begin(); pair_iter != result_pairs.end();
-    ++pair_iter)
+  std::vector<ByteSeqPair>::iterator result_pairs_end {result_pairs.end()};
+  for(std::vector<ByteSeqPair>::iterator pair_iter {result_pairs.begin()};
+    pair_iter != result_pairs_end; ++pair_iter)
   {
-    // Encode name length.
+    // Encodes name length.
     std::int_fast32_t item_size(pair_iter->first.size());
     (item_size <= kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
       EncodeFourByteLength(item_size, std::back_inserter(result));
-    // Encode value length.
+    // Encode svalue length.
     item_size = pair_iter->second.size();
     (item_size <= kNameValuePairSingleByteLength) ?
       result.push_back(item_size) :
       EncodeFourByteLength(item_size, std::back_inserter(result));
-    // Append character bytes of name and value.
+    // Appends character bytes of name and value.
     result.insert(result.end(), pair_iter->first.begin(),
       pair_iter->first.end());
     result.insert(result.end(), pair_iter->second.begin(),
       pair_iter->second.end());
   }
-
   // Prepare to write the response.
   // Note that it is not currently possible to exceed the limit for the
   // content size of a singe record (2^16 - 1 bytes).

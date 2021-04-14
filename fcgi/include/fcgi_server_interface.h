@@ -706,6 +706,14 @@ class FcgiServerInterface {
 
   // HELPER FUNCTIONS
 
+  using ByteSeqPair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+
+  inline static bool NameLessThan(const ByteSeqPair& lhs,
+    const ByteSeqPair& rhs)
+  {
+    return (lhs.first < rhs.first);
+  }
+
   //    AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation. When a connection is accepted,
   // interface state is updated so that requests can be received over the
@@ -1211,9 +1219,6 @@ class FcgiServerInterface {
   bool bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////
-
-  const std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end_
-    {request_map_.end()};
 };
 
 } // namespace fcgi
