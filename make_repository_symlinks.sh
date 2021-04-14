@@ -1,11 +1,35 @@
 #! /bin/bash
 
+# MIT License
+#
+# Copyright (c) 2021 Adam J. Breland
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # This script is invoked during the configuration of a local source directory.
 # This configuration, among other purposes, allows build actions to be taken by
 # a container which has a bind mount to the source directory. The script is
 # responsible for creating symbolic links in the source directory to the
-# external dependencies of as_components. See the WORKSPACE file of
-# as_components for the Bazel targets definitions of its external dependencies.
+# external dependencies of as_components. Note that these symbolic links refer
+# to directories which exist within the build_and_test container image. They
+# are valid within a build_and_test container. See the WORKSPACE file of
+# as_components for the Bazel target definitions of external dependencies.
 #
 # Arguments:
 # 1) The script accepts "help" and "--help" as the first argument.

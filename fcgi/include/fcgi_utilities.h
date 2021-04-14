@@ -227,7 +227,7 @@ inline bool EncodeNVPairSingleRecordFailure(
 //
 // Effects:
 // 1) The encoded lengths of the name and value byte sequences are extracted
-//    in the order of their occurrence. 
+//    in the order of their occurrence.
 //    a) If content_length is not large enough to continue processing given the
 //       encountered length values, processing halts and an empty list is
 //       returned.

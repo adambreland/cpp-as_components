@@ -1,3 +1,5 @@
+#! /bin/bash
+
 # MIT License
 #
 # Copyright (c) 2021 Adam J. Breland
@@ -20,6 +22,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Container image: as_components/ubuntu_base
+as_components_path=${0%/*} &&
+if [[ ${as_components_path} == ${0} ]]; then
+    as_components_path=${PWD}
+else
+    cd ${as_components_path} &&
+    # An absolute path is needed for a Docker bind mount.
+    as_components_path=${PWD}
+fi &&
+{
+    docker run \
+        --name test_result_inspector \
+        -i -t \
+        --mount type=volume,src=as_components_build_and_test,dst=/usr/local/src/build_and_test \
+        --mount type=bind,src=${as_components_path},dst=/usr/local/src/as_components \
+        as_components/build_and_test
+        /bin/bash
+    echo "Removing the container which was used to inspect test results."
+    docker container rm test_result_inspector
+}
 
-FROM ubuntu:20.04
+exit

@@ -20,6 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// A value class for identifying a FastCGI request by the connected socket
+// descriptor over which it was sent and its FastCGI request identifier.
+// * The class is ordered.
+// * An explicit conversion to boolean type converts the value (0, 0) to false
+//   and all other values to true.
+// * Mutation is only allowed through assignment.
+
 #ifndef AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
 #define AS_COMPONENTS_FCGI_INCLUDE_FCGI_REQUEST_IDENTIFIER_H_
 
@@ -29,12 +36,6 @@
 namespace as_components {
 namespace fcgi {
 
-// A value class for identifying a FastCGI request by the connected socket
-// descriptor over which it was sent and its FastCGI request identifier.
-// * The class is ordered.
-// * An explicit conversion to boolean type converts the value (0, 0) to false
-//   and all other values to true.
-// * Mutation is only allowed through assignment.
 class FcgiRequestIdentifier {
 public:
   inline int descriptor() const noexcept

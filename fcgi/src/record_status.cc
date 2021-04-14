@@ -20,18 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdint>
-#include <cstring>
-#include <limits>
-#include <mutex>
-#include <vector>
-
-#include "fcgi/include/fcgi_protocol_constants.h"
-#include "fcgi/include/fcgi_request.h"
-#include "fcgi/include/fcgi_request_identifier.h"
-#include "fcgi/include/fcgi_server_interface.h"
-#include "socket_functions/include/socket_functions.h"
-
 // Class implementation notes:
 // 1) Discipline for accessing shared state:
 //    a) Whenever FcgiServerInterface::interface_state_mutex_ must be
@@ -54,6 +42,18 @@
 //       This method puts the RequestData object into a state which can be
 //       used by the FcgiRequest constructor to generate a request from the
 //       data of the request.
+
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <mutex>
+#include <vector>
+
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "socket_functions/include/socket_functions.h"
 
 namespace as_components {
 namespace fcgi {
@@ -132,7 +132,7 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
   try
   {
     std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
-    request_map_end {i_ptr_->request_map_end_};
+    request_map_end {i_ptr_->request_map_.end()};
     // Initialize result to the end value to signify no result.
     std::map<FcgiRequestIdentifier, FcgiServerInterface::RequestData>::iterator
     result {request_map_end};
@@ -288,14 +288,19 @@ FcgiServerInterface::RecordStatus::ProcessCompleteRecord(
               {
                 // Not assigned but completed implies "just completed."
                 bool found {false};
+                std::vector<std::map<FcgiRequestIdentifier,
+                  RequestData>::iterator>::iterator end_iter
+                  {request_iterators_ptr->end()};
                 for(std::vector<std::map<FcgiRequestIdentifier,
                   RequestData>::iterator>::iterator iter
-                  {request_iterators_ptr->begin()};
-                  iter != request_iterators_ptr->end();
-                  ++iter)
+                    {request_iterators_ptr->begin()};
+                  iter != end_iter; ++iter)
                 {
                   if(*iter == local_request_iter)
                   {
+                    // The break ensures that ++iter and iter != end_iter from
+                    // the loop will not be evaluated. The erase below renders
+                    // iter invalid.
                     request_iterators_ptr->erase(iter);
                     found = true;
                     break;
@@ -474,8 +479,8 @@ FcgiServerInterface::RecordStatus::ReadRecords()
   std::vector<std::map<FcgiRequestIdentifier, RequestData>::iterator>
     request_iterators {};
 
-  const std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
-    {i_ptr_->request_map_end_};
+  std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
+    {i_ptr_->request_map_.end()};
   // An iterator over request_map_ which serves as a cache to the most recently
   // accessed RequestData item or to a safe null value (end).
   std::map<FcgiRequestIdentifier, RequestData>::iterator local_request_iter
@@ -768,7 +773,7 @@ FcgiServerInterface::RecordStatus::ReadRecords()
           std::map<FcgiRequestIdentifier, RequestData>::iterator result_iter
             {ProcessCompleteRecord(&request_iterators, &local_request_iter)};
           ClearRecord();
-          if(result_iter != i_ptr_->request_map_end_)
+          if(result_iter != request_map_end)
             request_iterators.push_back(result_iter);
         }
         catch(...)
@@ -876,7 +881,7 @@ void FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion(
       "FcgiServerInterface::RecordStatus::UpdateAfterHeaderCompletion."};
   
   std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end
-    {i_ptr_->request_map_end_};
+    {i_ptr_->request_map_.end()};
   // Note that it is expected that find may sometimes return the past-the-end
   // iterator.
   std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_iter 

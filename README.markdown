@@ -16,7 +16,8 @@ information.
 
 ## Namespace `fcgi`
 The classes of namespace `fcgi` provide components for the development and
-testing of FastCGI application servers.
+testing of FastCGI application servers. See the namespace README for
+additional information which is not given here.
 
 ### FastCGI application server development with `FcgiServerInterface`
 The primary development component of `as_components` is `FcgiServerInterface`.

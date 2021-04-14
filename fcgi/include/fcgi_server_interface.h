@@ -83,7 +83,7 @@ class FcgiServerInterface {
   //       are returned immediately.
   //    b) AcceptRequests returns if it was blocked waiting for incoming
   //       connections or data and either:
-  //       1) A signal affected the interface thread (errno == EINTR).
+  //       1) A signal interrupted the interface thread (errno == EINTR).
   //       2) An FcgiRequest object updated interface state in a way that
   //          the interface should respond to. For example, a call will return
   //          when a connection was corrupted by a request object. The
@@ -201,6 +201,7 @@ class FcgiServerInterface {
     application_overload_ = overload_status;
   }
 
+  // Normal constructor
   // Parameters:
   // listening_descriptor: The descriptor of the listening socket to be
   //                       used by the interface to accept connections.
@@ -238,7 +239,7 @@ class FcgiServerInterface {
   //       valid addresses are found when that value is processed. An address
   //       is valid if inet_pton finds the address to be valid when given the
   //       appropriate socket domain.
-  // 4) An exception if thrown if, during construction, another
+  // 4) An exception is thrown if, during construction, another
   //    FcgiServerInterface object exists.
   // 5) The file description of listening_descriptor may or may not have been
   //    made non-blocking.
@@ -704,6 +705,14 @@ class FcgiServerInterface {
   friend class FcgiRequest;
 
   // HELPER FUNCTIONS
+
+  using ByteSeqPair = std::pair<std::vector<uint8_t>, std::vector<uint8_t>>;
+
+  inline static bool NameLessThan(const ByteSeqPair& lhs,
+    const ByteSeqPair& rhs)
+  {
+    return (lhs.first < rhs.first);
+  }
 
   //    AcceptConnection wraps the accept system call. It performs socket error
   // checking and FastCGI IP address validation. When a connection is accepted,
@@ -1210,9 +1219,6 @@ class FcgiServerInterface {
   bool bad_interface_state_detected_ {false};
 
   ///////////////// SHARED DATA REQUIRING SYNCHRONIZATION END /////////////////
-
-  const std::map<FcgiRequestIdentifier, RequestData>::iterator request_map_end_
-    {request_map_.end()};
 };
 
 } // namespace fcgi

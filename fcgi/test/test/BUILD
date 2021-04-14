@@ -189,3 +189,35 @@ cc_test(
     features = ["interpret_as_test_executable"],
     exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
 )
+
+# This test is executed by curl_easy_handle_classes_internal_test.
+cc_test(
+    tags = ["manual"],
+    name = "curl_easy_handle_classes_internal_test",
+    deps = [
+        # It is assumed that libcurl is present as a system library.
+        "//fcgi/test:curl_easy_handle_classes",
+        ":client_interface_testing_utilities",
+        "//socket_functions:socket_functions_header",
+        "@googletest//:gtest",
+        "@googletest//:gtest_main"
+    ],
+    srcs = [
+        "curl_easy_handle_classes_internal_test.cc",
+        "//socket_functions:libsocket_functions.so"
+    ],
+    copts = copts_list,
+    features = ["interpret_as_test_executable"],
+    exec_compatible_with = ["@simple_bazel_cpp_toolchain//nonstandard_toolchain:simple_cpp_toolchain"]
+)
+
+sh_test(
+    name = "curl_easy_handle_classes_test",
+    deps = [],
+    data = [
+        ":curl_easy_handle_classes_internal_test",
+        "curl_easy_handle_classes_test_nginx.conf.template",
+        "curl_easy_handle_classes_internal_test_http_response_body.txt"
+    ],
+    srcs = ["curl_easy_handle_classes_test.sh"],
+)

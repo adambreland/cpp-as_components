@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Tests are largely incomplete at this time.
+
 #include <sys/uio.h>
 
 #include <cstdint>
