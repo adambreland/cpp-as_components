@@ -20,54 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/un.h>
-#include <unistd.h>
-
-#include <cerrno>
-#include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <functional>
-#include <iterator>
-#include <map>
-#include <memory>
-#include <set>
-#include <stdexcept>
-#include <string>
-#include <typeinfo>
-#include <utility>
-#include <vector>
-
-#include "googletest/include/gtest/gtest.h"
-
-#include "fcgi/include/fcgi_protocol_constants.h"
-#include "fcgi/include/fcgi_request.h"
-#include "fcgi/include/fcgi_request_identifier.h"
-#include "fcgi/include/fcgi_server_interface.h"
-#include "fcgi/test/include/fcgi_si_testing_utilities.h"
-#include "fcgi/test/include/test_fcgi_client_interface.h"
-#include "fcgi/test/test/include/client_interface_testing_utilities.h"
-#include "socket_functions/include/socket_functions.h"
-#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
-
-namespace as_components {
-namespace fcgi {
-namespace test {
-namespace test {
-
-// Environment variable use:
-// NO_IPV6 When set, this environment variable causes tests which rely on the
-//         presence of IPv6 networking to be skipped. This was added to support
-//         testing in docker containers which lack working IPv6 by default.
-namespace {
-  bool test_ipv6 {!(std::getenv("NO_IPV6"))};
-} // namespace
-
 // TESTING DISCUSSION
 
 // A few test cases are currently not implemented. These are marked with:
@@ -182,6 +134,54 @@ namespace {
 // transition of TestFcgiClientInterface. Such specification largely holds for
 // the methods of TestFcgiClientInterface.
 //    Several testing utility functions are present to support this technique.
+
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/un.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <typeinfo>
+#include <utility>
+#include <vector>
+
+#include "googletest/include/gtest/gtest.h"
+
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "fcgi/test/include/fcgi_si_testing_utilities.h"
+#include "fcgi/test/include/test_fcgi_client_interface.h"
+#include "fcgi/test/test/include/client_interface_testing_utilities.h"
+#include "socket_functions/include/socket_functions.h"
+#include "testing/gtest/include/as_components_testing_gtest_utilities.h"
+
+namespace as_components {
+namespace fcgi {
+namespace test {
+namespace test {
+
+// Environment variable use:
+// NO_IPV6 When set, this environment variable causes tests which rely on the
+//         presence of IPv6 networking to be skipped. This was added to support
+//         testing in docker containers which lack working IPv6 by default.
+namespace {
+  bool test_ipv6 {!(std::getenv("NO_IPV6"))};
+} // namespace
 
 // TEST IMPLEMENTATION
 

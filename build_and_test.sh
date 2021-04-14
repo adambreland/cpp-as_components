@@ -70,17 +70,15 @@ build_container_name=as_components_fcgi_build
 test_container_name=as_components_fcgi_test
 
 # AND list: Build as_components.
-# It is assumed that the script is in fcgi.
-script_path=${0%/*} &&
-if [[ ${script_path} == ${0} ]]; then
-    script_path=${PWD}
+# It is assumed that the script is in as_components.
+# An absolute path is needed to mount as_components.
+as_components_path=${0%/*} &&
+if [[ ${as_components_path} == ${0} ]]; then
+    as_components_path=${PWD}
 else
-    cd ${script_path} &&
-    script_path=${PWD}
+    cd ${as_components_path} &&
+    as_components_path=${PWD}
 fi &&
-cd ${script_path}/.. &&
-# An absolute path is needed for a Docker bind mount.
-as_components_path=${PWD} &&
 echo -e "Starting the build container." &&
 execute_docker_run_for_build=0 &&
 docker run \
@@ -89,7 +87,7 @@ docker run \
     --mount type=volume,src=as_components_build_and_test,dst=/usr/local/src/build_and_test \
     --mount type=bind,src=${as_components_path},dst=/usr/local/src/as_components \
     as_components/build_and_test:latest \
-    /bin/bash /usr/local/src/as_components/fcgi/internal_build_and_test.sh
+    /bin/bash /usr/local/src/as_components/internal_build_and_test.sh
 
 # Conditionally test after the build.
 build_return_status=${?}

@@ -20,6 +20,36 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Testing disposition for the modules of libfcgi_server_interface_combined.so:
+//
+// Non-synchronization testing:
+//  1) ConstructionExceptionsAndDirectlyObservableEffects
+//     Status: complete
+//  2) FcgiGetValues
+//     Status: complete
+//  3) UnknownManagementRequests
+//     Status: complete
+//  4) ConnectionAcceptanceAndRejection
+//     Status: complete
+//  5) FcgiRequestGeneration
+//     Status: complete
+//  6) RequestAcceptanceAndRejection
+//     Status: **incomplete**
+//  7) ConnectionClosureAndAbortRequests
+//     Status: **incomplete**
+//  8) FcgiRequestDataTransmissionAndCompletion
+//     Status: **incomplete**
+//  9) FcgiServerInterfaceDestructionNotSynchronization
+//     Status: **incomplete**
+// 10) Simple integration testing with a commercial HTTP server with a FastCGI
+//     client interface (NGINX)
+//     Status: complete
+// 11) Shared library installation test on a minimal Linux distribution
+//     (standard Ubuntu container image)
+//     Status: complete
+//
+// Synchronization testing: **incomplete**
+
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -4386,18 +4416,7 @@ TEST(FcgiServerInterface, FcgiRequestGeneration)
 // Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
 {
-  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalIgnoreSignal(SIGPIPE,
-    __LINE__));
-
-  testing::FileDescriptorLeakChecker fdlc {};
-
-
-
-
-  testing::gtest::GTestNonFatalCheckAndReportDescriptorLeaks(&fdlc,
-    "RequestAcceptanceAndRejection", __LINE__);
-  ASSERT_NO_FATAL_FAILURE(testing::gtest::GTestFatalRestoreSignal(SIGPIPE,
-    __LINE__));
+  // Pending.
 }
 
 // ConnectionClosureAndAbortRequests
@@ -4463,7 +4482,7 @@ TEST(FcgiServerInterface, RequestAcceptanceAndRejection)
 // Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)
 {
-  
+  // Pending.
 }
 
 // FcgiRequestDataTransmissionAndCompletion
@@ -4503,7 +4522,7 @@ TEST(FcgiServerInterface, ConnectionClosureAndAbortRequests)
 // Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, FcgiRequestDataTransmissionAndCompletion)
 {
-  
+  // Pending.
 }
 
 // FcgiServerInterfaceDestructionNotSynchronization
@@ -4528,7 +4547,7 @@ TEST(FcgiServerInterface, FcgiRequestDataTransmissionAndCompletion)
 // Other modules whose testing depends on this module:
 TEST(FcgiServerInterface, FcgiServerInterfaceDestructionNotSynchronization)
 {
-
+  // Pending.
 }
 
 } // namespace test

@@ -13,20 +13,21 @@
     with platforms. Building for or on other platforms has not been tested.
 
 ### Initial installation and configuration
-1. Install Docker if it is not installed.
-2. Run `docker_build_configure.sh` as root. This script builds the Docker
+1. Download the source in your preferred way.
+2. Install Docker if it is not installed.
+3. Run `docker_build_configure.sh` as root. This script builds the Docker
    images which are needed for build and test actions.
 
-## Building a module
-1. Run the `build_and_test.sh` script for the module that you want to build.
-   In most cases, this will be the `fcgi` script at `fcgi/build_and_test.sh`.
-   Note that the local source directory is mounted into a Docker container and
-   modified during script execution. If the build was successful, then:
+## Building the modules of `as_components`
+1. Run the `build_and_test.sh` script. Note that the local source directory is
+   mounted into a Docker container and modified during script execution. If the
+   build was successful, then:
    1. Build outputs were placed in the appropriate subdirectories of
       `output_binaries_and_tests/application_libraries`.
    2. Tests were run. The results were displayed.
-2. Note that a Docker volume named `as_components_build_and_test` is created
-   for build and test actions to store Bazel files and test files.
+
+Note that a Docker volume named `as_components_build_and_test` is created for
+build and test actions to store Bazel files and test files.
 
 ### Test result review (if performing development)
 Test results can be inspected by running `inspect_test_results.sh`. This script

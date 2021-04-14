@@ -20,18 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdint>
-#include <cstring>
-#include <limits>
-#include <mutex>
-#include <vector>
-
-#include "fcgi/include/fcgi_protocol_constants.h"
-#include "fcgi/include/fcgi_request.h"
-#include "fcgi/include/fcgi_request_identifier.h"
-#include "fcgi/include/fcgi_server_interface.h"
-#include "socket_functions/include/socket_functions.h"
-
 // Class implementation notes:
 // 1) Discipline for accessing shared state:
 //    a) Whenever FcgiServerInterface::interface_state_mutex_ must be
@@ -54,6 +42,18 @@
 //       This method puts the RequestData object into a state which can be
 //       used by the FcgiRequest constructor to generate a request from the
 //       data of the request.
+
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <mutex>
+#include <vector>
+
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_server_interface.h"
+#include "socket_functions/include/socket_functions.h"
 
 namespace as_components {
 namespace fcgi {

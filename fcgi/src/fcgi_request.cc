@@ -20,31 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "fcgi/include/fcgi_request.h"
-
-#include <sys/select.h>
-#include <sys/time.h>           // For portable use of select.
-#include <sys/types.h>          // For ssize_t and portable use of select.
-#include <sys/uio.h>
-#include <unistd.h>
-
-#include <cerrno>
-#include <cstdint>
-#include <limits>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <stdexcept>
-#include <system_error>
-#include <tuple>
-#include <utility>
-#include <vector>
-
-#include "fcgi/include/fcgi_protocol_constants.h"
-#include "fcgi/include/fcgi_request_identifier.h"
-#include "fcgi/include/fcgi_utilities.h"
-#include "socket_functions/include/socket_functions.h"
-
 // Class implementation notes:
 // 1) Updating interface state:
 //    a) Removing requests from the collection of requests tracked by the
@@ -251,6 +226,31 @@
 //    h) Not accessing private interface state or methods even though
 //       a pointer to the interface is available and FcgiRequest is a friend.
 //    i) Terminating the program when invariants cannot be maintained.
+
+#include "fcgi/include/fcgi_request.h"
+
+#include <sys/select.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/uio.h>
+#include <unistd.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <system_error>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_utilities.h"
+#include "socket_functions/include/socket_functions.h"
 
 namespace as_components {
 namespace fcgi {

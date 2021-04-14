@@ -27,9 +27,9 @@
 # is part of the build and test actions for namespace fcgi.
 #
 # Preconditions:
-# 1) The container has a Docker volume mounted at /usr/local/src/bazel_files.
-#    This volume is used as the ouputUserRoot for the build actions of
-#    Bazel as determined by the .bazelrc of as_components.
+# 1) The container has a Docker volume mounted at the appropriate location
+#    which contains a subdirectory for the Bazel outputUserRoot as determined
+#    by the .bazelrc file of as_components.
 # 2) The container has the source directory of as_components mounted at
 #    /usr/local/src/as_components.
 # 3) The following directories exist in as_components:

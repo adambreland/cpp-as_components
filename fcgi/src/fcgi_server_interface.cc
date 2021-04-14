@@ -20,35 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "fcgi/include/fcgi_server_interface.h"
-
-#include <arpa/inet.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-#include <algorithm>
-#include <cerrno>
-#include <cstdint>
-#include <cstdlib>
-#include <iterator>
-#include <memory>
-#include <mutex>
-#include <regex>
-#include <stdexcept>
-#include <system_error>
-#include <utility>
-
-#include "fcgi/include/fcgi_protocol_constants.h"
-#include "fcgi/include/fcgi_request.h"
-#include "fcgi/include/fcgi_request_identifier.h"
-#include "fcgi/include/fcgi_utilities.h"
-#include "socket_functions/include/socket_functions.h"
-
 // Class implementation notes:
 // 1) Mutex acquisition patterns and related actions:
 //    a) With no other mutexes held, the interface may either:
@@ -108,6 +79,35 @@
 //    c) If a connection is corrupted from a write which wrote some but not all
 //       of its data, the boolean value associated with the write mutex of the
 //       connection must be set under the protection of the mutex.
+
+#include "fcgi/include/fcgi_server_interface.h"
+
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <iterator>
+#include <memory>
+#include <mutex>
+#include <regex>
+#include <stdexcept>
+#include <system_error>
+#include <utility>
+
+#include "fcgi/include/fcgi_protocol_constants.h"
+#include "fcgi/include/fcgi_request.h"
+#include "fcgi/include/fcgi_request_identifier.h"
+#include "fcgi/include/fcgi_utilities.h"
+#include "socket_functions/include/socket_functions.h"
 
 namespace as_components {
 namespace fcgi {
