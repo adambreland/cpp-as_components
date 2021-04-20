@@ -41,14 +41,14 @@ monitoring of connections for incoming request data are performed implicitly
 through appropriate methods calls.
 
 ### Application server testing with `test::TestFcgiClientInterface`
-The client-side of the FastCGI protocol is primarily implemented by HTTP
+The client side of the FastCGI protocol is primarily implemented by HTTP
 servers. This presents a problem when performing unit tests on FastCGI
-application servers: without a component which implements the client-side of
+application servers: without a component which implements the client side of
 the FastCGI protocol, tests must submit FastCGI requests and receive responses
 through an intermediary HTTP server. Such an intermediary complicates test
 development and interpretation.
 
-`TestFcgiClientInterface` implements the client-side of the FastCGI
+`TestFcgiClientInterface` implements the client side of the FastCGI
 protocol! It facilitates the development of unit tests for FastCGI application
 servers by providing a high-level interface to the FastCGI request-response
 cycle. It also handles and exposes invalid FastCGI response records.
