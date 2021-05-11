@@ -1132,7 +1132,9 @@ class FcgiServerInterface {
   // A timeout for blocking calls related to writing to prevent infinite
   // blocking in the unusual case that a mutex is held by the blocked thread.
   // The number of seconds until such a call times out.
-  static constexpr time_t write_block_timeout {300};
+  // ("Non-shared" in the sense that a shared memory concurrency control
+  // discipline is not needed to access the value.)
+  static constexpr time_t kWriteBlockTimeout_ {300};
 
   // Configuration parameters:
   int listening_descriptor_;

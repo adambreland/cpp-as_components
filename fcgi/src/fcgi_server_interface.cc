@@ -114,7 +114,7 @@ namespace fcgi {
 
 // Initialize static class data members.
 // Non-shared:
-// write_block_timeout is initialized with a constexpr in the class definition.
+// kWriteBlockTimeout_ is initialized with a constexpr in the class definition.
 // Shared:
 std::mutex FcgiServerInterface::interface_state_mutex_ {};
 unsigned long FcgiServerInterface::interface_identifier_ {0U};
@@ -1415,7 +1415,7 @@ SendRecord(int connection, const std::uint8_t* buffer_ptr,
   // inappropriate to have the interface thread block on a write.
   // 
   // Send record.
-  struct timeval timeout {write_block_timeout, 0};
+  struct timeval timeout {kWriteBlockTimeout_, 0};
   std::size_t number_written {as_components::socket_functions::
     WriteOnSelect(connection, buffer_ptr, count, &timeout)};
   

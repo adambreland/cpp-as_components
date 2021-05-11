@@ -405,14 +405,15 @@ class FcgiRequest {
 
   //    Attempts to a perform a scatter-gather write on the socket given
   // by request_identifier_.descriptor(). Write blocking is subject to the
-  // time-out limit set by fcgi_si::write_block_timeout. If errors occur during
-  // the write or if connection closure is discovered, interface invariants are
-  // maintained. If interface invariants may not be maintained, the program
-  // is terminated.
-  //    Note that scatter-gather I/O is useful in general for request servicing
-  // as user-provided byte sequences must be split into FastCGI records. The
-  // header of such records will be stored in a buffer which is not contiguous
-  // with that of the user byte sequence. Hence scatter-gather I/O.
+  // time-out limit set by FcgiServerInterface::kWriteBlockTimeout_. If errors
+  // occur during the write or if connection closure is discovered, interface
+  // invariants are maintained. If interface invariants may not be maintained,
+  // the program is terminated.
+  //    (Note that scatter-gather I/O is useful in general for request
+  // servicing as user-provided byte sequences must be split into FastCGI
+  // records. The header of such records will be stored in a buffer which is
+  // not contiguous with that of the user byte sequence. Hence scatter-gather
+  // I/O.)
   //
   // Parameters:
   // iovec_ptr:            A pointer to an array of struct iovec instances.
@@ -423,10 +424,10 @@ class FcgiRequest {
   //                       [iovec_ptr, iovec_ptr + iovec_count) was written.
   // interface_mutex_held: A flag which allows a caller to indicate whether
   //                       or not interface_state_mutex_ is held before a call.
-  //                       This allows WriteHelper to be called in contexts
-  //                       which must maintain mutex ownership during the call
-  //                       and in contexts which do not require interface mutex
-  //                       ownership over the entire call.
+  //                       This allows ScatterGatherWriteHelper to be called in
+  //                       contexts which must maintain mutex ownership during
+  //                       the call and in contexts which do not require
+  //                       interface mutex ownership over the entire call.
   //
   // Preconditions:
   // 1) completed_ == false.
@@ -457,13 +458,15 @@ class FcgiRequest {
   // Effects:
   // 1) If true was returned:
   //    a) The message was sent successfully.
-  //    b) No change in request state occurred.
+  //    b) No change in request state occurred (i.e. completion and abortion
+  //       status).
   // 2) If false was returned:
   //    Either:
   //    a) The connection was found to be closed.
   //    b) InterfaceStateCheckForWritingUponMutexAcquisition returned false.
   //    c) The connection was found to be in a corrupted state. 
-  //    d) A time-out relative to fcgi_si::write_block_timeout occurred.
+  //    d) A time-out relative to FcgiServerInterface::kWriteBlockTimeout_
+  //       occurred.
   //    
   //    For any of these cases:
   //    a) The request should be destroyed.

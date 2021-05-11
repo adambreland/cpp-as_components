@@ -51,7 +51,7 @@ complete. The role of a request determines which condition is used. When a
 request has been received in-full, an `FcgiRequest` object is constructed
 from the request data and exposed to the application.
 
-**Responder**: (`FCGI_PARAMS`, `FCFI_STDIN` needed; `FCGI_DATA` optional.)
+**Responder**: (`FCGI_PARAMS`, `FCGI_STDIN` needed; `FCGI_DATA` optional.)
 
 A Responder request is considered to be complete when either:
 * No `FCGI_DATA` records have been received and `FCGI_PARAMS` and `FCGI_STDIN`

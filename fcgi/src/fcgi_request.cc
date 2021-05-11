@@ -42,7 +42,7 @@
 //          connection of the request has been corrupted.
 //       6) The destructor of a request is called and the request has not
 //          yet removed itself from the interface.
-//       
+//
 //          The cases above may be viewed as occurring on the transition of 
 //       completed_ from false to true. This should only occur once for a 
 //       request and, once it has occurred, the request is no longer relevant
@@ -154,7 +154,13 @@
 //       2) Its interface is in a bad state. This is done after the check for
 //          interface destruction by checking if 
 //          bad_interface_state_detected_ == true.
-//    b) Any use of:
+//    b) A write mutex cannot be obtained if the the connection of the write
+//       mutex is present in application_closure_request_set_. A request must
+//       search this set for its connection upon acquiring the interface mutex
+//       after it has verified that the interface is the correct interface and
+//       is not in a bad state. If a request determines that its connection is
+//       scheduled for closure, then it must regard the request as rejected.
+//    c) Any use of:
 //       1) The file descriptor of the connection (such as from
 //          request_id.descriptor()) in a method which requires that the
 //          file description associated with the descriptor is valid.
@@ -163,11 +169,11 @@
 //       connection_closed_by_interface_ in the RequestData object associated
 //       with the request. If the connection was closed, the state above cannot
 //       be used.
-//    c) Any write to the connection must be preceded by a check for connection
+//    d) Any write to the connection must be preceded by a check for connection
 //       corruption. This is done under the protection of the write mutex by
 //       checking if the boolean value associated with the write mutex has been
 //       set.
-//    d) Acquisition of a write mutex may only occur when interface_state_mutex_
+//    e) Acquisition of a write mutex may only occur when interface_state_mutex_
 //       is held.
 //       1) FcgiRequest objects are separate from their associated
 //          FcgiServerInterface object yet need to access state which belongs to
@@ -188,12 +194,12 @@
 //          been destroyed and, as such, that they cannot access interface
 //          state. Thus it is ensured that the destructor will not destroy a
 //          write mutex while a request holds that write mutex.
-//   c) Once a write mutex has been acquired by a request under the protection
+//   f) Once a write mutex has been acquired by a request under the protection
 //      of interface_state_mutex_, the request may release
 //      interface_state_mutex_ to write. Alternatively, the request may
 //      defer releasing interface_state_mutex_ until after the write mutex
 //      is released.
-//   d) A request may never acquire interface_state_mutex_ while a write mutex
+//   g) A request may never acquire interface_state_mutex_ while a write mutex
 //      is held. Doing so may lead to deadlock.
 //
 // 3) Other disciplines:
@@ -763,17 +769,11 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
 {
   std::unique_lock<std::mutex> interface_state_lock
     {FcgiServerInterface::interface_state_mutex_, std::defer_lock};
-
-  // write_lock has the following property in the loop below:
-  // The mutex is always held when writing and, once some data has been written,
-  // the mutex is never released. This allows the write mutex to be released
-  // while the thread sleeps in select in the case that writing blocks and
-  // nothing was written.
   std::unique_lock<std::mutex> write_lock {*write_mutex_ptr_, std::defer_lock};
 
   // An internal helper function used when application_closure_request_set_
   // of the interface must be accessed. This occurs when:
-  // 1) The connection was found to be closed by an attempt to write and 
+  // 1) The connection was found by an attempt to write to be closed and
   //    close_connection_ == true. (Addition to the set is not strictly
   //    necessary as closure would eventually be discovered by the interface.)
   // 2) The connection from the server to the client was corrupted by
@@ -790,8 +790,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
   //         close_connection == true.
   //
   // Preconditions:
-  // 1) interface_state_mutex cannot be held locally. (That is,
-  //    interface_state_mutex cannot be held if interface_mutex_held is false.)
+  // 1) interface_state_mutex_ cannot be held locally. (That is,
+  //    interface_state_mutex_ cannot be held if interface_mutex_held is false.)
+  // 2) *write_mutex_ptr_ cannot be held when a call is made.
   //
   // Synchronization:
   // 1) interface_state_mutex_ will be conditionally acquired depending on the
@@ -877,52 +878,48 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
     }
   };
   
+  // Conditionally ACQUIRE interface_state_mutex_.
+  if(!interface_mutex_held)
+  {
+    // This is a case where a throw may occur but FcgiRequest object state
+    // is not updated.
+    interface_state_lock.lock();
+    if(!InterfaceStateCheckForWritingUponMutexAcquisition())
+      return false;
+  }
+  // ACQUIRE *write_mutex_ptr_
+  // This is a case where a throw may occur but FcgiRequest object state
+  // is not updated.
+  //
+  // Performance note:
+  // Unfortunately, this attempt to acquire *write_mutex_ptr_ could block.
+  // Blocking would occur when interface_state_mutex_ is held. This scenario is
+  // mitigated by low contention for *write_mutex_ptr_. In the most common case,
+  // a client will never multiplex requests over a single connection. In this
+  // case, there will never be contention for *write_mutex_ptr_.
+  write_lock.lock();
+  if(*bad_connection_state_ptr_)
+  {
+    // application_closure_request_set_ does not need to be updated. An
+    // appropriate update was performed by the entity which set
+    // *bad_connection_state_ptr_ from false to true.
+    completed_ = true;
+    was_aborted_ = true;
+    interface_ptr_->RemoveRequest(request_identifier_);
+    return false;
+  }
+  // Conditionally RELEASE interface_state_mutex_ to free the interface
+  // before the write. (The mutex will still be held by the caller if
+  // interface_mutex_held == true.)
+  if(interface_state_lock.owns_lock())
+  {
+    interface_state_lock.unlock();
+  }
+
   std::size_t working_number_to_write {number_to_write};
   int fd {request_identifier_.descriptor()};
-  while(working_number_to_write > 0) // Start write loop.
+  while(working_number_to_write > 0)
   {
-    // Conditionally ACQUIRE interface_state_mutex_.
-    // If interface_state_mutex_ is acquired, is is possible that the interface
-    // was destroyed or that the connection was closed.
-    if(!interface_mutex_held && !write_lock.owns_lock())
-    {
-      // Note that the write mutex is not released once some data has been
-      // written. As such, a throw from lock() does not risk corrupting
-      // the connection.
-      // This is a case where a throw may occur but FcgiRequest object state
-      // is not updated.
-      interface_state_lock.lock();
-      if(!InterfaceStateCheckForWritingUponMutexAcquisition())
-        return false;
-    }
-
-    // Conditionally ACQUIRE *write_mutex_ptr_.
-    if(!write_lock.owns_lock())
-    {
-      // As above, no data will have been written to the connection. A throw
-      // from lock() does not risk connection corruption.
-      // This is a case where a throw may occur but FcgiRequest object state
-      // is not updated.
-      write_lock.lock();
-      if(*bad_connection_state_ptr_)
-      {
-        // application_closure_request_set_ does not need to be updated. An
-        // appropriate update was performed by the entity which set
-        // *bad_connection_state_ptr_ from false to true.
-        completed_ = true;
-        was_aborted_ = true;
-        interface_ptr_->RemoveRequest(request_identifier_);
-        return false;
-      }
-    }
-    // *write_mutex_ptr_ is held.
-
-    // Conditionally RELEASE interface_state_mutex_ to free the interface
-    // before the write. The mutex will still be held by the caller if
-    // interface_mutex_held == true.
-    if(interface_state_lock.owns_lock())
-      interface_state_lock.unlock();
-
     std::tuple<struct iovec*, int, std::size_t> write_return
       {as_components::socket_functions::ScatterGatherSocketWrite(fd, iovec_ptr,
         iovec_count, working_number_to_write)};
@@ -937,16 +934,16 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
          // errno.
     {
       // EINTR is handled by ScatterGatherSocketWrite.
-      // Handle blocking errors.
-      if(errno == EAGAIN || errno == EWOULDBLOCK)
+      // Handle blocking errors. Note that the write mutex cannot be released
+      // (even if nothing was written). This is because another worker thread
+      // may schedule the connection for closure and the interface may close
+      // the connection before this thread wakes up from select. In this case,
+      // the interface will have closed a descriptor which is being monitored
+      // by a call to select. Doing so results in undefined behavior.
+      if((errno == EAGAIN) || (errno == EWOULDBLOCK))
       {
-        // Check if nothing was written and nothing was written prior.
-        if(std::get<2>(write_return) == number_to_write)
-          // RELEASE *write_mutex_ptr_. (As no record content has been written.)
-          write_lock.unlock();
-        else // Some but not all was written.
-          std::tie(iovec_ptr, iovec_count, working_number_to_write) =
-            write_return;
+        std::tie(iovec_ptr, iovec_count, working_number_to_write) =
+          write_return;
         // Call select with error handling to wait until a write won't block.
         int select_descriptor_range {fd + 1};
         fd_set write_set {};
@@ -956,16 +953,17 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
           // The loop exits only when writing won't block or an error occurs.
           FD_ZERO(&write_set);
           FD_SET(fd, &write_set);
-          timeout = {FcgiServerInterface::write_block_timeout, 0};
+          timeout = {FcgiServerInterface::kWriteBlockTimeout_, 0};
           int select_return {};
           if((select_return = select(select_descriptor_range, nullptr, 
             &write_set, nullptr, &timeout)) <= 0)
           {
-            if((select_return == 0) || (errno != EINTR))
+            if((select_return == 0) /*time-out*/ || (errno != EINTR))
             {
-              // If some data was written and a throw will occur, the
-              // connection must be closed. This is becasue, if the write mutex
-              // was immediately acquired by another request and data was 
+              // Problem statement and solution implementation discussion:
+              // In general, if some data was written and a throw will occur,
+              // the connection must be closed. This is becasue, if the write
+              // mutex was immediately acquired by another request and data was
               // written, that data would be corrupt as a partial record was
               // written here. However, indicating that the connection should
               // be closed requires an update that must be done under the
@@ -977,14 +975,13 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               // *bad_connection_state_ptr_ of the write mutex before releasing
               // the write mutex.
 
-              // Conditionally RELEASE *write_mutex_ptr_.
-              // write_lock.owns_lock() is equivalent to a partial write and,
-              // in this case, connection corruption.
-              if(write_lock.owns_lock())
+              // Check for a partial write which causes connection corruption.
+              if(working_number_to_write < number_to_write)
               {
                 *bad_connection_state_ptr_ = true;
-                write_lock.unlock();
               }
+              // RELEASE *write_mutex_ptr_.
+              write_lock.unlock();
 
               // May ACQUIRE interface_state_mutex_.
               // Connection closure is attempted even if nothing was written
@@ -994,17 +991,22 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
               // occurred at all on the connection is suspicious.
               TryToAddToApplicationClosureRequestSet(true);
 
-              if(select_return != 0) {
+              if(select_return != 0)
+              {
                 std::error_code ec {errno, std::system_category()};
                 throw std::system_error {ec, "select"};
               }
               else
+              {
                 return false; // A time-out is not exceptional.
+              }
             }
             // else: loop (EINTR is handled)
           }
           else
+          {
             break; // Exit select loop.
+          }
         }
       }
       // Handle a connection which was closed by the peer.
@@ -1030,7 +1032,9 @@ ScatterGatherWriteHelper(struct iovec* iovec_ptr, int iovec_count,
         // exiting corrupts the connection.
         // Conditionally RELEASE *write_mutex_ptr_.
         if(std::get<2>(write_return) < number_to_write)
+        {
           *bad_connection_state_ptr_ = true;
+        }
       
         // *write_mutex_ptr_ MUST NOT be held to prevent potential deadlock.
         // RELEASE *write_mutex_ptr_.
