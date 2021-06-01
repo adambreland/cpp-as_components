@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -372,39 +373,41 @@ EncodeNameValuePairs(ByteSeqPairIter pair_iter, ByteSeqPairIter end,
 }
 
 namespace partition_byte_sequence_internal {
-   // The content length of a record should be a multiple of 8 whenever possible.
-  // kMaxRecordContentByteLength = 2^16 - 1
-  // (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
-  constexpr uint16_t max_aligned_content_length
-    {kMaxRecordContentByteLength - 7};
-  // The maximum number of bytes that can be written in one call to writev.
-  constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
 
-  inline constexpr std::size_t CeilingOfQuotient(std::size_t numerator,
-    std::size_t denominator) 
-  {
-    return ((numerator/denominator) +
-            (static_cast<std::size_t>((numerator % denominator) > 0U)));
-  }
+// The content length of a record should be a multiple of 8 whenever possible.
+// kMaxRecordContentByteLength = 2^16 - 1
+// (2^16 - 1) - 7 = 2^16 - 8 = 2^16 - 2^3 = 2^3*(2^13 - 1) = 8*(2^13 - 1)
+constexpr uint16_t max_aligned_content_length
+  {kMaxRecordContentByteLength - 7};
+// The maximum number of bytes that can be written in one call to writev.
+constexpr ssize_t ssize_t_MAX {std::numeric_limits<ssize_t>::max()};
 
-  inline constexpr std::size_t InitializeMaxForSsize_t()
-  {
-    constexpr std::size_t macl {static_cast<std::size_t>(
-                                  max_aligned_content_length)};
-    constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(
-                                         ssize_t_MAX)/8U)};
-    constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
-    return (inter_1 - (8U*inter_2));
-  }
+inline constexpr std::size_t CeilingOfQuotient(std::size_t numerator,
+  std::size_t denominator)
+{
+  return ((numerator/denominator) +
+          (static_cast<std::size_t>((numerator % denominator) > 0U)));
+}
 
-  constexpr std::size_t max_for_ssize_t     {InitializeMaxForSsize_t()};
-  const     std::size_t max_for_iovec       {InitializeMaxForIovec()};
-  const     std::size_t min_max             {std::min<std::size_t>(
-    partition_byte_sequence_internal::max_for_ssize_t,
-    max_for_iovec
-  )};
-  const     ssize_t     working_ssize_t_max {NeededSsize_t(min_max)};
-  const     std::size_t working_iovec_max   {NeededIovec(min_max)};
+inline constexpr std::size_t InitializeMaxForSsize_t()
+{
+  constexpr std::size_t macl {static_cast<std::size_t>(
+                                max_aligned_content_length)};
+  constexpr std::size_t inter_1 {8U*(static_cast<std::size_t>(
+                                        ssize_t_MAX)/8U)};
+  constexpr std::size_t inter_2 {CeilingOfQuotient(inter_1, macl)};
+  return (inter_1 - (8U*inter_2));
+}
+
+constexpr std::size_t max_for_ssize_t     {InitializeMaxForSsize_t()};
+const     std::size_t max_for_iovec       {InitializeMaxForIovec()};
+const     std::size_t min_max             {std::min<std::size_t>(
+  partition_byte_sequence_internal::max_for_ssize_t,
+  max_for_iovec
+)};
+const     ssize_t     working_ssize_t_max {NeededSsize_t(min_max)};
+const     std::size_t working_iovec_max   {NeededIovec(min_max)};
+
 } // partition_byte_sequence_internal
 
 template<typename ByteIter>
@@ -413,20 +416,22 @@ std::tuple<std::vector<std::uint8_t>, std::vector<struct iovec>, std::size_t,
 PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type, 
   std::uint16_t Fcgi_id)
 {
-  // Verify that ByteIter iterates over units of data which are the size of
+                            // Static asserts
+
+  // Verifies that ByteIter iterates over units of data which are the size of
   // a byte. Note that this assertion disallows ByteIter being equal to void*.
   static_assert(sizeof(std::uint8_t) == sizeof(decltype(*begin_iter)),
     "A call to PartitionByteSequence<ByteIter> used an iterator type which did "
     "not iterate over data in units of bytes.");
 
-  // Disallow unusually small ssize_t.
+  // Disallows unusually small ssize_t.
   static_assert(std::numeric_limits<ssize_t>::max() >=
                 std::numeric_limits<std::uint16_t>::max());
 
-                      // Begin processing input.
+                            // Input processing
 
-  // Determine the number of bytes of the input which will be processed.
-  // Check that ptrdiff_t can to hold the byte length.
+  // Determines the number of bytes of the input which will be processed.
+  // Checks that ptrdiff_t can hold the byte length.
   static_assert(
     std::numeric_limits<decltype(std::distance(begin_iter, end_iter))>::max() <= 
     std::numeric_limits<std::ptrdiff_t>::max()
@@ -456,30 +461,31 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
     {partition_byte_sequence_internal::NeededLocalData(bytes_remaining)};
 
   // The first FCGI_HEADER_LEN (8) bytes are zero for padding.
-  std::vector<uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
+  std::vector<std::uint8_t> noncontent_record_information(FCGI_HEADER_LEN, 0);
   noncontent_record_information.reserve(local_length);
   std::uint8_t* padding_ptr {noncontent_record_information.data()};
   std::vector<struct iovec> iovec_list {};
   iovec_list.reserve(working_iovec);
   ssize_t number_to_write {0};
 
-  // Handle the special case of no content.
+  // Handles the special case of no content.
   if(begin_iter == end_iter)
   {
     std::vector<uint8_t>::iterator header_iter 
       {noncontent_record_information.insert(noncontent_record_information.end(),
         FCGI_HEADER_LEN, 0)};
-    PopulateHeader(&(*header_iter), type, Fcgi_id, 0, 0);
-    iovec_list.push_back({&(*header_iter), FCGI_HEADER_LEN});
+    std::uint8_t* header_ptr {&(*header_iter)};
+    PopulateHeader(header_ptr, type, Fcgi_id, 0, 0);
+    iovec_list.push_back({header_ptr, FCGI_HEADER_LEN});
     number_to_write += FCGI_HEADER_LEN;
   }
   else
   {
-    // While records can be produced and need to be produced, produce a record
+    // While records can be produced and need to be produced, produces a record
     // with the largest content length up to the contingent maximum.
     while(bytes_remaining)
     {
-      uint16_t current_record_content_length {
+      std::uint16_t current_record_content_length {
         static_cast<std::uint16_t>(
           std::min<ssize_t>(
             static_cast<ssize_t>(bytes_remaining),
@@ -488,41 +494,45 @@ PartitionByteSequence(ByteIter begin_iter, ByteIter end_iter, FcgiType type,
           )
         )
       };
-      // Check if we need padding.
-      uint8_t padding_length {0U};
-      if(uint8_t padding_length_complement = current_record_content_length % 8)
+      // Checks if padding is needed for the record.
+      std::uint8_t padding_length {0U};
+      if(std::uint8_t padding_length_complement =
+        current_record_content_length % 8)
       {
         padding_length = (padding_length_complement) ?
           (8 - padding_length_complement) : 0U;
       }
-      // Update non-content information.
-      std::vector<uint8_t>::iterator header_iter
+      // Updates non-content information.
+      std::vector<std::uint8_t>::iterator header_iter
         {noncontent_record_information.insert(
           noncontent_record_information.end(),
           FCGI_HEADER_LEN, 0)};
       std::uint8_t* local_ptr {&(*header_iter)};
       PopulateHeader(local_ptr, type, Fcgi_id,
         current_record_content_length, padding_length);
-      // Update iovec with header.
       iovec_list.push_back({local_ptr, FCGI_HEADER_LEN});
+      // Content information.
+      //
       // The const_cast is necessary as struct iovec contains a void* member
-      // and a client may pass in a const_iterator.
+      // and a client may pass in a const_iterator or a pointer to constant
+      // type. This cast is safe as the data which is pointed to is never
+      // modified.
+      //
+      // TEMPLATE PARAMETER TYPE (ByteIter) TO POINTER TO VOID CONVERSION.
       iovec_list.push_back({
         const_cast<void*>(static_cast<const void*>(&(*begin_iter))),
-        current_record_content_length
-      });
-      // Update iovec with padding if needed. Update relocation information.
+        current_record_content_length});
+      // Updates iovec with padding if needed.
       if(padding_length)
       {
         iovec_list.push_back({padding_ptr, padding_length});
       }
-      // Update tracking variables and increment iterator.
       number_to_write += (FCGI_HEADER_LEN + current_record_content_length
         + padding_length);
       bytes_remaining -= current_record_content_length;
       std::advance(begin_iter, current_record_content_length);
     }
-    // Check if an error was made in the vector length calculations.
+    // Checks if an error was made in the vector length calculations.
     if((number_to_write > working_ssize_t) ||
        (iovec_list.size() > working_iovec) ||
        (noncontent_record_information.size() > local_length))
