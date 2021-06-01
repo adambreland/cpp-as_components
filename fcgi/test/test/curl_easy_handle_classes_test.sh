@@ -38,7 +38,10 @@ cp --update ${TEST_SRCDIR}/__main__/fcgi/test/test/curl_easy_handle_classes_inte
 # text which contains replacement patterns which determine which environment
 # variables will be substituted in STDIN.
 envsubst '${TEST_TMPDIR}' < ${TEST_SRCDIR}/__main__/fcgi/test/test/curl_easy_handle_classes_test_nginx.conf.template \
-         > ${TEST_TMPDIR}/curl_easy_handle_classes_test_nginx.conf
+         > ${TEST_TMPDIR}/curl_easy_handle_classes_test_nginx.conf &&
+# Allow time for TCP port use expiration upon the closure of a service which
+# used the port.
+sleep 5
 
 if [[ $? -eq 0 ]]; then
     nginx -c ${TEST_TMPDIR}/curl_easy_handle_classes_test_nginx.conf \
